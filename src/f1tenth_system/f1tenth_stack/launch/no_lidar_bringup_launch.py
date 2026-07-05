@@ -31,6 +31,17 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
+    """The shared foundation layer (no-LiDAR variant): hardware drivers +
+    arbitration, no control layer of its own.
+
+    Same split as bringup_launch.py -- starts joy_node, the VESC driver
+    stack, and ackermann_mux, but no LiDAR node and deliberately no
+    joy_teleop (that's its own control layer now, see teleop_launch.py).
+    Run this first, in its own terminal, then launch exactly one control
+    layer on top of it in a second terminal: teleop_launch.py (manual
+    driving), gap_follow_launch.py, or pure_pursuit_launch.py. See
+    docs/operations.md.
+    """
     joy_teleop_config = os.path.join(
         get_package_share_directory('f1tenth_stack'),
         'config',
@@ -77,12 +88,8 @@ def generate_launch_description():
         name='joy',
         parameters=[LaunchConfiguration('joy_config')]
     )
-    joy_teleop_node = Node(
-        package='joy_teleop',
-        executable='joy_teleop',
-        name='joy_teleop',
-        parameters=[LaunchConfiguration('joy_config')]
-    )
+    # joy_teleop is its own control layer now -- see teleop_launch.py.
+    # Deliberately not started here; only joy_node (raw input) is shared.
     ackermann_to_vesc_node = Node(
         package='vesc_ackermann',
         executable='ackermann_to_vesc_node',
@@ -117,7 +124,6 @@ def generate_launch_description():
 
     # finalize
     ld.add_action(joy_node)
-    ld.add_action(joy_teleop_node)
     ld.add_action(ackermann_to_vesc_node)
     ld.add_action(vesc_to_odom_node)
     ld.add_action(vesc_driver_node)

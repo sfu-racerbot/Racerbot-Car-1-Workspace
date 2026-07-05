@@ -61,20 +61,25 @@ Every new shell needs both `source /opt/ros/jazzy/setup.bash` and `source instal
 ## Running
 Use separate terminals so each layer can be killed/restarted independently.
 
-1. **Drivers + teleop** (start here, every time):
+1. **Drivers** (start here, every time — this alone never moves the car: it's the shared foundation layer with no control layer of its own, see [docs/architecture.md](docs/architecture.md#the-node-graph)):
    ```bash
    ros2 launch f1tenth_stack bringup_launch.py
    ```
-   Hold **LB** on the F710 (must be in **XInput mode**) to drive manually. The car will *not* move on its own from this command alone.
 
-2. **Mapping** (drive the car around the track manually while this runs):
+2. **Manual teleop**, in a second terminal, on top of the drivers:
+   ```bash
+   ros2 launch f1tenth_stack teleop_launch.py
+   ```
+   Hold **LB** on the F710 (must be in **XInput mode**) to drive manually.
+
+3. **Mapping** (drive the car around the track manually while this runs):
    ```bash
    ros2 launch racerbot_launch slam_launch.py
    ```
    Save the result: `ros2 run nav2_map_server map_saver_cli -f <map_name>`
 
-3. **Localization** against a saved map:
-   - Copy the map files you saved from step 2 (`<map_name>.yaml` + `.pgm`) into `src/particle_filter/maps/`.
+4. **Localization** against a saved map:
+   - Copy the map files you saved from step 3 (`<map_name>.yaml` + `.pgm`) into `src/particle_filter/maps/`.
    - Set `map_server.ros__parameters.map` in `src/particle_filter/config/localize.yaml` to `<map_name>` (no extension).
    - Rebuild (`colcon build --symlink-install --packages-select particle_filter`) so the map gets installed into the share directory.
    - ```bash
@@ -82,7 +87,7 @@ Use separate terminals so each layer can be killed/restarted independently.
      ```
    - In RViz, use "2D Pose Estimate" to seed the particle filter's initial guess.
 
-4. **Baseline autonomous driving** (reactive, no map/localization required):
+5. **Baseline autonomous driving** (reactive, no map/localization required — run this instead of `teleop_launch.py`, not alongside it, or its always-on `/teleop` will mask `/drive` at the mux):
    ```bash
    ros2 launch gap_follow gap_follow_launch.py
    ```
