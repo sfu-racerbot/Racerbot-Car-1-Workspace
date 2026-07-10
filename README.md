@@ -15,6 +15,7 @@ Start here if you're new to the car or the codebase:
 | [docs/writing-your-own-node.md](docs/writing-your-own-node.md) | The full contract for driving code specifically, using `gap_follow` as a worked template |
 | [docs/web-dashboard.md](docs/web-dashboard.md) | Live browser dashboard of the car's map/scan/pose — read-only, safe to run alongside anything |
 | [docs/hardware-reference.md](docs/hardware-reference.md) | VESC, LiDAR, joystick — exact addresses, ports, config values, and gotchas for this specific car |
+| [docs/realsense-camera.md](docs/realsense-camera.md) | Intel RealSense D435i color/depth over ROS2 — install notes and verified performance |
 | [docs/usb-camera-livestream.md](docs/usb-camera-livestream.md) | Live MJPEG video stream from a USB webcam, viewable in any browser — camera picks, how it works, security note |
 | [docs/operations.md](docs/operations.md) | Step-by-step procedures: driving, mapping, localizing, running autonomy, shutting down |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Real issues hit during bring-up and how they were diagnosed |
@@ -33,6 +34,7 @@ This file stays a short quick-start; the docs above are the full reference.
 | `f1tenth_system` (+ `ackermann_mux`, `teleop_tools`, `vesc`) | vendored (plain tracked files, **not** a git submodule — see [docs/git-setup.md](docs/git-setup.md)) | VESC driver, `urg_node` (Hokuyo), joystick teleop, command muxing |
 | `transport_drivers` | git submodule, `humble` | serial transport dependency for `vesc` |
 | `particle_filter` (+ `range_libc`) | git submodules, `foxy-devel`/`humble-devel` | Monte Carlo localization against a saved map |
+| `realsense-ros` | git submodule, `ros2-master` | Intel RealSense D435i driver — color/depth over ROS2 |
 | `gap_follow` | local package | baseline reactive autonomy — follow-the-gap on `/scan` → `/drive`, no map needed. Code/algorithm detail: [src/gap_follow/README.md](src/gap_follow/README.md) |
 | `pure_pursuit` | local package | map-based race controller — pure pursuit over a curvature-paced recorded racing line, plus the tools to record and pace one. Pipeline/workflow: [docs/racing-autonomy.md](docs/racing-autonomy.md) |
 | `web_dashboard` | local package | live browser dashboard of the map/LIDAR/pose, streamed over a WebSocket — read-only, not an autonomy node, safe to run alongside anything else. Workflow: [docs/web-dashboard.md](docs/web-dashboard.md) |

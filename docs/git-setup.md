@@ -17,6 +17,7 @@ How this workspace is versioned, what's a real git submodule vs. a plain vendore
 | `range_libc` | **real git submodule** | `f1tenth/range_libc` | `humble-devel` |
 | `transport_drivers` | **real git submodule** | `ros-drivers/transport_drivers` | `1.2.0` |
 | `f1tenth_system` | **vendored (plain tracked files, NOT a submodule)** | was `f1tenth/f1tenth_system` | was pinned at `v2.0.0-beta-22-g94cb8d7` |
+| `realsense-ros` | **real git submodule** | `realsenseai/realsense-ros` | `ros2-master` |
 
 `f1tenth_system` is vendored, exactly like on Car 2 — but for this car's own reasons, discovered while adapting the docs: its working tree carried **three** uncommitted local patches that a plain submodule can't preserve across a fresh clone or a submodule update:
 

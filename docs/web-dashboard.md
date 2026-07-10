@@ -1,11 +1,16 @@
 # Live web dashboard: see what the car sees
 
 `web_dashboard` streams the car's SLAM/localization map, its raw LIDAR
-scan, and its own pose to a plain web page, live, over the LAN — open a
-browser on a laptop or phone and watch the map build during SLAM, or watch
-the car's position and LIDAR returns during localization/racing, with no
-RViz, no ROS install, and no login needed on the viewing device. This is
-the reference example of "support/tooling code" in [adding-your-own-code.md](adding-your-own-code.md) — see that doc first if you're adding something similar.
+scan, its own pose, the currently-arbitrated `/drive` command, and coarse
+system health (CPU/mem/temp/WiFi/uptime) to a plain web page, live, over
+the LAN — open a browser on a laptop or phone and watch the map build
+during SLAM, or watch the car's position and LIDAR returns during
+localization/racing, with no RViz, no ROS install, and no login needed on
+the viewing device. A corner inset also embeds the live camera feed from
+[`usb_cam_stream`](../src/usb_cam_stream/README.md), if that node is
+running. This is the reference example of "support/tooling code" in
+[adding-your-own-code.md](adding-your-own-code.md) — see that doc first if
+you're adding something similar.
 
 This doc covers the workflow, what you'll see, and how the pieces fit
 together; for a line-by-line code walkthrough (the wire protocol, every
@@ -13,11 +18,14 @@ parameter, the thread-bridging pattern) see
 [src/web_dashboard/README.md](../src/web_dashboard/README.md).
 
 ```
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch web_dashboard web_dashboard_launch.py
 ```
 then open `http://<car-ip>:8080/` in any browser on the same network (find
 `<car-ip>` with `hostname -I` on the car, or use its Tailscale address —
-see [Security note](#security-note) below).
+see [Security note](#security-note) below). No other node needs to be
+running first — see the table below for what you'll see at each stage;
+worst case with nothing else up yet, the page just shows "no scan yet."
 
 This node is **entirely passive** — it only ever subscribes, it never
 publishes anything, to `/drive` or any other topic. That means the
@@ -41,6 +49,22 @@ everything is fully set up:
 | `/scan` + `slam_toolbox` mapping | The map builds and updates live in the background as you drive; the scan stays robot-centric (see [Limitations](#limitations) for why the overlay doesn't lock onto the map during live SLAM specifically). |
 | `/scan` + a saved map + `particle_filter` localized (seeded with RViz's "2D Pose Estimate") | **Map-relative mode**: the map is the background, the car is drawn at its real localized position and heading, and the LIDAR points are drawn in true world coordinates — so you can directly see where the car is relative to the walls, other objects, and the rest of the track. |
 
+To get just `/scan` publishing, without the rest of the hardware layer
+(no `joy_node`, VESC, or `ackermann_mux` — those only come bundled
+together via `bringup_launch.py`), run the LIDAR driver directly with the
+same config `bringup_launch.py` uses:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+ros2 run urg_node urg_node_driver --ros-args --params-file src/f1tenth_system/f1tenth_stack/config/sensors.yaml
+```
+
+The Hokuyo is Ethernet-connected (see
+[hardware-reference.md](hardware-reference.md#lidar--hokuyo-ust-10lx)), so
+if this is a fresh boot and the `hokuyo` NetworkManager profile hasn't
+auto-connected yet, bring it up first: `nmcli connection up hokuyo`, then
+confirm with `ping 192.168.0.10`.
+
 ## How it works
 
 ```mermaid
@@ -48,18 +72,25 @@ flowchart LR
     M["/map\n(nav_msgs/OccupancyGrid)"] --> N[dashboard_node]
     S["/scan\n(sensor_msgs/LaserScan)"] --> N
     P["/pf/viz/inferred_pose\n(geometry_msgs/PoseStamped)"] --> N
+    D["/drive\n(ackermann_msgs/AckermannDriveStamped)"] --> N
+    T["CPU/mem/temp\n(psutil + /sys/class/thermal)"] --> N
     N -- WebSocket --> B1[Browser tab 1]
     N -- WebSocket --> B2[Browser tab 2 ...]
 ```
 
 One ROS2 node (`dashboard_node.py`) does two jobs in one process:
 
-1. **Subscribes** to the map, scan, and pose topics, exactly like any other
-   node in this workspace.
+1. **Subscribes** to the map, scan, pose, and drive topics, exactly like any
+   other node in this workspace, and separately samples system stats
+   (CPU/mem/temp/uptime) on a timer rather than from a topic.
 2. **Runs a small web server** ([Tornado](https://www.tornadoweb.org/), a
    mature, single-dependency Python library that already ships on this
    machine) that serves the dashboard's HTML/JS/CSS as static files, and
    pushes every update out to any connected browser tab over a WebSocket.
+
+Subscribing to `/drive` only ever *reads* the current command for display
+— this node still never publishes anything, so it remains just as safe to
+leave running as before; see the [security note](#security-note).
 
 ### Two concurrency models sharing one process
 
@@ -87,6 +118,8 @@ manual parsing:
 | Map | width, height, resolution, origin | `Int8Array` — one signed byte per cell, exactly matching `OccupancyGrid.data` (-1 unknown, 0 free, 100 occupied) |
 | Scan | angle range/increment, LIDAR mounting offset | `Float32Array` — one little-endian float per beam, exactly matching `LaserScan.ranges` |
 | Pose | `{x, y, yaw}` | *(none — small enough to just be JSON)* |
+| Drive | `{speed, steering_angle}` | *(none)* |
+| Stats | `{cpu_percent, mem_percent, cpu_temp_c, uptime_s, wifi_dbm}` | *(none — `cpu_temp_c`/`wifi_dbm` are `null` if no readable thermal zone / wireless interface was found)* |
 
 All of this conversion lives in `web_dashboard/protocol.py`, deliberately
 kept free of any ROS/Tornado/network imports so it's directly
@@ -96,30 +129,152 @@ or web server.
 ### The browser side
 
 `web/dashboard.js` is one plain file, no build step, no framework:
-connects to `ws://<host>/ws`, keeps the latest map/scan/pose in a small
-state object, and redraws an HTML5 `<canvas>` whenever new data arrives
-(plus on a 250ms timer, purely so "updated Xs ago" and stale-data
+connects to `ws://<host>/ws`, keeps the latest map/scan/pose/drive/stats in
+a small state object, and redraws an HTML5 `<canvas>` whenever new data
+arrives (plus on a 250ms timer, purely so "updated Xs ago" and stale-data
 coloring stay live even when nothing new has arrived). The occupancy grid
 is rendered into an off-screen canvas once per map update (not once per
 frame) and then scaled onto the visible canvas with a single `drawImage()`
 call — redrawing every cell every frame would be needlessly slow for a
-large map. Drag to pan, scroll to zoom (toward the cursor), "reset view"
-to re-fit.
+large map. Drag to pan (works both before and after localization — see
+below), scroll to zoom (toward the cursor), "reset view" to re-fit.
+
+Robot-centric mode (no pose yet) and map-relative mode (once localized)
+use two different coordinate transforms (`bodyToCanvas` vs
+`worldToCanvas`), so panning/zooming tracks its own offset in each —
+`view.bodyPanX/bodyPanY` for the former, `view.centerX/centerY` for the
+latter — rather than sharing one, since a drag that happened before
+localization has no meaningful world-frame equivalent to carry over.
+
+The car itself is drawn as a small top-down car silhouette (rounded body,
+wheels, a lighter "windshield" stripe marking the front) rather than a
+bare arrow, so heading reads unambiguously even at a glance. A translucent
+red wedge marks the LIDAR's actual blind spot — the arc it physically
+never scans (e.g. the Hokuyo's ~270° field of view leaves a real ~90° gap
+behind its mount) — computed from the scan's own
+`angle_min`/`angle_increment`/count, not guessed from which beams read "no
+return" this frame (open space with nothing in range would look identical
+to a blind spot that way, and shouldn't be flagged as one). A scale bar in
+the bottom-left corner shows the current zoom level in meters/cm.
+
+### Layout
+
+- **Left sidebar** — connection status, then a `feeds` section (map,
+  scan, pose, drive, each with a small status dot: gray = never received,
+  green = updating, red = stale) and a `system` section (CPU%, mem%, CPU
+  temp, WiFi signal, uptime). It has no fixed/maximum height — it simply
+  grows to fit whatever rows it has, rather than cramming them into a
+  fixed box.
+- **Top-right inset** — a minimap: always shows the *whole* map at a
+  fixed auto-fit scale, independent of the main canvas's own pan/zoom,
+  with a white rectangle showing what the main view currently frames and
+  a small marker for the car — so zooming into one corner of the track on
+  the main canvas doesn't lose the big picture. Shows a placeholder until
+  a map has arrived.
+- **Bottom-right inset** — the live camera feed, if
+  [`usb_cam_stream`](../src/usb_cam_stream/README.md) is running. This is
+  a completely separate node on its own port (`9090`) — the browser just
+  points an `<img>` at `http://<car-ip>:9090/stream` directly (an MJPEG
+  stream is a plain, never-ending HTTP response; no WebSocket, no JSON
+  frame). If that node isn't running, the inset shows a "camera offline"
+  placeholder and retries the connection every 3 seconds — no need to
+  reload the dashboard page once the camera node starts. Either variant of
+  that node fills this panel: `usb_cam_stream_launch.py` (a UVC webcam) or
+  `realsense_stream_launch.py` (the RealSense D435i's color feed, via its
+  ROS topic — see [realsense-camera.md](realsense-camera.md)); they share
+  port 9090, so run one at a time.
 
 ## Running it
 
+Dashboard by itself — map/scan/pose, no camera:
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch web_dashboard web_dashboard_launch.py
 ```
-Then open `http://<car-ip>:8080/`. That's the entire procedure — this
-node doesn't touch `/drive`, so none of the joystick-override or
-wheels-off-ground precautions in [operations.md](operations.md) apply to
-it; it's safe to start and stop at any time, on top of anything else.
+Then open `http://<car-ip>:8080/` (see
+[Finding the car's address](#finding-the-cars-address-and-viewing-through-a-forwarded-port)
+below if you're not sure what to put there). That's the entire procedure
+for the dashboard alone — this node reads `/drive` only to display it and
+never publishes anything to it (or any other topic), so none of the
+joystick-override or wheels-off-ground precautions in
+[operations.md](operations.md) apply to it; it's safe to start and stop at
+any time, on top of anything else.
 
 To point it at different topics (e.g. testing against a bag file) or a
 different port, edit `src/web_dashboard/config/web_dashboard.yaml` — see
 the [parameter reference](#parameter-reference) below.
+
+### With the camera panel filled in too
+
+Three terminals, each sourced the same way as above
+(`source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash`).
+Order doesn't matter — all three are support/tooling nodes (see
+[adding-your-own-code.md](adding-your-own-code.md)), none of them touch
+`/drive`, so there's no bringup sequencing or LB-deadman precaution to
+follow here, unlike the driving-code procedures in
+[operations.md](operations.md):
+
+```bash
+# Terminal 1 — the RealSense camera itself (publishes color/depth topics)
+ros2 launch racerbot_launch realsense_camera_launch.py
+
+# Terminal 2 — bridges the color topic to the MJPEG port the dashboard's
+# camera panel looks for (see docs/realsense-camera.md)
+ros2 launch usb_cam_stream realsense_stream_launch.py
+
+# Terminal 3 — the dashboard
+ros2 launch web_dashboard web_dashboard_launch.py
+```
+
+Then open `http://<car-ip>:8080/`. If the camera panel still says "camera
+offline" after a few seconds, it's almost always the forwarded-port issue
+below, not a launch-order problem — the panel retries its connection every
+3 seconds on its own, so a blank/offline panel that never fills in (rather
+than one that briefly says offline before connecting) is the tell.
+
+### Finding the car's address, and viewing through a forwarded port
+
+**Use the car's real network address, not `localhost`, whenever you can.**
+On the car:
+```bash
+hostname -I
+```
+lists every address the car currently has — the LAN one (e.g. `192.168.x.x`,
+see [hardware-reference.md#network](hardware-reference.md#network)) works
+from any device on the same network; the Tailscale one (`100.x.x.x`, same
+section) works from anywhere Tailscale is set up, including off-network.
+Either one, browsed directly, is the normal/intended way to use this
+dashboard — from a laptop or phone, no code editor involved.
+
+**If you're instead viewing through an editor's port-forwarding feature**
+(e.g. VS Code's Ports panel showing `localhost:8080` in your browser's
+address bar because it tunneled port 8080 from the car to your machine):
+the dashboard's map/scan/pose/system stats all still work fine, because
+they travel over the one WebSocket connection to that same forwarded
+origin. **The camera panel is the exception** — `dashboard.js` makes your
+*browser* open a second, independent HTTP connection straight to
+`<the address in your address bar>:9090` (see `CAMERA_PORT` in
+`dashboard.js`), substituting whatever hostname is currently in the URL.
+If that hostname is `localhost` because of a tunnel, your browser tries
+`localhost:9090` on *your own laptop* — which is nothing, since only port
+8080 was forwarded — and the panel shows "camera offline" even though
+everything on the car is running correctly.
+
+Two ways to fix it:
+1. **Browse the car's real address instead** (`hostname -I` above) — the
+   camera panel then resolves `9090` against that same real address and
+   just works. This is the simplest fix and matches how the dashboard is
+   meant to be used.
+2. **Or forward port `9090` too**, in addition to `8080`, using the same
+   mechanism (e.g. VS Code's Ports panel → "Forward a Port" → `9090`). The
+   panel's own 3-second retry picks it up automatically — no page reload
+   needed.
+
+This isn't specific to the camera panel or this dashboard — any tool here
+that has a browser make a *second* connection to a *different* port than
+the one you loaded the page from will hit the same issue under
+port-forwarding. The camera panel is just the one place in this workspace
+that currently does that.
 
 ## Parameter reference
 
@@ -130,9 +285,11 @@ All in `src/web_dashboard/config/web_dashboard.yaml`:
 | `map_topic` | `/map` | Subscribed with "transient local" durability to match `map_server`/`slam_toolbox`, so a dashboard started after the map was published still receives it |
 | `scan_topic` | `/scan` | Subscribed with best-effort sensor QoS |
 | `pose_topic` | `/pf/viz/inferred_pose` | `particle_filter`'s localized pose |
+| `drive_topic` | `/drive` | Whichever control layer is currently arbitrated onto `/drive` (see [architecture.md](architecture.md)) — read-only, purely for the `drive` readout |
 | `host` | `0.0.0.0` | Listen on every network interface — see [security note](#security-note) |
 | `port` | `8080` | Web server port |
 | `scan_broadcast_rate_hz` | `10.0` | `/scan` runs ~40Hz; no browser needs to redraw that often, and this keeps WiFi/CPU load down |
+| `stats_interval_sec` | `1.0` | How often CPU%/mem%/temp/uptime are sampled and broadcast |
 | `laser_offset_x` / `laser_offset_y` | `0.27` / `0.0` | LIDAR mounting offset from `base_link` (matches [hardware-reference.md](hardware-reference.md)), used to place scan points correctly relative to the car's pose |
 
 ## Security note
@@ -141,9 +298,11 @@ This dashboard has **no authentication** and accepts WebSocket connections
 from any origin. That's a deliberate, reasonable trade-off for a read-only
 tool that never publishes anything and therefore can never be used to
 *command* the car — but it does mean anyone who can reach `<car-ip>:8080`
-on the network can see the map/scan/pose. Don't port-forward this to the
-open internet. For remote-but-still-private access, this machine already
-has a `tailscale0` interface configured (see
+on the network can see the map/scan/pose, the currently-arbitrated drive
+command, coarse system stats (CPU/mem/temp/WiFi/uptime), and — if
+`usb_cam_stream` is running — the camera feed. Don't port-forward this to
+the open internet. For remote-but-still-private access, this machine
+already has a `tailscale0` interface configured (see
 [hardware-reference.md](hardware-reference.md)) — use the car's Tailscale
 address instead of exposing the port publicly.
 
@@ -162,10 +321,15 @@ address instead of exposing the port publicly.
 - **No rotated map origins.** The renderer assumes the map's origin
   orientation is identity (true for every map this workspace's tooling
   produces); a map saved with a rotated origin would render misaligned.
+- **Camera port (`9090`) is hardcoded in `dashboard.js`** (`CAMERA_PORT`),
+  not a `config/web_dashboard.yaml` parameter — it's the browser, not
+  `dashboard_node`, that connects to the camera stream directly, so this
+  is a JS constant, not a launch-time ROS parameter. Edit it directly if
+  `usb_cam_stream` is ever reconfigured to a different port.
 - Exactly one shared view per browser tab — there's no multi-car, no
-  recording/playback, no camera feed. It does one job (see what the LIDAR
-  and localization currently say) and does it with almost no moving
-  parts.
+  recording/playback. It does one job (see what the LIDAR, localization,
+  drive command, system health, and camera currently say) and does it
+  with almost no moving parts.
 
 ## File map
 
