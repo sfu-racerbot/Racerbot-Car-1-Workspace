@@ -1,5 +1,6 @@
 # racerbot-ws
 
+> **Sister repositories:** This Car 1 workspace shares its software lineage with [Racerbot Car 2 Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace). Shared software updates should be reviewed across both repositories, while car-specific hardware configuration remains separate.
 ROS2 Jazzy workspace for the team's roboracer/F1TENTH car (Jetson Orin Nano Super, JetPack 7.2, Ubuntu 24.04).
 
 Recent changes to the team's own packages are logged in [CHANGELOG.md](CHANGELOG.md) — check it after pulling to see what changed and whether anything still needs on-car validation.
@@ -40,7 +41,7 @@ This file stays a short quick-start; the docs above are the full reference.
 | `gap_follow` | local package | baseline reactive autonomy — follow-the-gap on `/scan` → `/drive`, no map needed. Code/algorithm detail: [src/gap_follow/README.md](src/gap_follow/README.md) |
 | `pure_pursuit` | local package | map-based race controller — pure pursuit over a curvature-paced recorded racing line, plus the tools to record and pace one. Pipeline/workflow: [docs/racing-autonomy.md](docs/racing-autonomy.md) |
 | `web_dashboard` | local package | live browser dashboard of the map/LIDAR/pose, streamed over a WebSocket — read-only, not an autonomy node, safe to run alongside anything else. Workflow: [docs/web-dashboard.md](docs/web-dashboard.md) |
-| `racerbot_launch` | local package | launch glue not owned by any single driver repo (currently: SLAM, autonomous mapping, and race-day localization+pure_pursuit) |
+| `racerbot_launch` | local package | launch glue not owned by any single driver repo (currently: SLAM, autonomous mapping, automated map-to-race, and race-day localization+pure_pursuit) |
 | `usb_cam_stream` | local package | live MJPEG video stream from a USB webcam, served over plain HTTP for viewing in any browser. Detail: [docs/usb-camera-livestream.md](docs/usb-camera-livestream.md) |
 
 `slam_toolbox` is installed system-wide via apt (`ros-jazzy-slam-toolbox`), not vendored in `src/`.
