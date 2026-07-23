@@ -178,11 +178,7 @@ the bottom-left corner shows the current zoom level in meters/cm.
   stream is a plain, never-ending HTTP response; no WebSocket, no JSON
   frame). If that node isn't running, the inset shows a "camera offline"
   placeholder and retries the connection every 3 seconds — no need to
-  reload the dashboard page once the camera node starts. Either variant of
-  that node fills this panel: `usb_cam_stream_launch.py` (a UVC webcam) or
-  `realsense_stream_launch.py` (the RealSense D435i's color feed, via its
-  ROS topic — see [realsense-camera.md](realsense-camera.md)); they share
-  port 9090, so run one at a time.
+  reload the dashboard page once the camera node starts. On Car 1, this panel is filled by `usb_cam_stream_launch.py`, which captures the installed UVC webcam.
 
 ## Running it
 
@@ -206,23 +202,13 @@ the [parameter reference](#parameter-reference) below.
 
 ### With the camera panel filled in too
 
-Three terminals, each sourced the same way as above
-(`source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash`).
-Order doesn't matter — all three are support/tooling nodes (see
-[adding-your-own-code.md](adding-your-own-code.md)), none of them touch
-`/drive`, so there's no bringup sequencing or LB-deadman precaution to
-follow here, unlike the driving-code procedures in
-[operations.md](operations.md):
+Two terminals, each sourced with `source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash`:
 
 ```bash
-# Terminal 1 — the RealSense camera itself (publishes color/depth topics)
-ros2 launch racerbot_launch realsense_camera_launch.py
+# Terminal 1 — the Car 1 UVC webcam MJPEG stream
+ros2 launch usb_cam_stream usb_cam_stream_launch.py
 
-# Terminal 2 — bridges the color topic to the MJPEG port the dashboard's
-# camera panel looks for (see docs/realsense-camera.md)
-ros2 launch usb_cam_stream realsense_stream_launch.py
-
-# Terminal 3 — the dashboard
+# Terminal 2 — the dashboard
 ros2 launch web_dashboard web_dashboard_launch.py
 ```
 

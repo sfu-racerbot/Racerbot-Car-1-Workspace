@@ -108,29 +108,7 @@ error and keeps retrying every few seconds rather than crashing the node
 
 ## `image_topic` mode: streaming a ROS image topic instead
 
-Setting the `image_topic` parameter to a `sensor_msgs/Image` topic makes
-the node subscribe to that topic instead of opening a V4L2 device — same
-MJPEG endpoint, same browser side, different frame source. This exists for
-cameras whose V4L2 device is already held open exclusively by their own
-ROS driver: the RealSense D435i's `/dev/videoN` belongs to
-`realsense2_camera_node` (see [realsense-camera.md](realsense-camera.md)),
-so a second `cv2.VideoCapture` on it fails — but its frames are already on
-a topic.
-
-The shipped variant of this is the RealSense stream that fills
-[web_dashboard's camera panel](web-dashboard.md#what-youll-actually-see):
-
-```bash
-ros2 launch usb_cam_stream realsense_stream_launch.py   # needs realsense_camera_launch.py running
-```
-
-(`config/realsense_stream.yaml`: `image_topic: /camera/camera/color/image_raw`,
-port `9090` — the port `dashboard.js` looks for. Don't run this and
-`usb_cam_stream_launch.py` at the same time; both default to 9090.)
-
-In this mode `device`/`width`/`height`/`capture_fps` are unused — the
-publishing node owns the capture settings; `stream_fps`/`jpeg_quality`/
-`host`/`port` still apply as normal.
+The node can optionally subscribe to a generic `sensor_msgs/Image` topic instead of opening the webcam directly. Car 1 uses the default V4L2 webcam configuration, so this mode is not part of the normal setup.
 
 ## Parameter reference
 
@@ -178,7 +156,5 @@ src/usb_cam_stream/
 ├── web/
 │   └── index.html              # entire browser side: one <img> tag
 ├── config/usb_cam_stream.yaml      # V4L2/UVC-webcam variant
-├── config/realsense_stream.yaml    # RealSense topic-mode variant (dashboard's camera panel)
-├── launch/usb_cam_stream_launch.py
-└── launch/realsense_stream_launch.py
+└── launch/usb_cam_stream_launch.py
 ```

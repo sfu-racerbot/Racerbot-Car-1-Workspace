@@ -9,7 +9,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     """Everything the web dashboard can show, minus anything that can move
-    the car: LiDAR + RealSense camera + the camera->MJPEG bridge + the
+    the car: LiDAR + UVC webcam stream + the
     dashboard itself, all in one launch, for testing the dashboard/sensors
     without bringing up the driving stack (VESC/joy/ackermann_mux from
     f1tenth_stack's bringup_launch.py).
@@ -17,7 +17,7 @@ def generate_launch_description():
     None of these nodes touch /drive, /ackermann_cmd, or
     /commands/motor|servo/* -- support/tooling per
     docs/adding-your-own-code.md, same category as web_dashboard/
-    usb_cam_stream/realsense_camera_launch.py already are -- so there's no
+    usb_cam_stream already is -- so there's no
     LB-deadman check and no bringup ordering to worry about here, unlike
     the driving-code procedures in docs/operations.md.
 
@@ -46,18 +46,11 @@ def generate_launch_description():
         arguments=['0.27', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser'],
     )
 
-    realsense_camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('racerbot_launch'), 'launch',
-                'realsense_camera_launch.py')
-        )
-    )
-    realsense_stream_launch = IncludeLaunchDescription(
+    webcam_stream_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
                 get_package_share_directory('usb_cam_stream'), 'launch',
-                'realsense_stream_launch.py')
+                'usb_cam_stream_launch.py')
         )
     )
     web_dashboard_launch = IncludeLaunchDescription(
@@ -71,7 +64,6 @@ def generate_launch_description():
     return LaunchDescription([
         urg_node,
         static_tf_node,
-        realsense_camera_launch,
-        realsense_stream_launch,
+        webcam_stream_launch,
         web_dashboard_launch,
     ])

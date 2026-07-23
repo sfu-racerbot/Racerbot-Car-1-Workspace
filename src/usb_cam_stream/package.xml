@@ -3,7 +3,7 @@
 <package format="3">
   <name>usb_cam_stream</name>
   <version>0.1.0</version>
-  <description>Live MJPEG video stream from a USB webcam, served over plain HTTP so it can be viewed in any browser. Read-only: captures via V4L2 or subscribes to a sensor_msgs/Image topic (image_topic mode, used for the RealSense), never publishes anything -- no ROS install, no plugins, no login needed on the viewing device. See docs/usb-camera-livestream.md.</description>
+  <description>Live MJPEG video stream from a USB webcam, served over plain HTTP so it can be viewed in any browser. Read-only: captures the Car 1 UVC webcam via V4L2 (or an explicitly configured sensor_msgs/Image topic) and never publishes anything -- no ROS install, no plugins, no login needed on the viewing device. See docs/usb-camera-livestream.md.</description>
   <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>
   <license>MIT</license>
 

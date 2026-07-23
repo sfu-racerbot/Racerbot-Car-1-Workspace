@@ -7,15 +7,7 @@ as a live MJPEG video stream over plain HTTP: open http://<car-ip>:9090/
 in any browser and watch, no plugins, no WebRTC signaling, no ROS install
 needed on the viewing device.
 
-Alternate source mode: set the `image_topic` parameter to a
-sensor_msgs/Image topic (e.g. the RealSense's
-/camera/camera/color/image_raw) and the node subscribes to that instead of
-opening a V4L2 device. This exists because a camera whose device is
-already held open by its own ROS driver node (realsense2_camera_node holds
-the D435i's /dev/videoN exclusively) can't be captured a second time via
-V4L2 -- but its frames are right there on a topic. Everything downstream
-(the MJPEG endpoint, the web_dashboard camera panel that points at it) is
-identical in both modes. See docs/realsense-camera.md.
+Alternate source mode: set the `image_topic` parameter to any `sensor_msgs/Image` topic and the node subscribes to that instead of opening a V4L2 device. Car 1 normally uses its installed UVC webcam directly; topic mode is generic optional functionality. The MJPEG endpoint and dashboard integration are identical in both modes.
 
 Three concurrency models share this one process (an extra one compared to
 web_dashboard_node -- see that file's docstring for the base pattern this

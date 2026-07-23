@@ -47,6 +47,10 @@ If `/dev/sensors/hokuyo` doesn't show up after plugging the LiDAR in: `lsusb` sh
 
 No static IP, dedicated NIC, or `nmcli` connection is needed for this car's LiDAR — that's a Car 2–specific detail (Ethernet Hokuyo UST-10LX) that doesn't apply here.
 
+## Camera — UVC USB webcam
+
+Car 1 uses a standard UVC webcam at `/dev/video0`; it does **not** have an Intel RealSense camera. `src/usb_cam_stream/config/usb_cam_stream.yaml` captures it at 1280×720 and 30 FPS and serves the monitoring stream on port 9090. Verify the device path with `v4l2-ctl --list-devices` if USB enumeration changes. See [usb-camera-livestream.md](usb-camera-livestream.md).
+
 ## Joystick — Logitech F710
 
 | | |

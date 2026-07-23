@@ -7,7 +7,7 @@ How this workspace is versioned, what's a real git submodule vs. a plain vendore
 - GitHub, private: `https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace.git`
 - Default/only branch: `main`
 - `build/`, `install/`, `log/` (colcon artifacts), `__pycache__/`/`*.pyc`, and `.claude/` (local Claude Code settings, machine-specific) are gitignored — never expected in a commit.
-- This car's history was bootstrapped from the team's other car workspace (`Racerbot-Car-2-Workspace`) and then adapted for this car's own hardware (LiDAR connection, accounts, git remote) — see the main [README.md](../README.md) for what's actually different between the two.
+- Car 2 is a related but independent sister repository, not a submodule or configured upstream. Compare against it and manually port selected changes only when explicitly requested; never wholesale-merge or overwrite Car 1 hardware configuration. See the main [README.md](../README.md).
 
 ## Submodules vs. vendored code — know which is which
 
@@ -17,13 +17,12 @@ How this workspace is versioned, what's a real git submodule vs. a plain vendore
 | `range_libc` | **real git submodule** | `f1tenth/range_libc` | `humble-devel` |
 | `transport_drivers` | **real git submodule** | `ros-drivers/transport_drivers` | `1.2.0` |
 | `f1tenth_system` | **vendored (plain tracked files, NOT a submodule)** | was `f1tenth/f1tenth_system` | was pinned at `v2.0.0-beta-22-g94cb8d7` |
-| `realsense-ros` | **real git submodule** | `realsenseai/realsense-ros` | `ros2-master` |
 
-`f1tenth_system` is vendored, exactly like on Car 2 — but for this car's own reasons, discovered while adapting the docs: its working tree carried **three** uncommitted local patches that a plain submodule can't preserve across a fresh clone or a submodule update:
+`f1tenth_system` is vendored to preserve this car's own hardware and launch differences: its working tree carried **three** uncommitted local patches that a plain submodule can't preserve across a fresh clone or a submodule update:
 
-- `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml` — the `human_control` profile's `drive-steering_angle` axis, changed from upstream's `axis: 2` to `axis: 3` (this car's F710 right stick in XInput mode; axis 2 is the left trigger — see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710)). Same fix as Car 2, verified independently against this car's own controller.
-- `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` — `urg_node` switched from upstream's default Ethernet params (`ip_address`/`ip_port`) to `serial_port: "/dev/sensors/hokuyo"`, because **this car's Hokuyo UST-30LX is USB, not Ethernet** (unlike Car 2's UST-10LX) — see [hardware-reference.md](hardware-reference.md#lidar--hokuyo-ust-30lx).
-- `src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py` / `launch/teleop_launch.py` — upstream bundles `joy_teleop` into `bringup_launch.py` itself; here it's split out into its own `teleop_launch.py` so manual driving and autonomy are independent control layers you switch between with `Ctrl+C`, not a `pkill` dance (see [architecture.md](architecture.md#the-node-graph)). `bringup_launch.py` still starts `joy_node` (every control layer's deadman check needs it), just not `joy_teleop` anymore. Same change as Car 2 (including the `no_lidar_bringup_launch.py`/`sick_bringup_launch.py` variants below, which aren't on Car 2 at all but got the identical split for consistency).
+- `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml` — the `human_control` profile's `drive-steering_angle` axis, changed from upstream's `axis: 2` to `axis: 3` (this car's F710 right stick in XInput mode; axis 2 is the left trigger — see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710)). Verified against this car's own controller.
+- `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` — `urg_node` switched from upstream's default Ethernet params (`ip_address`/`ip_port`) to `serial_port: "/dev/sensors/hokuyo"`, because **this car's Hokuyo UST-30LX is USB, not Ethernet** — see [hardware-reference.md](hardware-reference.md#lidar--hokuyo-ust-30lx).
+- `src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py` / `launch/teleop_launch.py` — upstream bundles `joy_teleop` into `bringup_launch.py` itself; here it's split out into its own `teleop_launch.py` so manual driving and autonomy are independent control layers you switch between with `Ctrl+C`, not a `pkill` dance (see [architecture.md](architecture.md#the-node-graph)). `bringup_launch.py` still starts `joy_node` (every control layer's deadman check needs it), just not `joy_teleop` anymore. This workspace also applies the split consistently to the `no_lidar_bringup_launch.py` and `sick_bringup_launch.py` variants.
 
 A git submodule can only ever point at a commit in *someone else's* repo — there's no way to carry an uncommitted local edit through it into this repo's history. Vendoring was the simplest way to keep all three fixes without standing up a fork. **Practical effect: `f1tenth_system` will never move on its own.** There's no `git submodule update --remote` for it — updating it means manually pulling upstream changes and re-applying/re-checking all three patches (see below).
 
