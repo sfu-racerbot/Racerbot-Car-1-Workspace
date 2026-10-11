@@ -23,7 +23,8 @@ import numpy as np
 import pytest
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Joy, LaserScan
+from rclpy.duration import Duration
 from rclpy.parameter import Parameter
 
 from pure_pursuit.pure_pursuit_node import OpponentTracker, PurePursuitNode
@@ -44,6 +45,31 @@ def profiled_csv(tmp_path_factory):
 
 
 @pytest.fixture
+def node_factory(profiled_csv):
+    """Build more than one identically configured node in one context.
+
+    Needed by the pass-side tests, which are comparisons: "steers further
+    right *than it would have* without the opponent" is the claim, and a
+    comparison needs a baseline run from the same starting state.
+    """
+    rclpy.init(args=['--ros-args',
+                     '-p', f'waypoints_file:={profiled_csv}',
+                     '-p', 'enable_deadman:=false',
+                     '-p', 'drive_topic:=/test_only/drive'])
+    built = []
+
+    def make():
+        node = PurePursuitNode()
+        built.append(node)
+        return node
+
+    yield make
+    for node in built:
+        node.destroy_node()
+    rclpy.shutdown()
+
+
+@pytest.fixture
 def node(profiled_csv):
     """A real PurePursuitNode against the profiled example track, in its
     own rclpy context per test (parameter overrides -- like the profiled
@@ -54,7 +80,10 @@ def node(profiled_csv):
     racing-line/avoidance/overtake logic, which is independent of (and
     already covered separately from) that gate.
     """
-    rclpy.init(args=['--ros-args', '-p', f'waypoints_file:={profiled_csv}', '-p', 'enable_deadman:=false'])
+    rclpy.init(args=['--ros-args',
+                     '-p', f'waypoints_file:={profiled_csv}',
+                     '-p', 'enable_deadman:=false',
+                     '-p', 'drive_topic:=/test_only/drive'])
     n = PurePursuitNode()
     yield n
     n.destroy_node()
@@ -96,6 +125,23 @@ def _car_ahead_scan(car_range=2.0, left_room=9.9, right_room=9.6):
     return scan, center
 
 
+def _one_command_interval(node):
+    """Make the next control_loop() integrate a realistic time step.
+
+    Back-to-back control_loop() calls are microseconds apart, and
+    max_steering_rate (1.0 rad/s) then permits about 0.0001 rad of steering
+    change per call. Four of those leaves the command within a thousandth
+    of a radian of zero, and a test asserting its *sign* is really
+    asserting how long each call took -- which flips with machine load.
+    Rewinding last_command_time by one command_slew_max_dt gives the slew
+    limiter the same budget it gets on the car, so what is measured is the
+    pass-side decision rather than the scheduler. (Same idiom as
+    test_shaped_speed_ramps_up_to_the_profiled_speed.)
+    """
+    node.last_command_time = node.get_clock().now() - Duration(
+        seconds=node.command_slew_max_dt)
+
+
 def _capture_published(node):
     published = []
     original = node.drive_pub.publish
@@ -110,34 +156,193 @@ def test_drives_normally_on_a_clear_track(node):
     node.control_loop()
     last = published[-1]
     assert abs(last.drive.steering_angle) < 0.05
-    assert last.drive.speed > 0.5
+    # This is the very first command, so it starts from a standstill and the
+    # acceleration limit -- not the racing line -- sets it: exactly one
+    # command_slew_max_dt step's worth of ramp.
+    assert last.drive.speed == pytest.approx(
+        node.max_acceleration * node.command_slew_max_dt)
+    assert last.drive.speed > 0.5, \
+        "the first command must still be a real drive command, not a crawl"
     assert node.overtake_active is False
+    assert node.last_decision_state == 'pure_pursuit'
 
 
-def test_overtakes_toward_the_more_open_side(node):
+def test_shaped_speed_ramps_up_to_the_profiled_speed(node):
+    # The acceleration limit shapes how fast a command may *rise*. It must
+    # converge on the profiled speed rather than hold the car below it: an
+    # over-tight ramp is what stalled the car behind traffic in simulation.
+    # Each loop is spaced one full command interval apart, as a real one is.
     published = _capture_published(node)
-    scan, _center = _car_ahead_scan(left_room=9.9, right_room=9.6)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -1.2, 0.0)
+    for _ in range(12):
+        node.last_command_time = node.get_clock().now() - Duration(
+            seconds=node.command_slew_max_dt)
+        node.control_loop()
+
+    speeds = [msg.drive.speed for msg in published]
+    assert all(later >= earlier - 1e-9
+               for earlier, later in zip(speeds, speeds[1:])), speeds
+    assert speeds[-1] > speeds[0], "the ramp must actually let the car speed up"
+    assert speeds[-1] == pytest.approx(speeds[-2]), \
+        "the ramp must converge, leaving the racing line in charge of speed"
+    assert speeds[-1] > 1.0
+
+
+def test_missing_lidar_stop_has_a_diagnostic_reason(node):
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'lidar_scan_missing'
+
+
+def _drive_four_ticks(node, scan):
+    """Four control ticks from the same start, returning the last command."""
+    published = _capture_published(node)
     node.scan_callback(scan)
     for step in range(4):
         _set_pose(node, -1.5 + step * 0.2, -1.2, 0.0)
+        _one_command_interval(node)
         node.control_loop()
-    last = published[-1]
+    return published[-1]
+
+
+def test_overtakes_toward_the_more_open_side(node_factory):
+    node = node_factory()
+    scan, _center = _car_ahead_scan(left_room=9.9, right_room=9.6)
+    _drive_four_ticks(node, scan)
     assert node.overtake_active is True
     assert node.overtake_side == 1  # more open on the left -> pass left
-    assert last.drive.steering_angle > 0.0
+    assert node.last_decision_state == 'overtake_left'
 
 
-def test_overtakes_toward_the_right_when_thats_more_open(node):
-    published = _capture_published(node)
+def test_overtakes_toward_the_right_when_thats_more_open(node_factory):
+    node = node_factory()
     scan, _center = _car_ahead_scan(left_room=9.6, right_room=9.9)
+    _drive_four_ticks(node, scan)
+    assert node.overtake_active is True
+    assert node.overtake_side == -1
+    assert node.last_decision_state == 'overtake_right'
+
+
+def test_the_chosen_pass_side_actually_moves_the_steering_that_way(node_factory):
+    """Passing right must steer further right than passing left, from the
+    same pose against the same opponent.
+
+    Stated as a comparison between the two sides rather than as the sign of
+    either one. The overtake offsets a point `overtake_lookahead_distance`
+    (4m) ahead by `overtake_lateral_offset` (0.35m), which is about five
+    degrees of bearing -- a nudge on top of whatever the racing line is
+    already doing over those four metres, not a replacement for it. On this
+    fixture's track the line's own curvature is the larger term, so *both*
+    passes come out with a positive steering angle and an assertion on the
+    sign of one of them is an assertion about the test track.
+
+    It used to pass anyway: back-to-back control_loop() calls are
+    microseconds apart, max_steering_rate then allowed about 0.0001 rad of
+    change per call, and the command stayed pinned near zero where its sign
+    was noise. Adding a few microseconds of work per tick flipped it.
+    """
+    left_node = node_factory()
+    left_scan, _ = _car_ahead_scan(left_room=9.9, right_room=9.6)
+    left = _drive_four_ticks(left_node, left_scan)
+
+    right_node = node_factory()
+    right_scan, _ = _car_ahead_scan(left_room=9.6, right_room=9.9)
+    right = _drive_four_ticks(right_node, right_scan)
+
+    assert left_node.overtake_side == 1
+    assert right_node.overtake_side == -1
+    assert right.drive.steering_angle < left.drive.steering_angle
+
+
+def _set_odom(node, speed):
+    from nav_msgs.msg import Odometry
+    msg = Odometry()
+    msg.twist.twist.linear.x = float(speed)
+    node.odom_callback(msg)
+
+
+def test_acceleration_ramp_starts_from_measured_speed_not_the_last_command(node):
+    # A ceiling (avoidance, curvature, an overtake cap) drops the *command*
+    # instantly, but the car keeps rolling at nearly its old speed -- it
+    # cannot shed 3 m/s in one 25ms tick. Ramping back up from that command
+    # would hold the throttle far below the car's real speed for the whole
+    # climb, braking a car that never actually slowed. The ramp must start
+    # from measured speed instead.
+    published = _capture_published(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -1.2, 0.0)
+    _set_odom(node, 3.0)
+    node.last_commanded_speed = 1.0   # as a one-tick ceiling would leave it
+
+    node.control_loop()
+    speed = published[-1].drive.speed
+    assert speed > 2.5, \
+        "must not crawl back up from the capped command while the car is at 3 m/s"
+
+    # ...and stale odometry must fall back to the old, conservative behavior
+    # rather than trusting a reading that is no longer current.
+    node.last_commanded_speed = 1.0
+    node.last_odom_time = node.get_clock().now() - Duration(
+        seconds=node.odom_timeout_sec + 0.1)
+    node.last_command_time = None
+    node.control_loop()
+    assert published[-1].drive.speed == pytest.approx(
+        1.0 + node.max_acceleration * node.command_slew_max_dt)
+
+
+def test_ramp_basis_never_exceeds_the_configured_speed_ceiling(node):
+    # A wildly wrong odometry reading must not be able to inflate the ramp
+    # basis past max_speed and let the command jump beyond the safety ceiling.
+    published = _capture_published(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -1.2, 0.0)
+    _set_odom(node, 500.0)
+    node.control_loop()
+    assert published[-1].drive.speed <= node.max_speed
+
+
+def test_overtake_aims_further_ahead_than_the_normal_steering_target(node):
+    # The passing line is a lateral offset applied to a waypoint
+    # overtake_lookahead_distance ahead, deliberately *not* to the normal
+    # max_lookahead target. Offsetting a target only max_lookahead away asks
+    # for a turn sharp enough that the online curvature speed cap answers it
+    # by braking -- which stalls the pass instead of completing it.
+    scan, _center = _car_ahead_scan()
     node.scan_callback(scan)
     for step in range(4):
         _set_pose(node, -1.5 + step * 0.2, -1.2, 0.0)
         node.control_loop()
-    last = published[-1]
     assert node.overtake_active is True
-    assert node.overtake_side == -1
-    assert last.drive.steering_angle < 0.0
+
+    nearest_idx, _ = racing_math.find_nearest_index(
+        node.xy, (node.car_x, node.car_y), closed=node.closed_loop)
+    normal_target = node.xy[racing_math.find_lookahead_index(
+        node.seg_len, nearest_idx, node.max_lookahead, closed=node.closed_loop)]
+    overtake_x, overtake_y = node._update_opponent_and_overtake(nearest_idx)
+
+    overtake_range = math.hypot(overtake_x - node.car_x, overtake_y - node.car_y)
+    normal_range = math.hypot(
+        normal_target[0] - node.car_x, normal_target[1] - node.car_y)
+    assert overtake_range > normal_range
+    assert overtake_range > node.max_lookahead
+
+
+def test_overtake_preview_shorter_than_the_lookahead_is_rejected(profiled_csv):
+    # Guards the invariant the preview exists for: a preview at or inside
+    # max_lookahead reintroduces exactly the sharp passing turn it prevents.
+    rclpy.init(args=['--ros-args',
+                     '-p', f'waypoints_file:={profiled_csv}',
+                     '-p', 'enable_deadman:=false',
+                     '-p', 'drive_topic:=/test_only/drive',
+                     '-p', 'overtake_lookahead_distance:=0.5'])
+    try:
+        with pytest.raises(RuntimeError, match='overtake_lookahead_distance'):
+            PurePursuitNode()
+    finally:
+        rclpy.shutdown()
 
 
 def test_hard_stop_overrides_an_active_overtake(node):
@@ -155,6 +360,280 @@ def test_hard_stop_overrides_an_active_overtake(node):
     node.control_loop()
     last = published[-1]
     assert last.drive.speed == 0.0, "the hard-stop safety net must win regardless of overtake state"
+    # 0.15m from the LiDAR straight ahead is only ~0.03m from the bodywork,
+    # so the footprint tier is the correct (and more urgent) classification.
+    assert node.last_decision_state == 'body_contact'
+
+
+def _range_for_body_clearance(node, clearance):
+    """A straight-ahead LiDAR range leaving `clearance` at the bodywork.
+
+    The emergency tiers compare a raw range against emergency_stop_distance
+    but a footprint-aware clearance against emergency_stop_clearance and
+    emergency_escape_clearance, so a scenario that wants to land in one
+    particular tier has to be written in terms of the clearance, not the
+    range. The conversion between them moved on 2026-08-24 when the car was
+    tape-measured: the LiDAR turned out to sit 0.26 m ahead of the rear axle
+    rather than 0.33 m, which put the modelled nose 0.088 m further out in
+    front of it, and every fixed range here quietly became a test of a
+    different tier.
+    """
+    forward_boundary = (
+        node.wheelbase / 2.0 + node.car_length / 2.0 - node.laser_offset_x)
+    return clearance + forward_boundary
+
+
+def test_forward_cone_obstacle_crawls_out_rather_than_latching(node):
+    """An obstacle inside the forward cone with an open track beside it is
+    escaped at a crawl, not sat next to forever.
+
+    A hard stop cannot clear its own safety cone: at zero speed nothing
+    about the scene changes, so whatever stopped the car keeps stopping it.
+    That ended a simulated auto-map race on 2026-08-08 -- pure pursuit ran
+    wide on its first corner, stopped 0.38m from a wall, and stayed there.
+    The classification must still be its own tier, distinct from
+    body_contact, and the speed must still be a crawl rather than a drive.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    center = len(scan.ranges) // 2
+    # 0.12m of body clearance: well outside emergency_stop_clearance and
+    # emergency_escape_clearance, so the escape tier is allowed to act...
+    # (cut from 0.15m on 2026-08-25 when emergency_stop_distance itself was
+    # cut from 0.4 to 0.35 -- 0.15m's raw range no longer landed inside it;
+    # see the assertion just below, which exists precisely to catch that.)
+    obstacle = _range_for_body_clearance(node, 0.12)
+    assert 0.12 > node.emergency_escape_clearance
+    # ...while the raw range is still inside emergency_stop_distance, so
+    # there is an emergency to escape from in the first place.
+    assert obstacle < node.emergency_stop_distance, (
+        'the configured footprint no longer leaves a range that is both an '
+        'emergency and escapable; this test proves nothing until it does')
+    scan.ranges[center] = obstacle
+    node.scan_callback(scan)
+    node.control_loop()
+    assert node.last_decision_state == 'emergency_escape'
+    assert published[-1].drive.speed == pytest.approx(node.emergency_escape_speed)
+    assert published[-1].drive.speed <= 0.3, 'the escape is a crawl, not a drive'
+
+
+def test_forward_cone_hard_stop_still_fires_with_nowhere_to_go(node):
+    """With no opening wide enough to crawl toward, the hard stop stands.
+
+    The escape above is allowed to move the car only because there is
+    somewhere to move it to. Boxed in, the node must fall back to the
+    original behaviour and report emergency_obstacle.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    # A wall right across the avoidance cone: inside the emergency distance
+    # ahead, and nothing anywhere near emergency_escape_min_gap to aim at.
+    # Deliberately at the SAME body clearance as the escapable case above
+    # (also cut from 0.15m to 0.12m on 2026-08-25, see that test), so the
+    # only thing that differs between the two is whether an opening exists
+    # -- otherwise this could pass merely because the wall was too close for
+    # the escape tier to consider at all, which is a different reason from
+    # the one the docstring claims.
+    wall = _range_for_body_clearance(node, 0.12)
+    assert 0.12 > node.emergency_escape_clearance
+    assert wall < node.emergency_stop_distance
+    scan.ranges = [wall] * len(scan.ranges)
+    node.scan_callback(scan)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state in ('emergency_obstacle', 'body_contact')
+
+
+def test_emergency_escape_yields_to_the_body_contact_tier(node):
+    """Nearly touching means stop, not nudge -- whatever the cone shows.
+
+    2026-08-25 UPDATE: body_contact gained its own directional escape this
+    session (state 'body_contact_escape', mirroring gap_follow_node), but
+    it is deliberately gated by body_contact_escape_clearance (default
+    0.0m) -- the *strictest* of every escape floor in this node, since this
+    tier fires closest to genuine contact. This scan's ~0.03m raw range
+    dead ahead computes to roughly -0.06m of body clearance (already past
+    the contact threshold, not just at it), which is below even that
+    stricter floor, so no escape is attempted and the result is the same
+    unconditional stop as before this session -- confirmed directly
+    against the real node, not merely asserted. See
+    test_body_contact_escapes_when_clearance_permits_it for a scan that
+    lands inside the escapable band (0, emergency_stop_clearance], where
+    body_contact_escape does fire, and
+    test_body_contact_still_hard_stops_when_genuinely_boxed_in for the
+    "escape considered and found impossible" case.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    center = len(scan.ranges) // 2
+    # ~0.03m from the bodywork straight ahead, with the rest of the cone
+    # open -- but note "open cone" is not what gates the escape here; the
+    # clearance itself is below body_contact_escape_clearance regardless.
+    scan.ranges[center] = 0.15
+    node.scan_callback(scan)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'body_contact'
+
+
+def test_body_contact_escapes_when_clearance_permits_it(node):
+    """INTENTIONAL BEHAVIOR CHANGE (2026-08-25): a body_contact trip dead
+    ahead, with clearance inside the escapable band (above
+    body_contact_escape_clearance's 0.0m floor, still at or below
+    emergency_stop_clearance so it counts as body_contact at all) and a
+    real gap elsewhere, now crawls out instead of latching -- the
+    body_contact half of the same directional gate section 2 gave
+    gap_follow_node. Real evidence this session: pure pursuit never took
+    control in any run that day, so this is the first exercise of this
+    exact tier's escape at all; validate in racerbot_sim before trusting it
+    on the car.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    center = len(scan.ranges) // 2
+    forward_boundary = (
+        node.wheelbase / 2.0 + node.car_length / 2.0 - node.laser_offset_x)
+    # Halfway between the two floors: above body_contact_escape_clearance
+    # (0.0), at or below emergency_stop_clearance (0.03) so this is still a
+    # body_contact trip in the first place.
+    clearance = node.body_contact_escape_clearance + (
+        node.emergency_stop_clearance - node.body_contact_escape_clearance) / 2.0
+    assert 0.0 < clearance <= node.emergency_stop_clearance, (
+        'the configured floors no longer leave an escapable band; this '
+        'test proves nothing until they do')
+    scan.ranges[center] = clearance + forward_boundary
+    node.scan_callback(scan)
+    node.control_loop()
+    assert node.last_decision_state == 'body_contact_escape', (
+        'a body contact dead ahead with room to escape and a real gap '
+        'elsewhere must crawl toward it, not latch at zero')
+    assert published[-1].drive.speed == pytest.approx(node.emergency_escape_speed)
+
+
+def test_body_contact_still_hard_stops_when_genuinely_boxed_in(node):
+    """The directional escape gate is not a licence to never hard-stop:
+    the same escapable-band clearance as the test above, dead ahead, but
+    with the rest of the avoidance cone within find_best_gap's own raw-range
+    depth threshold (emergency_escape_min_gap) too -- so no gap exists
+    anywhere in the cone _emergency_escape searches, and the tier must fall
+    back to its original unconditional stop.
+
+    NOTE on construction: filling the *whole* +/-avoidance_fov_deg/2 cone
+    uniformly at the trip clearance does NOT work here and was the first
+    thing tried -- the rectangular footprint's boundary distance grows
+    across that cone (measured: 0.210m at 0deg to 0.243m at 30deg for this
+    car), enough on its own to push the *worst* clearance in a uniform slab
+    below body_contact_escape_clearance's floor at the slab's edges, well
+    past the escapable band this test means to stay inside. Caught by
+    running the construction directly against the real node and reading
+    the logged clearance back, not by assumption. Only the single centre
+    beam is set to the trip range here; the rest of the cone is set closer
+    than emergency_escape_min_gap (blocking every gap `find_best_gap` could
+    find) but with enough clearance of its own that the centre beam stays
+    the strict minimum (directional). Window boundaries are taken from
+    node._fov_indices directly, matching what _emergency_escape itself
+    uses -- an independent angle-based loop left a beam or two at the
+    window edge unset in an earlier version of this test, which
+    find_best_gap read as a one-beam-wide "gap" at 10m depth and escaped
+    through.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    center = len(scan.ranges) // 2
+    forward_boundary = (
+        node.wheelbase / 2.0 + node.car_length / 2.0 - node.laser_offset_x)
+    clearance = node.body_contact_escape_clearance + (
+        node.emergency_stop_clearance - node.body_contact_escape_clearance) / 2.0
+    assert 0.0 < clearance <= node.emergency_stop_clearance, (
+        'the configured floors no longer leave an escapable band; this '
+        'test proves nothing until they do')
+    lo_idx, hi_idx = node._fov_indices(scan, node.avoidance_fov_deg)
+    for i in range(lo_idx, hi_idx + 1):
+        # Below emergency_escape_min_gap (0.8m raw range), so find_best_gap
+        # finds nothing here -- but comfortably above the trip beam's own
+        # range, so the trip beam remains the global clearance minimum.
+        scan.ranges[i] = node.emergency_escape_min_gap * 0.9
+    scan.ranges[center] = clearance + forward_boundary
+    node.scan_callback(scan)
+    node.control_loop()
+    assert node.last_decision_state == 'body_contact', (
+        'boxed in on every side, body_contact must still hard-stop outright'
+    )
+    assert published[-1].drive.speed == 0.0
+
+
+def test_wall_alongside_the_car_stops_it_although_the_forward_cone_is_clear(node):
+    """Regression test for the 2026-07-27 collision.
+
+    The car sat against a wall that was *beside* it. Every forward-cone
+    minimum read clear (the track ahead genuinely was open), so the old
+    safety net logged "LIDAR clear" and pure pursuit accelerated into the
+    wall. Only a clearance measured from the car's own footprint can see
+    this, which is why the body tier exists.
+
+    Confirmed unaffected by this session's directional escape gate: the
+    wall sits at ~45deg (a quarter of this scan's 361-beam length from
+    centre is a quarter of its 180deg span, not the 90deg the old comment
+    here claimed -- fixed in passing), still outside avoidance_fov_deg's
+    +/-30deg forward cone, so forward_body_clearance (measured only inside
+    that cone) reads nothing like the flank's own clearance -- directional
+    is False. See test_body_contact_flank_escape_is_refused_even_with_room
+    below for the test that isolates the directional gate itself, at
+    exactly +90deg and a clearance that would otherwise be escapable; this
+    one is also, independently, below body_contact_escape_clearance's own
+    floor (confirmed directly: -0.078m here), so on its own it does not
+    distinguish the two mechanisms.
+    """
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    n = len(scan.ranges)
+    center = n // 2
+    # A wall hard against the car's flank, and nothing at all ahead.
+    quarter = n // 4          # ~45deg with this helper's symmetric span
+    for i in range(center + quarter - 12, center + quarter + 12):
+        scan.ranges[i] = 0.17
+    node.scan_callback(scan)
+    node.control_loop()
+
+    forward_cone_min = min(scan.ranges[center - 30:center + 31])
+    assert forward_cone_min > node.emergency_stop_distance, (
+        "test is only meaningful if the forward cone really is clear")
+    assert published[-1].drive.speed == 0.0, "a wall against the flank must stop the car"
+    assert node.last_decision_state == 'body_contact'
+
+
+def test_body_contact_flank_escape_is_refused_even_with_room(node):
+    """The test that actually isolates the directional gate: a single beam
+    at exactly +90deg (true flank, `_footprint_clearance`'s own 180deg
+    window still sees it) with clearance *inside* the escapable band --
+    above body_contact_escape_clearance, so the floor check alone cannot
+    explain a refusal -- and the rest of the avoidance cone wide open, so a
+    gap search would trivially succeed if one were attempted. Only the
+    directional gate itself can be why this still hard-stops."""
+    published = _capture_published(node)
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan = _clear_scan()
+    flank_boundary = node.car_width / 2.0
+    clearance = node.body_contact_escape_clearance + (
+        node.emergency_stop_clearance - node.body_contact_escape_clearance) / 2.0
+    assert 0.0 < clearance <= node.emergency_stop_clearance, (
+        'the configured floors no longer leave an escapable band; this '
+        'test proves nothing until they do')
+    scan.ranges[-1] = clearance + flank_boundary   # the beam at exactly +90deg
+    node.scan_callback(scan)
+    node.control_loop()
+    assert node.last_decision_state == 'body_contact', (
+        'a flank contact must still hard-stop unconditionally, even with '
+        'clearance the escape floor alone would have permitted -- the '
+        'directional gate must not let the car steer along whatever it is '
+        'already touching at the side')
+    assert published[-1].drive.speed == 0.0
 
 
 def test_overtake_resolves_once_ego_is_past_the_opponent(node):
@@ -168,11 +647,49 @@ def test_overtake_resolves_once_ego_is_past_the_opponent(node):
     # Opponent now out of view (behind the car, as it would be after a
     # real pass) -- resolution must use the last tracked position, not
     # wait for opponent_lost_timeout_sec to just give up.
+    #
+    # x=2.7 puts the ego 1.20 m past the dead-reckoned opponent, which
+    # clears overtake_clear_margin (1.0 m). Note the opponent's tracked
+    # arc advances with the ego here -- the same scan is replayed while
+    # the ego moves, so it keeps being re-seen 2.4 m ahead -- which is
+    # why this is 1.20 m of lead and not the 4.2 m the ego travelled.
+    # Do not pull this back toward the opponent to make the pass resolve
+    # sooner: completion measures real track lead now, and a smaller
+    # number is a car rejoining the racing line across an opponent it
+    # has not cleared. See the test below.
+    node.scan_callback(_clear_scan())
+    _set_pose(node, 2.7, -1.2, 0.0)
+    for _ in range(3):
+        node.control_loop()
+    assert node.overtake_active is False
+
+
+def test_overtake_stays_active_while_the_cars_still_overlap(node):
+    """The completion-test defect, at the node level.
+
+    track_progress_gap wraps into [0, total), so the old test
+    (gap_ahead > total - clear_margin) read as "at least 1 m past" but
+    meant "at most 1 m past" -- true the instant the ego's nose edged
+    ahead. The car then steered back onto the racing line across a
+    0.535 m opponent it had not yet passed. test_racing_math.py pins the
+    arithmetic; this pins the node actually using it.
+    """
+    scan, _center = _car_ahead_scan()
+    node.scan_callback(scan)
+    for step in range(4):
+        _set_pose(node, -1.5 + step * 0.2, -1.2, 0.0)
+        node.control_loop()
+    assert node.overtake_active is True
+
+    # 0.15 m of track lead: the nose is barely in front, and two 0.535 m
+    # bodies at 0.15 m centre-to-centre are almost entirely overlapping.
+    # The old completion test ended the pass right here.
     node.scan_callback(_clear_scan())
     _set_pose(node, 1.5, -1.2, 0.0)
     for _ in range(3):
         node.control_loop()
-    assert node.overtake_active is False
+    assert node.overtake_active is True, (
+        "resumed the racing line while still alongside the opponent")
 
 
 def test_recovers_after_a_localization_jump(node):
@@ -202,6 +719,158 @@ def test_stays_stopped_when_genuinely_lost(node):
     node.scan_callback(_clear_scan())
     _set_pose(node, 20.0, 20.0, 0.0)
     node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'off_racing_line'
+
+
+def test_off_racing_line_recovers_toward_the_nearest_point(node):
+    """INTENTIONAL BEHAVIOR CHANGE (2026-08-25): a moderate cross-track
+    error -- past max_cross_track_error but inside
+    off_racing_line_recovery_max_error -- now attempts a capped recovery
+    crawl aimed at the nearest point on the line, instead of latching a
+    permanent stop the way off_racing_line always used to. Addresses a
+    documented incident: docs/racing-autonomy.md records a real,
+    non-kidnapped overshoot that landed in exactly this 1.0-2.0m band.
+    ~1.5m off the bottom straight here, comfortably inside the (1.0, 2.0]
+    band with the default thresholds; verified directly against the real
+    node before being written into this assertion, not assumed from the
+    geometry alone.
+    """
+    published = _capture_published(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -2.7, 0.0)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line_recovery', (
+        'a moderate off-line error must attempt a capped recovery, not '
+        'latch the old unconditional stop')
+    assert 0.0 < published[-1].drive.speed <= node.off_racing_line_recovery_speed + 1e-9
+
+
+def test_off_racing_line_recovery_yields_to_the_reactive_net(node):
+    """The reactive LIDAR safety net always has the final say, over a
+    recovery attempt exactly as over an ordinary driving tick: this is
+    what 'falls through to _reactive_override like any other candidate
+    command' actually buys, and it is worth proving directly rather than
+    trusting the claim. A close, boxed-in obstacle across the whole
+    avoidance cone -- so no escape is possible either -- must override the
+    recovery command down to a full stop.
+    """
+    published = _capture_published(node)
+    scan = _clear_scan()
+    lo_idx, hi_idx = node._fov_indices(scan, node.avoidance_fov_deg)
+    for i in range(lo_idx, hi_idx + 1):
+        # Inside emergency_stop_distance, and too close for any escape gap
+        # to be found either -- see test_body_contact_still_hard_stops_
+        # when_genuinely_boxed_in for the same construction reasoning.
+        scan.ranges[i] = 0.2
+    node.scan_callback(scan)
+    _set_pose(node, -1.5, -2.7, 0.0)   # the same moderate error as above
+    node.control_loop()
+    assert node.last_decision_state in ('emergency_obstacle', 'body_contact'), (
+        'the reactive net must win over the recovery attempt, not the '
+        'other way around')
+    assert published[-1].drive.speed == 0.0
+
+
+def test_off_racing_line_recovery_gives_up_past_its_timeout(node):
+    """A real overshoot closes within a few seconds; one that never does
+    is not going to on its own, so off_racing_line_recovery_timeout_sec
+    converts a recovery that has not paid off back into the unconditional
+    stop -- the same one that would have fired immediately before this
+    session's change.
+    """
+    published = _capture_published(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -2.7, 0.0)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line_recovery'  # sanity
+
+    # Back-date the recovery-attempt clock past the timeout, as if the car
+    # had been stuck at this same error for that whole window, and feed
+    # one more identical tick -- the error itself has not improved.
+    node._off_line_recovery_since = node.get_clock().now() - Duration(
+        seconds=node.off_racing_line_recovery_timeout_sec + 0.5)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line', (
+        'recovery held past its timeout without the error clearing must '
+        'give up and hard-stop, not crawl indefinitely')
+    assert published[-1].drive.speed == 0.0
+
+
+def _exhaust_off_line_recovery(node):
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -2.7, 0.0)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line_recovery'  # sanity
+    node._off_line_recovery_since = node.get_clock().now() - Duration(
+        seconds=node.off_racing_line_recovery_timeout_sec + 0.5)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line'  # sanity: gave up
+
+
+def test_off_racing_line_give_up_latches_instead_of_re_arming(node):
+    """docs/racing-autonomy.md: past the timeout the car is lost and "the
+    stop is unconditional". The give-up used to clear its own window, so
+    the very next tick re-armed a fresh 5 s crawl -- stop, crawl, stop,
+    forever. Every later tick at the same error must stay stopped."""
+    published = _capture_published(node)
+    _exhaust_off_line_recovery(node)
+    for _ in range(20):
+        node.scan_callback(_clear_scan())
+        _set_pose(node, -1.5, -2.7, 0.0)
+        node.control_loop()
+        assert node.last_decision_state == 'off_racing_line'
+        assert published[-1].drive.speed == 0.0
+
+
+def test_off_racing_line_latch_clears_once_back_on_the_line(node):
+    """Repositioning the car (or localization correcting itself) closes the
+    error, which is exactly the condition that ends the latch."""
+    published = _capture_published(node)
+    _exhaust_off_line_recovery(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -1.2, 0.0)   # back on the bottom straight
+    node.control_loop()
+    assert published[-1].drive.speed > 0.0
+
+    # And back off the line afterwards gets a fresh, normal recovery.
+    _set_pose(node, -1.5, -2.7, 0.0)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line_recovery'
+
+
+def test_off_racing_line_latch_clears_when_lb_is_released(node):
+    """Releasing LB is the operator's acknowledgement; the next hold may try
+    one more bounded recovery. (enable_deadman flipped on after
+    construction; the fixture already remaps drive_topic.)"""
+    _exhaust_off_line_recovery(node)
+    node.enable_deadman = True
+    joy = Joy()
+    joy.buttons = [0] * (node.deadman_button + 1)
+    node.joy_callback(joy)
+    node.control_loop()
+    assert node.last_decision_state == 'deadman_released'  # sanity
+
+    joy.buttons[node.deadman_button] = 1
+    node.joy_callback(joy)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -2.7, 0.0)
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line_recovery'
+
+
+def test_off_racing_line_recovery_has_its_own_ceiling(node):
+    """Beyond off_racing_line_recovery_max_error the car is genuinely lost
+    or kidnapped, not just running wide -- always hard-stops, distinct from
+    (and a tighter bound than) test_stays_stopped_when_genuinely_lost's
+    ~28m-off pose, which proves the same property far past any ambiguity
+    about which gate is responsible. This pose sits just past the 2.0m
+    recovery ceiling specifically."""
+    published = _capture_published(node)
+    node.scan_callback(_clear_scan())
+    _set_pose(node, -1.5, -3.4, 0.0)   # ~2.2m off the bottom straight
+    node.control_loop()
+    assert node.last_decision_state == 'off_racing_line'
     assert published[-1].drive.speed == 0.0
 
 
@@ -250,11 +919,23 @@ def test_overtake_aborts_after_too_long_blind(node):
 
 @pytest.fixture
 def map_mode_node(profiled_csv):
-    """Same as `node`, but with opponent_detection_mode:=map."""
+    """Same as `node`, but with opponent_detection_mode:=map.
+
+    opponent_detection_settle_sec:=0 disables the post-activation settle
+    window (2026-08-25): every test using this fixture calls map_callback
+    and asserts on detection within milliseconds of construction, well
+    inside the real 6.0s default, and this fixture is not what the
+    settle window itself is tested through -- see
+    test_map_ray_caster_is_suppressed_immediately_after_the_profile_
+    activates and its companion below, which construct their own node
+    with the real default specifically to exercise it.
+    """
     rclpy.init(args=['--ros-args',
                      '-p', f'waypoints_file:={profiled_csv}',
                      '-p', 'enable_deadman:=false',
-                     '-p', 'opponent_detection_mode:=map'])
+                     '-p', 'drive_topic:=/test_only/drive',
+                     '-p', 'opponent_detection_mode:=map',
+                     '-p', 'opponent_detection_settle_sec:=0.0'])
     n = PurePursuitNode()
     yield n
     n.destroy_node()
@@ -326,7 +1007,7 @@ def test_map_subtraction_ignores_what_the_map_explains(map_mode_node):
     scan = _clear_scan()
     ranges = np.clip(np.nan_to_num(np.array(scan.ranges), nan=0.0, posinf=node.max_range),
                      0.0, node.max_range)
-    detection = node._detect_opponent(scan, ranges, node.car_x + 0.27, node.car_y)
+    detection = node._detect_opponent(scan, ranges, node.car_x + node.laser_offset_x, node.car_y)
     assert detection is None
 
 
@@ -339,7 +1020,7 @@ def test_map_subtraction_detects_an_unmapped_car_directly(map_mode_node):
     scan, center = _car_ahead_scan(car_range=2.0)
     ranges = np.clip(np.nan_to_num(np.array(scan.ranges), nan=0.0, posinf=node.max_range),
                      0.0, node.max_range)
-    detection = node._detect_opponent(scan, ranges, node.car_x + 0.27, node.car_y)
+    detection = node._detect_opponent(scan, ranges, node.car_x + node.laser_offset_x, node.car_y)
     assert detection is not None
     start_idx, end_idx, centroid_range, centroid_angle = detection
     assert centroid_range == pytest.approx(2.0, abs=0.05)
@@ -347,6 +1028,212 @@ def test_map_subtraction_detects_an_unmapped_car_directly(map_mode_node):
     # Indices must come back in *full-scan* space (downsampling mapped back).
     assert center - 12 <= start_idx <= center
     assert center <= end_idx <= center + 12
+
+
+# ============================================================================
+# Frozen-map ray-casting once localization hands off to the particle
+# filter (2026-08-25) -- see the parameter comment near
+# frozen_map_topic's declare_parameter for the full mechanism.
+# ============================================================================
+
+def _synthetic_map_with_blob(cx, cy, size_px=400, resolution=0.05, origin=-10.0,
+                             blob_radius_px=3):
+    """Same base arena as _synthetic_map, plus a small occupied blob
+    centered on world (cx, cy) -- for proving ray-casting distinguishes an
+    already-mapped wall feature from a genuinely unmapped (dynamic) one."""
+    from nav_msgs.msg import OccupancyGrid
+    grid = np.zeros((size_px, size_px), dtype=np.int8)
+    grid[:2, :] = 100
+    grid[-2:, :] = 100
+    grid[:, :2] = 100
+    grid[:, -2:] = 100
+    col = int((cx - origin) / resolution)
+    row = int((cy - origin) / resolution)
+    grid[row - blob_radius_px:row + blob_radius_px,
+        col - blob_radius_px:col + blob_radius_px] = 100
+    msg = OccupancyGrid()
+    msg.header.frame_id = 'map'
+    msg.info.resolution = resolution
+    msg.info.width = size_px
+    msg.info.height = size_px
+    msg.info.origin.position.x = origin
+    msg.info.origin.position.y = origin
+    msg.info.origin.orientation.w = 1.0
+    msg.data = grid.flatten().tolist()
+    return msg
+
+
+def _localization_source(source: str):
+    from std_msgs.msg import String
+    msg = String()
+    msg.data = source
+    return msg
+
+
+def test_map_ray_caster_defaults_to_the_live_map(map_mode_node):
+    """No auto_map_race_node in the graph (or an older one, before this
+    existed): localization_source never arrives, so behavior must be
+    exactly today's -- always the live map."""
+    node = map_mode_node
+    assert node.localization_source == 'slam'
+    node.map_callback(_synthetic_map())
+    assert node.map_ray_caster is node._live_map_ray_caster
+    assert node._frozen_map_ray_caster is None
+
+
+def test_frozen_map_alone_does_not_switch_anything(map_mode_node):
+    """The frozen map arriving is not itself the trigger -- only
+    localization_source actually saying 'particle_filter' switches
+    ray-casting away from the live map. Otherwise a frozen map published
+    early (map saved, particle filter not yet converged, racing still on
+    live slam_toolbox) would prematurely stop tracking the live map."""
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    node.map_callback(_synthetic_map())
+    node.frozen_map_callback(_synthetic_map_with_blob(0.5, -1.2))
+    assert node.map_ray_caster is node._live_map_ray_caster
+
+
+def test_localization_source_switches_ray_casting_to_the_frozen_map(map_mode_node):
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    node.map_callback(_synthetic_map())
+    node.frozen_map_callback(_synthetic_map_with_blob(0.5, -1.2))
+    node.localization_source_callback(_localization_source('particle_filter'))
+    assert node.map_ray_caster is node._frozen_map_ray_caster
+
+
+def test_particle_filter_source_falls_back_to_live_map_until_frozen_map_arrives(map_mode_node):
+    """A transient ordering this isn't expected to hit in practice (the
+    frozen map is latched and published well before the particle filter
+    can possibly have converged) but must still fail safe rather than
+    leave opponent detection with no map at all."""
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    node.map_callback(_synthetic_map())
+    node.localization_source_callback(_localization_source('particle_filter'))
+    assert node.map_ray_caster is node._live_map_ray_caster
+
+
+def test_localization_source_reverts_ray_casting_when_slam_resumes(map_mode_node):
+    """The particle filter's demotion path (auto_map_race_node's
+    _update_pf_handover) is documented as one-way but still re-publishes
+    'slam' -- this must be honored, not sticky on 'particle_filter'."""
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    node.map_callback(_synthetic_map())
+    node.frozen_map_callback(_synthetic_map_with_blob(0.5, -1.2))
+    node.localization_source_callback(_localization_source('particle_filter'))
+    assert node.map_ray_caster is node._frozen_map_ray_caster
+    node.localization_source_callback(_localization_source('slam'))
+    assert node.map_ray_caster is node._live_map_ray_caster
+
+
+def test_frozen_map_prevents_a_stale_live_map_from_looking_like_an_opponent(map_mode_node):
+    """The exact bug report this whole mechanism exists to fix (found
+    2026-08-25 via racerbot_sim's solo scenario, zero real opponents):
+    once localization is on the particle filter, ray-casting must use the
+    SAME map it is localized against, not whatever slam_toolbox is still
+    live-publishing -- which, by racing time, may have moved on from what
+    the particle filter (and the racing line) actually describe. A live
+    map missing a wall the frozen one has would otherwise make that real,
+    already-mapped wall look like an unmapped (dynamic) object."""
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan, _center = _car_ahead_scan(car_range=2.0)  # a close return dead ahead
+    ranges = np.clip(np.nan_to_num(np.array(scan.ranges), nan=0.0, posinf=node.max_range),
+                     0.0, node.max_range)
+
+    # Live map: plain arena, no wall at the scan's close return -- exactly
+    # what would misread that return as an unmapped object if it were used.
+    node.map_callback(_synthetic_map())
+    # Frozen map: has a real wall exactly where the scan reports one --
+    # this is what the particle filter is actually localized against.
+    node.frozen_map_callback(_synthetic_map_with_blob(0.5, -1.2))
+    node.localization_source_callback(_localization_source('particle_filter'))
+
+    detection = node._detect_opponent(
+        scan, ranges, node.car_x + node.laser_offset_x, node.car_y)
+    assert detection is None, (
+        'a wall the frozen map already knows about must not look like an opponent')
+
+
+def test_the_live_map_alone_would_have_misread_that_same_wall(map_mode_node):
+    """Companion proof for the test above: confirms the scenario really
+    does trigger a false detection when ray-casting is left on the live
+    map, i.e. this is not a scenario that happens to never fire either
+    way -- the frozen-map switch above is doing real work."""
+    pytest.importorskip('range_libc')
+    node = map_mode_node
+    _set_pose(node, -1.5, -1.2, 0.0)
+    scan, _center = _car_ahead_scan(car_range=2.0)
+    ranges = np.clip(np.nan_to_num(np.array(scan.ranges), nan=0.0, posinf=node.max_range),
+                     0.0, node.max_range)
+
+    node.map_callback(_synthetic_map())  # live map only, no frozen map, no handover
+
+    detection = node._detect_opponent(
+        scan, ranges, node.car_x + node.laser_offset_x, node.car_y)
+    assert detection is not None, (
+        'this scenario must actually trigger the bug on the live map alone, '
+        'or the test above is not proving anything')
+
+
+def _map_mode_node_with_settle(profiled_csv):
+    """Same construction as map_mode_node, but WITHOUT overriding
+    opponent_detection_settle_sec -- the real default (6.0) is what the
+    two tests below exist to exercise."""
+    rclpy.init(args=['--ros-args',
+                     '-p', f'waypoints_file:={profiled_csv}',
+                     '-p', 'enable_deadman:=false',
+                     '-p', 'drive_topic:=/test_only/drive',
+                     '-p', 'opponent_detection_mode:=map'])
+    from pure_pursuit.pure_pursuit_node import PurePursuitNode
+    return PurePursuitNode()
+
+
+def test_map_ray_caster_is_suppressed_immediately_after_the_profile_activates(profiled_csv):
+    """A second, narrower bug found the same session (2026-08-25) on the
+    same racerbot_sim run, entirely separate from the frozen/live map
+    switch above: even fully on the live map, with no particle-filter
+    handover in play at all, slam_toolbox's own map_update_interval
+    (5.0s) means /map can still be stale relative to the pose right after
+    the racing handoff -- exactly when the just-closed mapping lap's
+    loop-closure correction is heaviest. That combination produced a
+    false opponent detection and a wall hit seconds into racing. See the
+    map_ray_caster property's own docstring."""
+    pytest.importorskip('range_libc')
+    node = _map_mode_node_with_settle(profiled_csv)
+    try:
+        assert node.opponent_detection_settle_sec > 0.0, (
+            'this test needs the real default, not an overridden 0 -- '
+            'otherwise it is not testing anything')
+        node.map_callback(_synthetic_map())
+        assert node._live_map_ray_caster is not None, (
+            'the live caster itself must still build normally -- only '
+            'the property that exposes it is suppressed')
+        assert node.map_ray_caster is None, (
+            'map subtraction must stay off until the settle window passes')
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_map_ray_caster_resumes_once_the_settle_window_passes(profiled_csv):
+    pytest.importorskip('range_libc')
+    node = _map_mode_node_with_settle(profiled_csv)
+    try:
+        node.map_callback(_synthetic_map())
+        assert node.map_ray_caster is None
+
+        # Simulate the settle window having passed, without a real sleep.
+        node._profile_active_since = node._profile_active_since - Duration(
+            seconds=node.opponent_detection_settle_sec + 1.0)
+        assert node.map_ray_caster is node._live_map_ray_caster
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_opponent_progress_rate_wraps_cleanly_at_start_finish():
@@ -359,13 +1246,15 @@ def test_opponent_progress_rate_wraps_cleanly_at_start_finish():
 def test_waiting_node_loads_generated_profile_at_runtime(profiled_csv):
     rclpy.init(args=['--ros-args',
                      '-p', 'wait_for_waypoints:=true',
-                     '-p', 'enable_deadman:=false'])
+                     '-p', 'enable_deadman:=false',
+                     '-p', 'drive_topic:=/test_only/drive'])
     waiting = PurePursuitNode()
     try:
         published = _capture_published(waiting)
         waiting.control_loop()
         assert published[-1].drive.speed == 0.0
         assert waiting.profile_ready is False
+        assert waiting.last_decision_state == 'waiting_for_profile'
 
         result = waiting._parameter_callback([
             Parameter('waypoints_file', Parameter.Type.STRING, profiled_csv)])

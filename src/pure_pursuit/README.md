@@ -1,5 +1,9 @@
 # `pure_pursuit`
 
+> **Who this is for:** someone reading or changing this package's code.
+> **Read first:** [docs/architecture.md](../../docs/architecture.md) for the safety model — this package can move the car — then [docs/racing-autonomy.md](../../docs/racing-autonomy.md) for the end-to-end workflow.
+> **What's in it:** the controller code, the math, and every parameter.
+
 Map-based race controller: given a saved (x, y, speed) racing line and a live localization pose, computes steering + speed every control tick via the Pure Pursuit algorithm. This file documents the code, the math, and every parameter in detail. For the end-to-end workflow (mapping → localizing → recording a lap → generating the profile → racing) and the full derivations/diagrams, see [docs/racing-autonomy.md](../../docs/racing-autonomy.md); for running it, see [docs/operations.md](../../docs/operations.md#racing-with-the-pure-pursuit-stack).
 
 ## Files
@@ -9,6 +13,7 @@ Map-based race controller: given a saved (x, y, speed) racing line and a live lo
 | [`pure_pursuit/racing_math.py`](pure_pursuit/racing_math.py) | **All the actual math**, as plain functions with no `rclpy`/ROS imports — frame conversions, Pure Pursuit geometry, path indexing, offline velocity-profile generation, CSV I/O, gap-finding, and opponent detection/tracking geometry. Deliberately kept separate from ROS plumbing so it's readable end-to-end and unit-testable without a robot (see [`test/test_racing_math.py`](test/test_racing_math.py)). |
 | [`pure_pursuit/pure_pursuit_node.py`](pure_pursuit/pure_pursuit_node.py) | The race controller ROS node — loads a profiled CSV at startup or safely at runtime, then owns control, watchdogs, opponent tracking, and overtaking. |
 | [`pure_pursuit/auto_map_race_node.py`](pure_pursuit/auto_map_race_node.py) | Supervisor for the one-command workflow: records SLAM poses while forwarding gap-follow commands, generates/loads the profile, saves map artifacts, then hands `/drive` selection to pure pursuit. |
+| [`pure_pursuit/recorded_path.py`](pure_pursuit/recorded_path.py) | Turns a lap recorded from a *live SLAM pose* into a line the rack can actually follow: trims to one revolution, resamples, low-passes the closed loop in space, and grades the result against `tan(delta_max)/L`. No `rclpy` (see [`test/test_recorded_path.py`](test/test_recorded_path.py)). Read its module docstring before touching the automatic workflow — it has the measurements from this car's own recordings. |
 | [`pure_pursuit/waypoint_recorder_node.py`](pure_pursuit/waypoint_recorder_node.py) | Records localized `(x, y)` positions to a CSV while you drive a lap by hand. |
 | [`pure_pursuit/generate_velocity_profile.py`](pure_pursuit/generate_velocity_profile.py) | Offline CLI tool — turns a raw `(x, y)` recording into a paced `(x, y, speed)` racing line. |
 | [`config/pure_pursuit.yaml`](config/pure_pursuit.yaml), [`config/auto_map_race.yaml`](config/auto_map_race.yaml), [`config/waypoint_recorder.yaml`](config/waypoint_recorder.yaml) | Controller, automatic workflow, and recorder parameters. |
@@ -17,11 +22,20 @@ Map-based race controller: given a saved (x, y, speed) racing line and a live lo
 
 ## Interface (`pure_pursuit_node`)
 
-- **Subscribes:** `<pose_topic>` (`geometry_msgs/PoseStamped`, default `/pf/viz/inferred_pose`, from `particle_filter`), `<scan_topic>` (`sensor_msgs/LaserScan`, default `/scan`, reactive safety net), `<joy_topic>` (`sensor_msgs/Joy`, default `/joy`, deadman button)
+- **Subscribes:** `<pose_topic>` (`geometry_msgs/PoseStamped`, default `/pf/viz/inferred_pose`, from `particle_filter`), `<scan_topic>` (`sensor_msgs/LaserScan`, default `/scan`, reactive safety net), `<odom_topic>` (`nav_msgs/Odometry`, default `/odom`, measured speed for lookahead sizing only — never a stop watchdog), `<joy_topic>` (`sensor_msgs/Joy`, default `/joy`, deadman button)
 - **Publishes:** `<drive_topic>` (`ackermann_msgs/AckermannDriveStamped`, default `/drive`)
 - Runs a fixed-rate `create_timer` control loop (`control_rate_hz`, default `40Hz`) rather than driving control directly off the pose callback — see *"Why a timer, not the callback"* below.
 
 For a new course, `ros2 launch racerbot_launch auto_map_race_launch.py` performs autonomous mapping, raceline capture/profiling, and the transition to racing without a manual map save, particle-filter seed, or node restart. The normal `pure_pursuit_launch.py`, recorder, generator, and saved-map race launch remain available independently; see [operations](../../docs/operations.md#racing-with-the-pure-pursuit-stack).
+
+Those launch terminals now also explain the surrounding workflow. The automatic
+supervisor prints which child controller it selected, missing/stale commands,
+deadman stops, lap-closure measurements and transition/profile-loading gates as
+`STOP`, `FORWARD`, or `SUPERVISOR` states. The waypoint recorder prints missing
+or stale pose input plus waypoint count, path distance, sample spacing and its
+output file. `decision_log_period_sec` (supervisor), `pose_timeout_sec`, and
+`status_log_period_sec` (recorder) control the repeat/watchdog intervals; setting
+a log period to `0.0` keeps transition-only messages.
 
 ## The math (`racing_math.py`), in detail
 
@@ -92,6 +106,14 @@ Two file "shapes": raw `x,y` (written by `waypoint_recorder_node`, read by `gene
 
 `control_loop()` also wraps the entire per-tick logic in `try/except`: any unhandled exception publishes a stop command *before* re-raising, so a bug can never leave the last (possibly full-speed) command sitting on `/drive`.
 
+The launch file sends ROS logs to the terminal. Every controller state change is
+printed immediately as `STOP [reason]` or `DRIVE [reason]`; an unchanged state
+is summarized every `decision_log_period_sec` (1.0 s by default). Drive summaries
+include pose, nearest/target waypoint, cross-track error, adaptive lookahead,
+profile speed, curvature, opponent/overtake reasoning, LIDAR status or override,
+and the final command. Stop summaries include the exact failed watchdog value
+and threshold. Set the period to `0.0` for transition-only logging.
+
 ### Per-tick sequence, in order
 
 1. **Deadman watchdog** (checked first, ahead of everything else) — LB must be held on a live `/joy` stream within `joy_timeout_sec`. **Mandatory workspace policy**, not specific to this node — see [docs/architecture.md](../../docs/architecture.md#workspace-policy-the-lb-deadman-button-is-mandatory-for-every-node-that-can-move-the-car). `enable_deadman` should stay `true`.
@@ -99,11 +121,12 @@ Two file "shapes": raw `x,y` (written by `waypoint_recorder_node`, read by `gene
 3. **Localization watchdog** — no pose yet, or `pose_topic` stale beyond `pose_timeout_sec` → stop.
 4. **Find nearest waypoint** → also yields cross-track error.
 5. **Cross-track watchdog** — error beyond `max_cross_track_error` → stop (car is lost/kidnapped/localization has diverged; steering at a stale position estimate is worse than not steering at all).
-6. **Steering** — adaptive lookahead sized off the speed *at the car's current position on the line* (not the target's — lookahead should reflect how fast the car is going *right now*), then the Pure Pursuit formulas above.
-7. **Speed** — read straight from the profiled speed at the car's current nearest waypoint, clipped to `[min_speed, max_speed]` as a hard ceiling independent of whatever the CSV says.
-8. **Opponent tracking + overtake** (if `enable_opponent_overtake`) — look for another car in the scan, track its progress along the racing line, and if closing on it within `overtake_trigger_gap`, replace the steering target with one nudged sideways toward whichever side has more room, via `lateral_offset_point`. See [docs/racing-autonomy.md](../../docs/racing-autonomy.md#racing-against-opponents-detection-tracking-and-overtaking) for the full strategy, and `OpponentTracker` (in `pure_pursuit_node.py`) for the progress-rate estimator behind it.
+6. **Steering** — adaptive lookahead sized off the car's *measured* speed from `/odom` (lookahead should reflect how fast the car is going *right now*, which during braking or after a safety stop is not what the profile is asking for), falling back to the profiled speed at the current waypoint if `/odom` is missing or staler than `odom_timeout_sec`. Then the Pure Pursuit formulas above.
+7. **Speed** — the profiled speed at the car's current nearest waypoint, clipped to `[min_speed, max_speed]` as a hard ceiling independent of whatever the CSV says.
+8. **Opponent tracking + overtake** (if `enable_opponent_overtake`) — look for another car in the scan, track its progress along the racing line, and if closing on it within `overtake_trigger_gap`, replace the steering target with one nudged sideways toward whichever side has more room, via `lateral_offset_point`. That nudge is applied to a waypoint `overtake_lookahead_distance` ahead rather than the normal target, so reaching the passing line is a gentle arc the curvature ceiling in step 10 won't brake for. See [docs/racing-autonomy.md](../../docs/racing-autonomy.md#racing-against-opponents-detection-tracking-and-overtaking) for the full strategy, and `OpponentTracker` (in `pure_pursuit_node.py`) for the progress-rate estimator behind it.
 9. **Reactive LIDAR safety net** (if `enable_lidar_safety`) — a stale scan or anything inside `emergency_stop_distance` always hard-stops. Map subtraction lets the longer avoidance trigger react only to unmapped objects; before a map arrives, a shorter raw-scan fallback avoids treating ordinary walls as traffic. During a committed overtake, generic 1 m/s gap avoidance is skipped so it cannot prevent the pass, but emergency stopping remains absolute.
-10. **Publish.**
+10. **Command shaping** — *normal commands only.* The final steering is converted back to a curvature and capped by `max_lateral_accel` (the offline profile only knows the recorded line; corrections, avoidance, and overtakes are exactly the turns it never saw), then steering and speed are rate-limited by `max_steering_rate` / `max_acceleration` / `max_braking_decel` over a `dt` capped at `command_slew_max_dt`. **Any zero-speed command from steps 1, 3, 5, or 9 skips this entirely and is published immediately** — rate-limiting a stop into a nonzero command would defeat every watchdog above it.
+11. **Publish.**
 
 ## Parameters (`config/pure_pursuit.yaml`)
 
@@ -113,18 +136,25 @@ Two file "shapes": raw `x,y` (written by `waypoint_recorder_node`, read by `gene
 | `wait_for_waypoints` | `false` | Keep stopped and accept a validated runtime profile; used only by `auto_map_race_launch.py` |
 | `closed_loop` | `true` | Whether the racing line wraps around |
 | `pose_topic` | `/pf/viz/inferred_pose` | Localization input |
-| `scan_topic` / `drive_topic` | `/scan` / `/drive` | LIDAR / output |
+| `pose_frame` | `laser` | Which point on the car `pose_topic` describes. `laser` (the particle filter's pose is the LiDAR's) is converted to the rear axle with `laser_offset_x/y`; `base_link` (e.g. `/slam_pose`) is used as-is. A wrong pairing puts the car 0.26 m from where it thinks — see [localization.md](../../docs/localization.md#which-point-on-the-car-the-position-means) |
+| `scan_topic` / `odom_topic` / `drive_topic` | `/scan` / `/odom` / `/drive` | LIDAR / measured speed / output |
 | `control_rate_hz` | `40.0` | Control loop frequency |
-| `wheelbase` | `0.25` m | Must match `vesc.yaml` |
+| `decision_log_period_sec` | `1.0` s | Repeat interval for an unchanged terminal decision (`0.0` = transitions only) |
+| `wheelbase` | `0.36` m | Measured on this car 2026-08-24; must match `vesc.yaml` |
 | `min_lookahead` / `max_lookahead` / `lookahead_speed_gain` | `0.6` / `1.5` / `0.15` | Adaptive lookahead formula above |
 | `nearest_search_window` | `40` | ±waypoints searched around last tick's nearest point (`0` = search all) |
 | `max_speed` / `min_speed` | `4.0` / `0.5` m/s | Hard safety ceiling/floor, independent of the CSV |
+| `max_lateral_accel` | `2.5` m/s² | Online cornering ceiling on the *commanded* curvature — a backstop for turns the offline profile never saw |
+| `max_acceleration` / `max_braking_decel` | `6.0` / `8.0` m/s² | How fast a *normal* speed command may rise / fall. Emergency stops bypass both. See [docs/simulator.md](../../docs/simulator.md#the-adaptive-speed-work-two-values-the-traffic-scenario-pinned-down) before lowering `max_acceleration` |
+| `max_steering_rate` | `1.0` rad/s | Steering slew limit between commands |
+| `command_slew_max_dt` | `0.10` s | Longest interval one slew step may integrate over |
 | `max_steering_angle` | `0.26` rad | Derived from this car's real servo limits — see [docs/racing-autonomy.md](../../docs/racing-autonomy.md#where-026-rad-comes-from) |
+| `odom_timeout_sec` | `0.5` s | Past this, lookahead falls back to profiled speed. **Not** a stop watchdog |
 | `pose_timeout_sec` | `0.5` s | Localization watchdog |
 | `max_cross_track_error` | `1.0` m | Lost/kidnapped watchdog |
-| `enable_lidar_safety` / `safety_fov_deg` / `emergency_stop_distance` / `scan_timeout_sec` | `true` / `60.0°` / `0.4` m / `0.5` s | Master switch + hard emergency-stop tier |
+| `enable_lidar_safety` / `safety_fov_deg` / `emergency_stop_distance` / `scan_timeout_sec` | `true` / `60.0°` / `0.35` m (was `0.4`, cut 2026-08-25, untested on the car) / `0.5` s | Master switch + hard emergency-stop tier |
 | `enable_obstacle_avoidance` / `avoidance_fov_deg` | `true` / `60.0°` | Steer-around tier — requires `enable_lidar_safety` too |
-| `avoidance_trigger_distance` / `avoidance_fallback_trigger_distance` | `1.5` / `0.7` m | Map-filtered dynamic-object trigger / raw-scan fallback before a map is ready |
+| `avoidance_trigger_distance` / `avoidance_fallback_trigger_distance` | `1.5` / `0.6` m (was `0.7`, cut 2026-08-25) | Map-filtered dynamic-object trigger / raw-scan fallback before a map is ready |
 | `avoidance_min_gap_distance` / `avoidance_speed` | `1.0` m / `1.0` m/s | Driveable gap depth and generic avoidance speed |
 | `enable_opponent_overtake` | `true` | Master switch for opponent detection/tracking/overtaking — requires `enable_lidar_safety` too |
 | `opponent_min_width` / `opponent_max_width` | `0.15` / `0.7` m | Car-shaped cluster width bounds |
@@ -135,9 +165,10 @@ Two file "shapes": raw `x,y` (written by `waypoint_recorder_node`, read by `gene
 | `opponent_lost_timeout_sec` | `1.0` s | Forget the tracked opponent if not re-detected within this long |
 | `overtake_trigger_gap` / `overtake_closing_margin` | `3.0` m / `0.3` m/s | Track-distance + closing-speed thresholds to start a pass |
 | `overtake_clear_margin` / `overtake_lateral_offset` | `1.0` m / `0.35` m | Track distance to consider a pass finished / sideways nudge while passing |
+| `overtake_lookahead_distance` | `4.0` m | Arc distance ahead the passing offset is applied to, instead of the normal target. Must be ≥ `max_lookahead` — the node refuses to start otherwise |
 | `opponent_detection_mode` | `map` | Subtract map-predicted walls from live scan; falls back to geometric detection until `/map` arrives |
 | `map_topic` / `map_beam_step` / `map_subtraction_margin` | `/map` / `4` / `0.4` m | Map-subtraction input, downsampling, and dynamic residual threshold |
-| `laser_offset_x` / `laser_offset_y` | `0.27` / `0.0` m | LIDAR mounting offset from `base_link`, used to place opponent detections in the map frame |
+| `laser_offset_x` / `laser_offset_y` | `0.26` / `0.0` m | Measured LIDAR mounting offset from `base_link`, used to place opponent detections in the map frame |
 | `max_range` | `10.0` m | Range clip ceiling for every LIDAR-based check above (also fills in `inf` returns) |
 | `enable_deadman` / `joy_topic` / `deadman_button` / `joy_timeout_sec` | `true` / `/joy` / `4` / `0.5` s | **Mandatory** LB deadman button — do not disable |
 
@@ -167,6 +198,9 @@ Two file "shapes": raw `x,y` (written by `waypoint_recorder_node`, read by `gene
 | Swerves at a wall/curve like it's an opponent | Map subtraction unavailable or map/pose misaligned | Confirm `/map` and localization agree; inspect `map_subtraction_margin`; heuristic mode remains a less reliable fallback |
 | Never attempts to overtake a slower car ahead | Not closing fast enough, or opponent not detected | Lower `overtake_closing_margin`; check the opponent is within `opponent_engagement_range` and roughly car-sized in the scan |
 | Overtakes then swerves back too early/late | `overtake_clear_margin` mismatched to this car | Raise it if the pass looks unfinished when it ends, lower it if the car lingers off-line too long |
+| Slows down mid-overtake instead of completing it | Offset passing line sharper than `max_lateral_accel` allows, so the online curvature ceiling brakes for it | Raise `overtake_lookahead_distance` to spread the same offset over a gentler arc — prefer this to raising `max_lateral_accel` past real grip |
+| Stops behind traffic and never gets going again | `max_acceleration` too tight to rebuild speed between safety stops | Raise it — it caps command rise, not the motor. `3.0` measurably stalls the car in simulation |
+| Lap times worse than expected after an avoidance event | The `max_acceleration` ramp climbing back from `avoidance_speed` each time | Expected; ~0.5 s per event at `6.0`. Raise `max_acceleration` (monotonic gain, no downside found), or reduce avoidance flicker — see [docs/simulator.md](../../docs/simulator.md#current-validated-result) |
 
 ## Simulator validation
 

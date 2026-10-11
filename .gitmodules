@@ -10,3 +10,15 @@
 	path = src/transport_drivers
 	url = https://github.com/ros-drivers/transport_drivers.git
 	branch = humble
+[submodule "src/racerbot_a"]
+	path = src/racerbot_a
+	url = https://github.com/sfu-racerbot/racerbot_a.git
+	branch = main
+[submodule "src/racerbot_b"]
+	path = src/racerbot_b
+	url = https://github.com/sfu-racerbot/racerbot_b.git
+	branch = main
+[submodule "src/web_dashboards"]
+	path = src/web_dashboards
+	url = https://github.com/sfu-racerbot/web-dashboards.git
+	branch = main

@@ -14,10 +14,20 @@
   <exec_depend>particle_filter</exec_depend>
   <exec_depend>gap_follow</exec_depend>
   <exec_depend>pure_pursuit</exec_depend>
+  <exec_depend>race_diagnostics</exec_depend>
+  <!-- usb_cam_stream and web_dashboard come from the src/web_dashboards
+       submodule (sfu-racerbot/web-dashboards); this package holds car 1's
+       settings for them, config/web_dashboard_rb1.yaml. -->
   <exec_depend>usb_cam_stream</exec_depend>
   <exec_depend>web_dashboard</exec_depend>
   <exec_depend>urg_node</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <!-- slam_launch.py drives slam_toolbox's lifecycle transitions itself. -->
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

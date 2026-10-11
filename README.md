@@ -1,56 +1,61 @@
 # racerbot-ws
 
-> **Sister repository:** [Racerbot Car 2 Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace) is a related but independent workspace. Car 2 is not a submodule or automatic upstream. Only review and manually port its changes when explicitly requested, preserving Car 1 hardware and configuration differences.
-ROS2 Jazzy workspace for the team's roboracer/F1TENTH car (Jetson Orin Nano Super, JetPack 7.2, Ubuntu 24.04).
+> **Who this is for:** anyone landing on this repo — new team members included. No ROS2 or robotics experience assumed.
+> **Read first:** nothing. For a guided path into the docs, go to [docs/README.md](docs/README.md).
+> **What's in it:** what this repo is, what's in `src/`, and how to build and drive the car.
 
-Recent changes to the team's own packages are logged in [CHANGELOG.md](CHANGELOG.md) — check it after pulling to see what changed and whether anything still needs on-car validation.
+> **Sister repository:** [Racerbot Car 2 Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace) is a related but independent workspace. Car 2 is not a submodule or automatic upstream. Only review and manually port its changes when explicitly requested, preserving Car 1 hardware and configuration differences. Last full port: October 2026, from car 2's `7ec6ae6` (see [CHANGELOG.md](CHANGELOG.md)).
 
-## Documentation
-
-Start here if you're new to the car or the codebase:
-
-| Doc | What's in it |
-|---|---|
-| [docs/concepts.md](docs/concepts.md) | New to ROS2/colcon/this workspace? What `ros2 launch`/`colcon build`/`source` actually do, what every top-level folder is for, and how a package is laid out — start here if any of that is unfamiliar |
-| [docs/adding-your-own-code.md](docs/adding-your-own-code.md) | **Adding your own code? Start here.** Where new packages go, what they're required to have (depends on whether it can move the car), and how to build/run them |
-| [docs/architecture.md](docs/architecture.md) | The full node/topic graph, what talks to what, and the safety/priority model — **read this before writing any driving code** |
-| [docs/racing-autonomy.md](docs/racing-autonomy.md) | The map-based race stack (SLAM → localization → recorded racing line → curvature-paced velocity profile → pure pursuit control) — the algorithm, the math, and how to tune it |
-| [docs/writing-your-own-node.md](docs/writing-your-own-node.md) | The full contract for driving code specifically, using `gap_follow` as a worked template |
-| [docs/web-dashboard.md](docs/web-dashboard.md) | Live browser dashboard of the car's map/scan/pose — read-only, safe to run alongside anything |
-| [docs/hardware-reference.md](docs/hardware-reference.md) | VESC, LiDAR, joystick — exact addresses, ports, config values, and gotchas for this specific car |
-| [docs/usb-camera-livestream.md](docs/usb-camera-livestream.md) | Live MJPEG video stream from a USB webcam, viewable in any browser — camera picks, how it works, security note |
-| [docs/operations.md](docs/operations.md) | Step-by-step procedures: driving, mapping, localizing, running autonomy, shutting down |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Real issues hit during bring-up and how they were diagnosed |
-| [docs/git-setup.md](docs/git-setup.md) | How this repo is versioned: `src/` git submodules, cloning/updating them, and checking upstream f1tenth repos for updates |
-
-This file stays a short quick-start; the docs above are the full reference.
+ROS2 Jazzy workspace for SFU Racerbot's **car 1** roboracer/F1TENTH car (Jetson Orin Nano Super, JetPack 7.2, Ubuntu 24.04).
 
 ## Hardware summary (see [docs/hardware-reference.md](docs/hardware-reference.md) for exact values)
 - **VESC** motor controller — USB serial, exposed as a stable `/dev/sensors/vesc` symlink (udev rule at `/etc/udev/rules.d/99-vesc.rules`).
-- **Hokuyo UST-30LX** LiDAR — **USB serial** (not Ethernet), exposed as a stable `/dev/sensors/hokuyo` symlink (udev rule at `/etc/udev/rules.d/99-hokuyo.rules`).
-- **UVC USB webcam** — `/dev/video0`, configured by `src/usb_cam_stream/config/usb_cam_stream.yaml`; this car does not have a RealSense camera.
-- **Logitech F710** joystick — LB is the teleop deadman switch (hold to drive manually).
+- **Hokuyo UST-30LX** LiDAR — **USB serial** (not Ethernet, unlike car 2), exposed as a stable `/dev/sensors/hokuyo` symlink (udev rule at `/etc/udev/rules.d/99-hokuyo.rules`).
+- **UVC USB webcam** — `/dev/video0`, streamed by `ros2 launch racerbot_launch webcam_launch.py`; this car does **not** have a RealSense camera.
+- **Logitech F710** joystick — LB is the deadman switch (hold to drive).
+
+Recent changes to the team's own packages are logged in [CHANGELOG.md](CHANGELOG.md) — check it after pulling to see what changed and whether anything still needs on-car validation.
+
+## Code provenance
+
+The team's actively developed codebases live in the [`racerbot_a`](src/racerbot_a) and [`racerbot_b`](src/racerbot_b) git submodules. The workspace-specific integration code and documentation outside those two team repositories were produced through vibe coding (AI-assisted development). Third-party dependencies are separately identified as upstream submodules or vendored upstream code below.
+
+## Documentation
+
+**New here? Start with [docs/README.md](docs/README.md)** — it has a numbered reading order for newcomers and lists every doc grouped by what you're trying to do.
+
+The three you'll want first:
+
+| Doc | What's in it |
+|---|---|
+| [docs/glossary.md](docs/glossary.md) | Every term the docs use — node, topic, mux, deadman, SLAM — defined for someone new to robotics |
+| [docs/concepts.md](docs/concepts.md) | What `ros2 launch`, `colcon build` and `source` actually do, and what each folder is for |
+| [docs/architecture.md](docs/architecture.md) | The node/topic graph and the safety model — **read before writing any driving code** |
+
+Full index, including the deep-dive and reference docs: **[docs/README.md](docs/README.md)**.
 
 ## Layout (`src/`)
 | Package | Source | Purpose |
 |---|---|---|
+| `racerbot_a` | [team git submodule](https://github.com/sfu-racerbot/racerbot_a), `main` | Racerbot Team A's actively developed codebase; its ROS2 packages are under `racerbot_a/src/` |
+| `racerbot_b` | [team git submodule](https://github.com/sfu-racerbot/racerbot_b), `main` | Racerbot Team B's actively developed codebase, currently containing `gap_follow_node` |
 | `f1tenth_system` (+ `ackermann_mux`, `teleop_tools`, `vesc`) | vendored (plain tracked files, **not** a git submodule — see [docs/git-setup.md](docs/git-setup.md)) | VESC driver, `urg_node` (Hokuyo), joystick teleop, command muxing |
 | `transport_drivers` | git submodule, `humble` | serial transport dependency for `vesc` |
-| `particle_filter` (+ `range_libc`) | git submodules, `foxy-devel`/`humble-devel` | Monte Carlo localization against a saved map |
+| `particle_filter` (+ `range_libc`) | git submodules, `humble-devel` | Monte Carlo localization against a saved map |
 | `gap_follow` | local package | baseline reactive autonomy — follow-the-gap on `/scan` → `/drive`, no map needed. Code/algorithm detail: [src/gap_follow/README.md](src/gap_follow/README.md) |
-| `pure_pursuit` | local package | map-based race controller — pure pursuit over a curvature-paced recorded racing line, plus the tools to record and pace one. Pipeline/workflow: [docs/racing-autonomy.md](docs/racing-autonomy.md) |
-| `web_dashboard` | local package | live browser dashboard of the map/LIDAR/pose, streamed over a WebSocket — read-only, not an autonomy node, safe to run alongside anything else. Workflow: [docs/web-dashboard.md](docs/web-dashboard.md) |
-| `racerbot_launch` | local package | launch glue not owned by any single driver repo (currently: SLAM, autonomous mapping, automated map-to-race, and race-day localization+pure_pursuit) |
-| `usb_cam_stream` | local package | live MJPEG video stream from a USB webcam, served over plain HTTP for viewing in any browser. Detail: [docs/usb-camera-livestream.md](docs/usb-camera-livestream.md) |
+| `pure_pursuit` | local package | map-based race controller — pure pursuit over a curvature-paced recorded racing line, plus the tools to record and pace one. Pipeline/workflow: [docs/racing-autonomy.md](docs/racing-autonomy.md); code/math detail: [src/pure_pursuit/README.md](src/pure_pursuit/README.md) |
+| `race_diagnostics` | local package | read-only run recorder and post-run analyzer: pipeline health, localization lag, watchdog stops, rosbag. Not an autonomy node, safe alongside anything. Workflow: [docs/run-diagnostics.md](docs/run-diagnostics.md); code detail: [src/race_diagnostics/README.md](src/race_diagnostics/README.md) |
+| `racerbot_doctor` | local package | one-command, read-only self-check: for the VESC, LiDAR, gamepad and camera it names the first broken layer (not plugged in / kernel driver / permissions / ROS driver / data rate), plus battery voltage and bringup health. Run `ros2 run racerbot_doctor doctor`; guide: [src/racerbot_doctor/README.md](src/racerbot_doctor/README.md) |
+| `drive_intent` | local package | shared schema and trajectory prediction for `/drive_intent` — what a driving algorithm is trying to do, and why. Pure Python (no `rclpy`), plus a single-header C++ port for teammates' codebases. Detail: [docs/drive-intent.md](docs/drive-intent.md) |
+| `web_dashboard` | submodule `src/web_dashboards` ([sfu-racerbot/web-dashboards](https://github.com/sfu-racerbot/web-dashboards)) | the car-side server of the browser dashboard at https://dashboard.sfuracerbot.ca: map/LIDAR/pose over a WebSocket, plus panels for tuning the driving nodes' parameters live, measuring distances on the map, and clearing or deleting a saved map — not an autonomy node, publishes to no topic, safe to run alongside anything else. Car 1's settings: `racerbot_launch/config/web_dashboard_rb1.yaml`. Workflow: [docs/web-dashboard.md](docs/web-dashboard.md); code detail: [src/web_dashboards/car/ros/web_dashboard/README.md](src/web_dashboards/car/ros/web_dashboard/README.md) |
+| `racerbot_launch` | local package | launch glue not owned by any single driver repo (SLAM, one-command autonomous map→race, saved-map race-day localization, the webcam stream, and car 1's dashboard settings) |
+| `racerbot_sim` | local package | F1TENTH Gym behind the car's own topics: stands in for the LiDAR, VESC and joystick so the real driving stack runs unchanged above it. Refuses to publish while the real drivers are on the graph. Detail: [docs/ros-simulator.md](docs/ros-simulator.md) |
+| `usb_cam_stream` | submodule `src/web_dashboards` | live MJPEG video stream of a camera (car 1: the USB webcam on `/dev/video0`), for the dashboard's camera inset or any browser. Detail: [docs/usb-camera-livestream.md](docs/usb-camera-livestream.md), [src/web_dashboards/car/ros/usb_cam_stream/README.md](src/web_dashboards/car/ros/usb_cam_stream/README.md) |
 
 `slam_toolbox` is installed system-wide via apt (`ros-jazzy-slam-toolbox`), not vendored in `src/`.
 
-## One-time setup (already done on this machine)
-- ROS2 Jazzy + dev tools installed, `rosdep` initialized.
-- `racerbotcar-1` and `racermember1` added to the `dialout` group (VESC + Hokuyo USB serial access) and `input` group (joystick device access). **Group membership only applies to sessions started after it was added** — open a fresh terminal if you hit a permission error on `/dev/sensors/vesc`, `/dev/sensors/hokuyo`, or `/dev/input/js0`.
-- `racermember1` has ACL access scoped to this workspace only — see `getfacl racerbot-ws`.
+## Quick start
 
-## Build
 ```bash
 source /opt/ros/jazzy/setup.bash
 cd ~/racerbot-ws
@@ -58,51 +63,27 @@ rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
 ```
-On the Orin Nano's 8GB RAM, prefer `colcon build --symlink-install --parallel-workers 1` if you hit OOM during a full rebuild.
+On the Orin Nano's 8GB RAM, prefer `colcon build --symlink-install --parallel-workers 1` if you hit OOM during a full rebuild. Every new shell needs both `source` lines above, in that order, before any `ros2`/`colcon` command.
 
-Every new shell needs both `source /opt/ros/jazzy/setup.bash` and `source install/setup.bash` (in that order) before running any `ros2`/`colcon` command.
+Drive it:
+```bash
+ros2 launch f1tenth_stack bringup_launch.py
+# in another terminal:
+ros2 launch f1tenth_stack teleop_launch.py
+```
+Hold **LB** on the F710 (must be in **XInput mode**), left stick = speed, right stick = steering. The car will not move on its own from the first command alone — see [docs/architecture.md](docs/architecture.md#the-node-graph) for why driving needs a second control-layer launch on top of the shared bringup.
 
-## Running
-Use separate terminals so each layer can be killed/restarted independently.
+For mapping, localization, running `gap_follow` or your own autonomy code, and every other workflow: see [docs/operations.md](docs/operations.md).
 
-1. **Drivers** (start here, every time — this alone never moves the car: it's the shared foundation layer with no control layer of its own, see [docs/architecture.md](docs/architecture.md#the-node-graph)):
-   ```bash
-   ros2 launch f1tenth_stack bringup_launch.py
-   ```
-
-2. **Manual teleop**, in a second terminal, on top of the drivers:
-   ```bash
-   ros2 launch f1tenth_stack teleop_launch.py
-   ```
-   Hold **LB** on the F710 (must be in **XInput mode**) to drive manually.
-
-3. **Mapping** (drive the car around the track manually while this runs):
-   ```bash
-   ros2 launch racerbot_launch slam_launch.py
-   ```
-   Save the result: `ros2 run nav2_map_server map_saver_cli -f <map_name>`
-
-4. **Localization** against a saved map:
-   - Copy the map files you saved from step 3 (`<map_name>.yaml` + `.pgm`) into `src/particle_filter/maps/`.
-   - Set `map_server.ros__parameters.map` in `src/particle_filter/config/localize.yaml` to `<map_name>` (no extension).
-   - Rebuild (`colcon build --symlink-install --packages-select particle_filter`) so the map gets installed into the share directory.
-   - ```bash
-     ros2 launch particle_filter localize_launch.py
-     ```
-   - In RViz, use "2D Pose Estimate" to seed the particle filter's initial guess.
-
-5. **Baseline autonomous driving** (reactive, no map/localization required — run this instead of `teleop_launch.py`, not alongside it, or its always-on `/teleop` will mask `/drive` at the mux):
-   ```bash
-   ros2 launch gap_follow gap_follow_launch.py
-   ```
-   Tunables live in `src/gap_follow/config/gap_follow.yaml` (speed limits, steering limits, safety bubble, emergency stop distance). Defaults are deliberately conservative — **the first run on a new car should be with the wheels off the ground.**
-
-For race-day localization+pure_pursuit, autonomous mapping, and every other workflow: see [docs/operations.md](docs/operations.md).
+## One-time setup (already done on this machine)
+- ROS2 Jazzy + dev tools installed, `rosdep` initialized.
+- `racerbotcar-1` and `racermember1` added to the `dialout` group (VESC + Hokuyo USB serial access) and `input` group (joystick device access). **Group membership only applies to sessions started after it was added** — open a fresh terminal if you hit a permission error on `/dev/sensors/vesc`, `/dev/sensors/hokuyo`, or `/dev/input/js0`.
+- `racermember1` has ACL access scoped to this workspace only — see `getfacl racerbot-ws`.
 
 ## Notes
 - **Current safety policy:** every autonomy node in this workspace (`gap_follow`, `pure_pursuit`, and any new one) requires the driver to hold **LB** on the physical controller for the car to move, on top of the usual `ackermann_mux` arbitration — see [docs/architecture.md](docs/architecture.md#workspace-policy-the-lb-deadman-button-is-mandatory-for-every-node-that-can-move-the-car). This stays in force until the team explicitly confirms the car's behavior is trustworthy enough to relax it — don't set any node's `enable_deadman` parameter to `false` unilaterally.
-- The official `f1tenth`/roboracer driver repos don't have a `jazzy` branch yet; everything here is the `humble-devel`/`humble`/`foxy-devel` source built against ROS2 Jazzy. If a future `rosdep update`/dependency bump breaks the build, check each package's upstream (submodule or vendored — see [docs/git-setup.md](docs/git-setup.md)) for a newer ROS2-distro branch before patching locally.
+- The official `f1tenth`/roboracer driver repos don't have a `jazzy` branch yet; everything here is the `humble-devel`/`humble` source built against ROS2 Jazzy. If a future `rosdep update`/dependency bump breaks the build, check each package's upstream (submodule or vendored — see [docs/git-setup.md](docs/git-setup.md)) for a newer ROS2-distro branch before patching locally.
+- F1TENTH Gym is installed reproducibly under the ignored `.sim/` directory by `tools/f1tenth_sim/setup.sh`; see [docs/simulator.md](docs/simulator.md). It does not modify the system Python environment. That checkout is kept pristine upstream code — our own fidelity work lives beside it in `tools/f1tenth_sim/sim_fidelity/` and layers on top, so nothing is ever forked or pushed upstream ([tools/f1tenth_sim/README.md](tools/f1tenth_sim/README.md)).
 - `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml`'s `human_control` profile was patched locally: upstream ships `drive-steering_angle` mapped to `axis: 2` (this F710's left trigger, not the right stick). Changed to `axis: 3`. `f1tenth_system` is vendored (not a submodule) specifically so this fix — and the LiDAR serial-port fix below — could be committed; see [docs/git-setup.md](docs/git-setup.md) before pulling in any upstream changes to it.
-- This car's LiDAR is a **Hokuyo UST-30LX over USB serial**, not the Ethernet UST-10LX some other team workspaces use — `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` was patched locally accordingly (`serial_port`, not `ip_address`/`ip_port`). See [docs/hardware-reference.md](docs/hardware-reference.md) before assuming otherwise.
-- Simulator (`f1tenth_gym_ros`) is intentionally not installed here — sim testing happens on a separate machine.
-
+- This car's LiDAR is a **Hokuyo UST-30LX over USB serial**, not car 2's Ethernet UST-10LX — `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` was patched locally accordingly (`serial_port`, not `ip_address`/`ip_port`). See [docs/hardware-reference.md](docs/hardware-reference.md) before assuming otherwise.
+- `racerbot_doctor`'s LiDAR and camera checks still describe **car 2's** hardware (Ethernet LiDAR, RealSense) and will report those layers as failing on car 1 until they are adapted — the VESC, gamepad, battery and bringup checks apply as-is. See [src/racerbot_doctor/README.md](src/racerbot_doctor/README.md).

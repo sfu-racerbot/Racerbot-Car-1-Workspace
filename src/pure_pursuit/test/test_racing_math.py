@@ -107,6 +107,22 @@ def test_adaptive_lookahead_clips_to_bounds():
     assert mid == pytest.approx(0.35 * 2.0 + 0.6)
 
 
+def test_online_curvature_speed_limit():
+    assert racing_math.curvature_speed_limit(0.0, 2.5, 4.0) == pytest.approx(4.0)
+    assert racing_math.curvature_speed_limit(1.0, 2.5, 4.0) == pytest.approx(
+        math.sqrt(2.5))
+    assert racing_math.curvature_speed_limit(-4.0, 1.0, 4.0) == pytest.approx(0.5)
+
+
+def test_command_slew_rate_limit():
+    assert racing_math.slew_rate_limit(
+        4.0, 1.0, 0.1, 3.0, 8.0) == pytest.approx(1.3)
+    assert racing_math.slew_rate_limit(
+        0.0, 1.0, 0.1, 3.0, 8.0) == pytest.approx(0.2)
+    assert racing_math.slew_rate_limit(
+        -0.5, 0.0, 0.1, 1.5) == pytest.approx(-0.15)
+
+
 # ============================================================================
 # Path indexing
 # ============================================================================
@@ -235,11 +251,23 @@ def test_velocity_profile_never_exceeds_braking_capability():
         a_lat_max=8.0, a_accel_max=3.0, a_brake_max=a_brake_max, closed=True)
 
     n = len(speed)
+    braking_segments = 0
     for i in range(n):
         j = (i + 1) % n
         if speed[i] > speed[j] + 1e-9:  # a braking segment: i is faster than i+1
+            braking_segments += 1
+            # oracle: closed form -- v_i^2 <= v_j^2 + 2*a*s is constant-acceleration
+            # kinematics, recomputed here rather than copied from a run.
             allowed = math.sqrt(speed[j] ** 2 + 2.0 * a_brake_max * seg_len[i]) + 1e-6
             assert speed[i] <= allowed
+
+    # oracle: invariant -- the bound above is only checked on segments where the
+    # car is slowing, so a profile with no braking at all would satisfy it
+    # vacuously. A stadium has two corners, so any correct profile brakes on at
+    # least one segment approaching each of them. (Measured here: 9 of 120.)
+    assert braking_segments >= 2, (
+        f'only {braking_segments} braking segments, so the braking bound above '
+        f'went essentially unchecked -- is the profile constant?')
 
 
 def test_velocity_profile_respects_v_max_and_v_min():
@@ -282,6 +310,43 @@ def test_load_profiled_csv_rejects_raw_file(tmp_path):
     racing_math.save_xy_csv(path, xy)
     with pytest.raises(ValueError):
         racing_math.load_profiled_csv(path)
+
+
+def _write_rows(path, rows):
+    with open(path, 'w') as f:
+        f.write('x,y,speed\n')
+        for row in rows:
+            f.write(row + '\n')
+
+
+@pytest.mark.parametrize('bad_row, match', [
+    ('nan,0.0,1.0', 'non-finite'),
+    ('0.0,inf,1.0', 'non-finite'),
+    ('0.0,0.0,nan', 'non-finite'),
+    ('0.0,0.0,-inf', 'non-finite'),
+    ('0.0,0.0,-0.5', 'negative speed'),
+    ('0.0,0.0', 'expected 3 columns'),
+])
+def test_load_profiled_csv_refuses_values_that_must_never_reach_drive(
+        tmp_path, bad_row, match):
+    """Audit M1: float() parses 'nan'/'inf'/'-0.5' without complaint, and the
+    node only checked point count and total length -- a NaN speed or a
+    negative one was loaded as a valid profile. Each bad row sits between
+    good ones so the check cannot pass by looking at the ends only."""
+    path = str(tmp_path / 'bad.csv')
+    _write_rows(path, ['0.0,0.0,1.0', '1.0,0.0,1.0', bad_row, '2.0,1.0,1.0'])
+    with pytest.raises(ValueError, match=match):
+        racing_math.load_profiled_csv(path)
+
+
+def test_load_profiled_csv_accepts_a_zero_speed_point(tmp_path):
+    """The boundary: 0 is a legitimate profiled speed (a stop point), only
+    strictly negative is refused."""
+    path = str(tmp_path / 'zero.csv')
+    _write_rows(path, ['0.0,0.0,0.0', '1.0,0.0,1.0', '2.0,1.0,1.5'])
+    xy, speed = racing_math.load_profiled_csv(path)
+    assert speed.tolist() == [0.0, 1.0, 1.5]
+    assert xy.shape == (3, 2)
 
 
 # ============================================================================
@@ -385,6 +450,130 @@ def test_track_progress_gap_wraps_around_finish_line():
     # start/finish line -- "ahead" should wrap around, not go negative.
     gap = racing_math.track_progress_gap(ego_arc_length=95.0, other_arc_length=5.0, total_length=100.0)
     assert gap == pytest.approx(10.0)
+
+
+def test_track_lead_distance_is_negative_while_the_opponent_leads():
+    lead = racing_math.track_lead_distance(
+        ego_arc_length=10.0, other_arc_length=13.0, total_length=100.0)
+    assert lead == pytest.approx(-3.0)
+
+
+def test_track_lead_distance_is_positive_once_the_ego_is_past():
+    lead = racing_math.track_lead_distance(
+        ego_arc_length=13.0, other_arc_length=10.0, total_length=100.0)
+    assert lead == pytest.approx(3.0)
+
+
+def test_track_lead_distance_wraps_around_the_finish_line():
+    # Ego just past the line, opponent just short of it: the ego leads by
+    # 4 m, not by 96 m the long way round.
+    lead = racing_math.track_lead_distance(
+        ego_arc_length=2.0, other_arc_length=98.0, total_length=100.0)
+    assert lead == pytest.approx(4.0)
+
+
+def test_overtake_is_not_complete_while_the_cars_are_still_alongside():
+    """The bug this function exists to prevent.
+
+    With a 0.535 m car and a 1.0 m clear margin, an ego 0.2 m past the
+    opponent is still overlapping it. The wrapped gap reads 99.8 -- which
+    satisfies the natural-looking `gap > total - clear_margin` test and
+    ended the pass early, cutting the car back into the opponent.
+    """
+    clear_margin, total = 1.0, 100.0
+    ego, opponent = 50.2, 50.0
+
+    misleading_gap = racing_math.track_progress_gap(ego, opponent, total)
+    assert misleading_gap > total - clear_margin  # the old, wrong predicate
+
+    lead = racing_math.track_lead_distance(ego, opponent, total)
+    assert lead == pytest.approx(0.2)
+    assert lead < clear_margin  # still alongside: stay on the passing line
+
+    # A metre further on the pass really is finished.
+    assert racing_math.track_lead_distance(51.0, opponent, total) >= clear_margin
+
+
+def test_approaching_an_opponent_never_reads_as_a_finished_pass():
+    # Guards the naive fix: flipping the comparison would make every
+    # approach look complete, because the opponent 3 m ahead wraps to 97.
+    total, clear_margin = 100.0, 1.0
+    assert racing_math.track_lead_distance(10.0, 13.0, total) < clear_margin
+
+
+def _corridor_scan(left_m, right_m, num_beams=271):
+    """Ranges for a car centred in a straight corridor, +/-135 deg sweep."""
+    angle_min, angle_increment = -math.radians(135.0), math.radians(1.0)
+    ranges = []
+    for i in range(num_beams):
+        a = angle_min + i * angle_increment
+        wall = left_m if a > 0 else right_m
+        # Perpendicular distance d read at angle theta off the perpendicular.
+        off_perpendicular = abs(abs(a) - math.pi / 2.0)
+        if off_perpendicular >= math.radians(89.0):
+            ranges.append(20.0)
+        else:
+            ranges.append(wall / math.cos(off_perpendicular))
+    return np.array(ranges)
+
+
+def test_side_clearance_recovers_the_perpendicular_wall_distance():
+    scan = _corridor_scan(left_m=1.2, right_m=0.4)
+    left = racing_math.side_clearance(
+        scan, -math.radians(135.0), math.radians(1.0), side=1,
+        half_span=math.radians(30.0), range_min=0.05, range_max=25.0)
+    right = racing_math.side_clearance(
+        scan, -math.radians(135.0), math.radians(1.0), side=-1,
+        half_span=math.radians(30.0), range_min=0.05, range_max=25.0)
+    assert left == pytest.approx(1.2, abs=1e-6)
+    assert right == pytest.approx(0.4, abs=1e-6)
+
+
+def test_side_clearance_reports_infinity_when_nothing_is_in_range():
+    # Everything at range_max means "no return", not "a wall 25 m away".
+    scan = np.full(271, 25.0)
+    clearance = racing_math.side_clearance(
+        scan, -math.radians(135.0), math.radians(1.0), side=1,
+        half_span=math.radians(30.0), range_min=0.05, range_max=25.0)
+    assert clearance == math.inf
+
+
+def test_overtake_declined_when_the_chosen_side_is_a_wall():
+    """The defect this guards.
+
+    pick_pass_side always names a side, even one with no room. Passing needs
+    the 0.35 m offset plus half a 0.31 m car plus margin -- about 0.7 m. A
+    0.4 m gap is not a passing place.
+    """
+    scan = _corridor_scan(left_m=1.2, right_m=0.4)
+    common = dict(angle_min=-math.radians(135.0),
+                  angle_increment=math.radians(1.0),
+                  required_clearance=0.70, half_span=math.radians(30.0),
+                  range_min=0.05, range_max=25.0)
+    assert racing_math.overtake_side_has_room(scan, side=1, **common)
+    assert not racing_math.overtake_side_has_room(scan, side=-1, **common)
+
+
+def test_overtake_allowed_when_no_wall_is_seen_at_all():
+    # An open side is the easy case, not a missing measurement.
+    scan = np.full(271, 25.0)
+    assert racing_math.overtake_side_has_room(
+        scan, angle_min=-math.radians(135.0),
+        angle_increment=math.radians(1.0), side=1,
+        required_clearance=0.70, half_span=math.radians(30.0),
+        range_min=0.05, range_max=25.0)
+
+
+def test_braking_speed_limit_allows_stopping_short():
+    # v^2 = 2*a*(d - reserve): 2 m of usable room at 8 m/s^2 gives 5.66 m/s,
+    # so a 4 m/s ceiling is untouched; 0.5 m of room is not.
+    assert racing_math.braking_speed_limit(2.4, 0.4, 8.0, 4.0) == pytest.approx(4.0)
+    assert racing_math.braking_speed_limit(0.9, 0.4, 8.0, 4.0) == pytest.approx(
+        math.sqrt(2.0 * 8.0 * 0.5))
+
+
+def test_braking_speed_limit_leaves_top_speed_alone_when_nothing_is_seen():
+    assert racing_math.braking_speed_limit(math.inf, 0.4, 8.0, 4.0) == 4.0
 
 
 def test_lateral_offset_point_moves_left_on_a_straight_segment():
@@ -504,11 +693,21 @@ def test_friction_ellipse_profile_still_respects_braking_capability():
         a_lat_max=8.0, a_accel_max=3.0, a_brake_max=a_brake_max,
         closed=True, friction_ellipse=True)
     n = len(speed)
+    braking_segments = 0
     for i in range(n):
         j = (i + 1) % n
         if speed[i] > speed[j] + 1e-9:
+            braking_segments += 1
+            # oracle: closed form -- same constant-acceleration bound as the
+            # uncoupled case; the ellipse may only ever brake harder, not less.
             allowed = math.sqrt(speed[j] ** 2 + 2.0 * a_brake_max * seg_len[i]) + 1e-6
             assert speed[i] <= allowed
+
+    # oracle: invariant -- see the uncoupled test: without this the loop above
+    # checks nothing at all against a constant profile.
+    assert braking_segments >= 2, (
+        f'only {braking_segments} braking segments, so the braking bound above '
+        f'went essentially unchecked -- is the profile constant?')
 
 
 def test_friction_ellipse_changes_nothing_on_a_constant_curvature_loop():
@@ -620,3 +819,56 @@ def test_detect_dynamic_cluster_returns_the_closest_of_two_and_splits_on_depth()
     start, end, centroid_range, _ = result
     assert (start, end) == (48, 58)
     assert centroid_range == pytest.approx(1.5)
+
+
+# --- LiDAR pose <-> rear-axle (base_link) pose --------------------------------
+# particle_filter ray-casts each particle's scan from the particle's own pose
+# (particle_filter.py sensor_model: queries = proposal_dist), so its
+# /pf/viz/inferred_pose is the LiDAR's pose, not base_link's. The LiDAR is
+# laser_offset_x = 0.26 m ahead of the rear axle (docs/hardware-reference.md).
+# Oracle for every value below: the rigid-body offset, recomputed in closed
+# form -- base = laser - R(yaw) @ offset, yaw unchanged.
+
+def test_laser_pose_to_base_link_heading_east_moves_back_along_x():
+    x, y, yaw = racing_math.laser_pose_to_base_link(5.0, 2.0, 0.0, 0.26, 0.0)
+    assert x == pytest.approx(5.0 - 0.26, abs=1e-12)  # m
+    assert y == pytest.approx(2.0, abs=1e-12)          # m
+    assert yaw == 0.0
+
+
+def test_laser_pose_to_base_link_heading_north_moves_back_along_y():
+    # Catches a cos/sin swap: facing +y, the rear axle is 0.26 m in -y.
+    x, y, yaw = racing_math.laser_pose_to_base_link(5.0, 2.0, math.pi / 2, 0.26, 0.0)
+    assert x == pytest.approx(5.0, abs=1e-12)          # m
+    assert y == pytest.approx(2.0 - 0.26, abs=1e-12)   # m
+    assert yaw == pytest.approx(math.pi / 2, abs=1e-15)
+
+
+def test_laser_pose_to_base_link_general_offset_matches_closed_form():
+    yaw, ox, oy = math.radians(30.0), 0.26, 0.05
+    x, y, out_yaw = racing_math.laser_pose_to_base_link(1.0, -1.0, yaw, ox, oy)
+    assert x == pytest.approx(1.0 - (ox * math.cos(yaw) - oy * math.sin(yaw)), abs=1e-12)
+    assert y == pytest.approx(-1.0 - (ox * math.sin(yaw) + oy * math.cos(yaw)), abs=1e-12)
+    assert out_yaw == yaw
+
+
+def test_base_link_pose_to_laser_is_the_exact_inverse():
+    rng = np.random.default_rng(7)
+    for _ in range(50):
+        x, y = rng.uniform(-20.0, 20.0, size=2)
+        yaw = rng.uniform(-math.pi, math.pi)
+        ox, oy = rng.uniform(-0.5, 0.5, size=2)
+        lx, ly, lyaw = racing_math.base_link_pose_to_laser(x, y, yaw, ox, oy)
+        # The LiDAR really is ahead by the offset, not just "some" inverse.
+        assert math.hypot(lx - x, ly - y) == pytest.approx(math.hypot(ox, oy), abs=1e-12)
+        bx, by, byaw = racing_math.laser_pose_to_base_link(lx, ly, lyaw, ox, oy)
+        assert (bx, by, byaw) == pytest.approx((x, y, yaw), abs=1e-12)
+
+
+def test_base_link_pose_to_laser_heading_north_moves_forward_along_y():
+    x, y, _ = racing_math.base_link_pose_to_laser(0.0, 0.0, math.pi / 2, 0.26, 0.0)
+    assert (x, y) == pytest.approx((0.0, 0.26), abs=1e-12)  # m
+
+
+def test_zero_offset_is_the_identity():
+    assert racing_math.laser_pose_to_base_link(3.0, 4.0, 1.0, 0.0, 0.0) == (3.0, 4.0, 1.0)

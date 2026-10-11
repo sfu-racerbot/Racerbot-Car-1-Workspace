@@ -1,26 +1,334 @@
+# ============================================================================
+# WANT THE CAR FASTER? Edit THIS file, not gap_follow_node.py.
+#
+# gap_follow_launch.py loads this file, and every value here overrides the
+# declare_parameter() default in the .py -- so changing a number in the .py
+# does nothing on the car. Restart the launch after editing (no rebuild
+# needed with --symlink-install).
+#
+# The speed the car actually drives is the LOWEST of several caps, so raise
+# the one that is binding. In rough order of how often each one binds:
+#
+#   corner_speed        cap whenever the car is in the corner fallback gap
+#                       (on the 2026-08-06 run: ~80% of all driving ticks)
+#   corner_speed_wide   the same cap on a corner sensed as wide
+#   max_lateral_accel   curvature cap: v <= sqrt(max_lateral_accel / curvature).
+#                       At this car's tightest corners (~0.82/m) 1.0 gives
+#                       ~1.1 m/s, so above that raising corner_speed alone
+#                       changes nothing in those corners. A grip limit --
+#                       raise in small steps.
+#   max_acceleration    SAFETY-CRITICAL: the braking the car assumes it has
+#                       for the clearance it sees. Raising it lets the car
+#                       drive faster than it can stop. Do not raise to go
+#                       faster.
+#   max_speed           cap on open straights
+#
+# Rule the node checks at startup, or it exits immediately:
+#     corner_speed <= corner_speed_wide <= max_speed
+# Mapping launches that cap max_speed scale the other two for you
+# (gap_follow/speed_overrides.py).
+#
+# The live-tuning panel on the web dashboard can change corner_speed,
+# max_speed and several others while the car runs; copy what works back
+# here, since live changes are lost on restart.
+#
+# Any speed increase: test wheels-off first, then low speed in open space
+# (docs/writing-your-own-node.md#testing-before-its-on-wheels).
+# ============================================================================
 gap_follow_node:
   ros__parameters:
     scan_topic: /scan
     drive_topic: /drive
+    odom_topic: /odom
     max_range: 10.0
     forward_fov_deg: 180.0
     # Deliberately higher than the code default (1.0): with this car's top
     # speed and this room's clutter, an opening has to be at least this
     # deep before it's worth steering into.
     min_gap_distance: 2.0
-    max_speed: 2.0
-    min_speed: 0.8
-    max_steering_angle: 0.4189
-    emergency_stop_distance: 0.15
-    # --- Physical clearance model (replaces the old fixed-angle
-    # bubble_angle_deg: a fixed 20 degrees was far too little clearance up
-    # close and wastefully much far away). Every obstacle edge (disparity)
-    # is extended, and the closest-obstacle bubble sized, by whatever
-    # (car_width/2 + safety_margin) subtends at that obstacle's actual
-    # distance -- see gap_logic.disparity_extend / safety_bubble. ---
-    car_width: 0.30            # meters -- chassis width, see docs/hardware-reference.md
-    safety_margin: 0.10        # meters -- extra clearance on top of the half-width, each side
-    disparity_threshold: 0.4   # meters -- a range jump bigger than this is an obstacle edge to extend
+    # If no 2m-deep gap exists at a blind/tight corner, accept a nearer
+    # post-inflation corridor and crawl through it instead of deadlocking.
+    fallback_min_gap_distance: 0.8
+    # How much better a new candidate gap must score than the one
+    # containing the previous tick's aim before the car re-aims at it --
+    # see gap_logic.find_best_gap. Added after a real-hallway report of the
+    # car "driving kind of drunk, side to side": gap selection had no
+    # damping at all, unlike corridor centering's fade-in/out ramps, so two
+    # similarly-scored candidates trading first place on ordinary LiDAR
+    # noise could flip the steering command every scan. 1.2 is a bounded
+    # first answer (needs a genuine 20% edge to win), not a value measured
+    # against a real weaving log -- validate low-speed before trusting it.
+    gap_switch_margin: 1.2
+    # The cap that actually governs most of a lap here. On the 2026-08-06
+    # run the car was in the corner fallback for ~120 of its ~150 driving
+    # ticks, so it spent most of its time pinned to this value rather than to
+    # max_speed. Raised with max_speed so corners are quicker, not just
+    # straights; the curvature and clearance ceilings still apply on top.
+    #
+    # Raised again from 0.8 after a real-hallway report of corners taken
+    # "too slowly and too tightly": 0.8 was the actual binding constraint
+    # on that 2026-08-06 run (pinned there ~80% of the time), well below
+    # what max_lateral_accel already permits independently -- at this
+    # car's near-rack-limit corner curvature (~0.82/m, see
+    # docs/asb-10000-sim-results.json), curvature_speed_limit alone already
+    # caps speed to sqrt(max_lateral_accel / 0.82) =~ 1.1m/s, so raising
+    # corner_speed to exactly that does not remove a safety ceiling, it
+    # only stops being the *tighter* one for a car that can already go
+    # this fast in that curvature on this car's own turning-circle math.
+    # Not measured on this exact hallway -- validate low-speed first.
+    #
+    # Raised 2026-09-26 (1.1 -> 1.5, max 2.5 -> 3.5, min 0.8 -> 1.0) to make
+    # the car faster. NOT yet validated on the car. Note max_lateral_accel
+    # below still caps the tightest corners near 1.1 m/s.
+    corner_speed: 1.5
+    max_speed: 3.5
+    min_speed: 1.0
+    # Symmetric achievable envelope from the calibrated servo mapping.
+    max_steering_angle: 0.26
+    # Steering is proportional to the selected gap's bearing, clipped to
+    # max_steering_angle: 1.0 means "point the wheels at the gap". This
+    # replaced a Pure Pursuit curvature law that could not physically ask for
+    # more than ~0.11rad at the 13deg bearings this car sees in a corridor,
+    # so it hugged walls instead of leaving them. Raise above 1.0 only if the
+    # car is still slow to leave a wall; too high will make it weave.
+    steering_gain: 1.0
+    max_lateral_accel: 1.0
+    max_acceleration: 3.0
+    # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit's identically
+    # named one. Here it is the braking authority the car *assumes it has*
+    # when deciding how fast it may drive for the clearance it can see
+    # (v <= sqrt(2*a*(clearance - forward_stop_clearance))). Setting it above
+    # what the car can really achieve makes it drive faster than it can stop.
+    # In pure_pursuit the same name is only a command slew rate and carries no
+    # such risk -- do not copy a value across from there.
+    max_braking_decel: 3.0
+    max_steering_rate: 1.0
+    # Never let a long scan pause turn into one unbounded command jump.
+    command_slew_max_dt: 0.10
+    # --- Rectangular vehicle footprint ---
+    # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
+    # published figures the earlier values came from:
+    #   wheelbase      0.36 m   front axle to rear axle (Traxxas says 0.324)
+    #   width          0.30 m   outer edge of tire to outer edge of tire --
+    #                           the tires, not the shell, are the widest part
+    #   laser_offset_x 0.26 m   = 0.36 - 0.10; the LiDAR sits 0.10 m behind
+    #                           the FRONT AXLE. The old 0.33 m assumed 0.10 m
+    #                           behind the NOSE, a different reference point.
+    # car_width's padding was cut from 14.5mm/side to 5mm/side on
+    # 2026-08-25: real run logs showed emergency_clearance latching at
+    # -10mm to -13mm with nothing actually in contact, tracking the old
+    # 14.5mm padding almost exactly -- so 0.30 measured plus 5mm a side is
+    # 0.31. Still an envelope, not a measurement, just a tighter one.
+    # (The pre-2026-08-24 car_width was also 0.31 -- 14.5mm padding on the
+    # wrong 0.281m Traxxas body figure. Same digits, unrelated derivation.)
+    # car_length is UNCHANGED because nobody has measured this car bumper to
+    # bumper; 0.58 still contains it under the published overhang, but with
+    # ~4.5 mm an end rather than the 22.5 mm it was designed for. Measure
+    # rear-axle-to-nose and revisit.
+    car_width: 0.31
+    car_length: 0.58
+    wheelbase: 0.36
+    laser_offset_x: 0.26
+    laser_offset_y: 0.0
+    # Padding added to half the car width when inflating obstacle edges
+    # (disparity_extend) and when sizing the safety bubble. This is the knob
+    # that decides how wide a berth the chosen gap gives the inside of a
+    # corner: the extension is car_width/2 + safety_margin, so 0.18 moves the
+    # drivable window 0.345m off every edge instead of 0.265m. Raised because
+    # the car was clipping corner apexes and then sitting ~0.08m off the wall.
+    # Costs gap width, so raise it further only alongside
+    # min_centerline_gap_width / fallback_min_gap_distance.
+    safety_margin: 0.18
+    # --- Adaptive corridor width (docs/asb-10000-sim-results.json) ---
+    # Live per-tick ceiling on corner_speed (and, if configured to, a floor
+    # on safety_margin), from the same side_wall_distance measurement
+    # corridor centering already takes. Measured on indoor_wide: a clean
+    # win, ~9% higher average speed with wall contact still zero, since it
+    # never touches the margin there.
+    #
+    # min_safety_margin below defaults to safety_margin, i.e. margin
+    # shrinking is a no-op out of the box: measured on the ASB 10000-level
+    # course's real 1.5m hallway (uniformly narrow, not narrow-in-spots),
+    # shrinking the margin there sensed as "narrow" almost continuously and
+    # just drove the car permanently closer to the walls -- wall contact
+    # rose with no speed or distance gain, because what limited that course
+    # was corner curvature near the car's own turning circle, not a
+    # margin-driven "no gap found" stop. Lower min_safety_margin in a
+    # per-course config only where the geometry is narrow-in-spots, not
+    # narrow throughout.
+    #
+    # Deliberately config-only, not in live_tuning's dashboard catalogue:
+    # min_safety_margin and corner_speed_wide are coupled to safety_margin/
+    # corner_speed/max_speed (gap_follow_node._validate_adaptive_width_
+    # parameters), and those three are already live-tunable. Restart to
+    # change this rather than risk the pair drifting out of the relation
+    # the node checked at startup.
+    enable_adaptive_width: true
+    # Sensed corridor width (left + right side distance) at or below which
+    # corner_speed tops out (and the margin would bottom out, if lowered
+    # below safety_margin). 1.4m is indoor_tight's corridor -- the
+    # narrowest layout already validated in the simulator
+    # (src/racerbot_sim/racerbot_sim/tracks.py).
+    adaptive_width_narrow: 1.4
+    # Sensed width at or above which nothing changes: both values are
+    # exactly today's static defaults. 2.6m is indoor_wide's corridor --
+    # the one those defaults are already tuned against.
+    adaptive_width_reference: 2.6
+    # Off by default -- see the comment above enable_adaptive_width. NOT the
+    # old pre-0.18 regime if you do lower this for a course: safety_margin's
+    # own comment above records that a smaller margin than today's default
+    # left the car "clipping corner apexes and then sitting ~0.08m off the
+    # wall".
+    min_safety_margin: 0.18
+    # The ceiling corner_speed may rise to on a sensed-wide bend -- one the
+    # fallback gap took for lack of forward visibility, not lack of room.
+    # corner_speed itself remains the floor; this only ever adds capability.
+    #
+    # Bounded above by max_speed, which the mapping launch files lower. They
+    # scale this and corner_speed by the same factor to keep the relation
+    # (gap_follow/speed_overrides.py); raising either of these without
+    # checking that helper is how gap_follow_node came to exit at startup on
+    # 2026-08-19, which stalled a whole auto_map_race run.
+    # 1.9 on 2026-09-26: raised with corner_speed (1.1 -> 1.5) at the same
+    # 1.4/1.1 ratio, because corner_speed <= corner_speed_wide is checked
+    # at startup and 1.5 against the old 1.4 would stop the node.
+    corner_speed_wide: 1.9
+    disparity_threshold: 0.4
+    # Obstacles are already inflated by half-width + margin on both sides.
+    # Requiring another car width here was double-padding tight openings.
+    min_centerline_gap_width: 0.10
+    # All-direction final contact floor, measured from the padded body.
+    # Dropped from 0.02 to 0.0 on 2026-08-25: real run logs showed this
+    # latching at -10mm to -13mm of "clearance" with nothing actually in
+    # contact -- false positives tracking the 14.5mm/side padding just cut
+    # from car_width above almost exactly, not real near-misses. Validate
+    # in racerbot_sim; if LiDAR-noise chatter shows up at 0.0, the
+    # documented fallback is 0.01, not the old 0.02.
+    emergency_stop_clearance: 0.0
+    # Odom-independent fallback ahead of the car. Keeping this to a narrow
+    # cone avoids treating a close side wall in a corner as a frontal hazard.
+    # Cut from 0.25 to 0.20 on 2026-08-25: the 0.25m reserve was putting
+    # ordinary cornering, not just genuine near-misses, into the
+    # escape_creep_speed regime below -- a plausible source of a real report
+    # of the car "inching" around corners.
+    forward_stop_clearance: 0.20
+    forward_stop_fov_deg: 60.0
+    # Inside forward_stop_clearance the car crawls at this speed instead of
+    # latching at zero. That cone points where the car is aimed, not where it
+    # is going, so a car turning out of a corner used to be frozen by the wall
+    # it was already steering around -- with no way back out, since stopping
+    # removes the motion that would clear the cone. Contact clearance, TTC and
+    # the no-gap stop all still stop the car outright; this only lets a car
+    # that has found an exit inch toward it.
+    # Raised from 0.25 to 0.40 on 2026-08-25, directly addressing a real
+    # report of this crawl itself feeling like "inching" -- still within the
+    # node's own validated bound (0.0 < escape_creep_speed <=
+    # max(min_speed, 0.5), checked at startup), a pure config change with
+    # no code implication.
+    escape_creep_speed: 0.40
+
+    # --- Cornering anticipation ---
+    # An extra speed cap from how much the chosen gap's near-only bearing
+    # disagrees with aim_within_gap's own choice -- see
+    # gap_follow_node.py's comment on this declared parameter for the full
+    # reasoning and the mechanism this is meant to add.
+    #
+    # Ships OFF: measured on indoor_wide (0 wall contact either way), this
+    # capped speed on 49 of 65 driving ticks and was the actually-binding
+    # cap on most of them, for about a 25% average speed drop versus the
+    # same run with only the corner_speed_wide change above -- a wide
+    # gap's own angular span naturally leans toward whichever edge is more
+    # open, which reads as "a bend is coming" even in a straight, open
+    # room. Needs a better-normalized trigger before this is worth
+    # enabling; the mechanism and its tests stay in place for that.
+    enable_cornering_anticipation: false
+    # Deliberately above min_gap_distance (2.0m) -- see the code comment
+    # next to this parameter's declaration in gap_follow_node.py for why
+    # a value below it would make the whole feature silently inert until
+    # the car was already committed to the fallback gap. 2.5m matches
+    # centering_full_forward_depth's own "genuine stretch ahead" threshold.
+    anticipation_near_depth: 2.5
+
+    # --- Corridor centering on straights ---
+    # Follow-the-gap only ever answers "which way do I point". On a straight
+    # the answer is "down the corridor", which is parallel to both walls -- so
+    # the car keeps whatever lateral offset it entered the straight with and
+    # will happily run a whole straight 15cm off one wall. This adds the
+    # missing cross-track term: a small steering bias toward the middle,
+    # faded out as soon as the car is actually turning so it never argues with
+    # the gap choice in a corner. See gap_logic.corridor_centering_bias.
+    enable_centering: true
+    # rad per meter of offset from the corridor middle. With the 0.08rad clamp
+    # below, this saturates at 0.32m off centre. Raise for a firmer pull to the
+    # middle; too high will weave, because the pull and the bearing term then
+    # fight each other faster than max_steering_rate can settle.
+    centering_gain: 0.25
+    # SAFETY-RELEVANT: the hard authority bound on the bias. The node refuses
+    # to start if this exceeds half of max_steering_angle -- centering is a
+    # refinement of the gap the obstacle-avoidance pipeline already chose, and
+    # a bias big enough to cancel that choice would be a second driving policy.
+    centering_max_steering: 0.08
+    # Width of the angular window centred on each of +/-90deg used to measure
+    # the wall beside the car. The minimum range inside the window is the
+    # perpendicular distance, so this width is really the yaw tolerance: 60deg
+    # keeps the estimate correct up to +/-30deg of yaw relative to the wall.
+    # Measured against the full 270deg scan, not the 180deg forward window.
+    centering_side_fov_deg: 60.0
+    # "Not actively turning": full centering at or below the first bearing,
+    # none at or above the second, linear between. A ramp rather than a switch
+    # -- a hard on/off on a steering term is what caused the scan-rate chatter
+    # documented in gap_follow_node._aim_within_gap.
+    centering_full_bearing_deg: 4.0
+    centering_zero_bearing_deg: 15.0
+    # There has to be a straight worth centring in. Faded out as the aimed-at
+    # depth drops, so the car stops centring on approach to a corner.
+    centering_full_forward_depth: 2.5
+    centering_zero_forward_depth: 1.5
+    # Both sides must be a real wall. Past this the "wall" is a doorway, an
+    # opening, or max_range, and centring against it would steer the car into
+    # the opening. Deliberately well above any plausible corridor width and
+    # well below max_range (10.0): the wall-hugging this fixes happens in the
+    # *wide* corridors, where the aim is the deepest beam and therefore
+    # parallel to the walls. In a corridor narrow enough that both gap edges
+    # are real obstacles, the existing midpoint aim is already correcting, and
+    # this term only trims what it leaves behind.
+    centering_full_side_distance: 4.0
+    centering_zero_side_distance: 5.0
+
+    # --- Time-to-collision automatic emergency braking ---
+    enable_ttc: true
+    # Lowered from 0.5, then again from 0.35 on 2026-08-25. At the 1.6m/s
+    # this car actually reaches, 0.5s meant braking 0.80m from a wall while
+    # mid-corner; 0.35s brakes at 0.56m; 0.30s brakes at 0.48m, which still
+    # exceeds the 0.43m the clearance ceiling reserves to stop from that
+    # speed at max_braking_decel. The clearance-based stops are unchanged.
+    # The 2026-08-25 cut was prompted by a real trip that fired with only a
+    # ~2ms margin against the computed collision time at the old 0.35s
+    # threshold -- and per section 2's directional escape gate, most TTC
+    # trips now attempt to crawl out through a visible gap rather than
+    # braking to zero at all, so a trip that still does hard-stop is one
+    # that was genuinely boxed in.
+    ttc_threshold_sec: 0.30
+    ttc_min_closing_speed: 0.05
+    # TTC uses max(fresh odom speed, latest command when it is positive),
+    # so brief odom under-reporting cannot suppress braking. A zero brake
+    # command supersedes the previous positive command instead of latching it.
+    ttc_command_speed_timeout_sec: 0.5
+    # Once fresh odom reports meaningful motion, use it rather than the much
+    # higher requested speed; this prevents stop/restart latching in corners.
+    ttc_command_fallback_max_odom_speed: 0.10
+    # Speed below which the TTC brake is not armed at all. TTC measures
+    # closing speed, and at a crawl it stops measuring anything useful: on the
+    # 2026-08-06 run 10 of 12 sampled TTC stops fired between 0.15 and
+    # 0.39m/s, where the old 0.5s threshold is just 0.08-0.20m of clearance,
+    # so a car that had eased up to a corner wall could never re-commit. Some
+    # of those samples read "odom 0.00m/s, recent command 0.16m/s" -- stopped,
+    # braking on its own commanded speed, releasing, re-braking at scan rate.
+    # Below this speed the clearance layers own the car instead, and they are
+    # the ones designed to let it escape: emergency_stop_clearance still stops
+    # on contact, and the forward reserve still creeps toward a visible exit.
+    ttc_min_brake_speed: 0.6
+    odom_timeout_sec: 0.5
     # --- Deadman button (workspace policy -- see docs/architecture.md) ---
     # Mandatory workspace-wide safety policy: the car must not move under
     # any code, autonomous or manual, unless LB is held on the physical
@@ -31,3 +339,33 @@ gap_follow_node:
     joy_topic: /joy
     deadman_button: 4
     joy_timeout_sec: 0.5
+
+    # --- Drive intent (docs/drive-intent.md) ---
+    # Publishes a JSON description of what this controller is trying to do
+    # -- the predicted path, the speed ceilings that competed, and the
+    # reason for the current decision -- for the web dashboard's intent
+    # arrow and decision panel. Read-only diagnostics: it goes out only
+    # after the drive command for the tick has already been published, and
+    # disables itself rather than the node if it ever starts failing.
+    publish_intent: true
+    intent_topic: /drive_intent
+    # Well under the ~40Hz scan rate; no browser needs to redraw an arrow
+    # faster than this, and the Jetson is also driving the car.
+    intent_rate_hz: 20.0
+    # How far ahead the arrow predicts. The arrow's *length* is distance
+    # travelled over this horizon, so a stopped car draws a stub and a fast
+    # one draws a long arrow -- that is the intended reading.
+    intent_horizon_sec: 1.5
+    intent_samples: 16
+    # Never draw an arrow longer than this, however fast the plan is; past
+    # a certain length it stops being informative and just covers the map.
+    intent_max_length: 8.0
+
+    # --- Terminal diagnostics ---
+    # Every state change prints immediately. While the state is unchanged,
+    # repeat the current stop/drive reason and final command at this rate.
+    # Set 0.0 for transitions only.
+    decision_log_period_sec: 1.0
+    # Gap follow is driven by scan callbacks, so a dead scan makes /drive go
+    # quiet. The status timer uses this threshold to explain that mux stop.
+    scan_timeout_sec: 0.5

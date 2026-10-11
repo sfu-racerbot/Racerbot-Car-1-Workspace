@@ -1,21 +1,44 @@
 # `gap_follow`
 
+> **Who this is for:** someone reading or changing this package's code. It's also the reference template for any new driving node.
+> **Read first:** [docs/architecture.md](../../docs/architecture.md) for the safety model — this package can move the car.
+> **What's in it:** the follow-the-gap algorithm as implemented, every parameter, and the mandatory deadman pattern to copy.
+
 Reactive "follow-the-gap" autonomy: no map, no localization, no memory of the track — every LIDAR scan is looked at fresh and the car steers into the biggest safe opening it currently sees. This file documents the algorithm and code in detail; for the broader workspace context (safety model, how to run it, how to write your own node) see [docs/architecture.md](../../docs/architecture.md), [docs/operations.md](../../docs/operations.md#running-autonomy-gap_follow-pure_pursuit-or-your-own-node), and [docs/writing-your-own-node.md](../../docs/writing-your-own-node.md).
+
+## Making the car faster
+
+Edit [`config/gap_follow.yaml`](config/gap_follow.yaml), **not** `gap_follow_node.py`. The launch file loads the YAML, and the YAML overrides every default in the code. Changing a number in the `.py` does nothing on the car.
+
+The car drives at the **lowest** of several speed caps, so raise the cap that is binding. The comment block at the top of the YAML lists them in order: usually `corner_speed`, then `max_lateral_accel` in tight corners, then `max_speed` on straights. Two rules:
+
+- Keep `corner_speed <= corner_speed_wide <= max_speed`. If that ordering breaks, the node exits at startup.
+- Don't raise `max_acceleration` to go faster. It is the braking the car *assumes* it has, so raising it makes the car drive faster than it can stop.
+
+Test any increase wheels-off first, then at low speed in open space.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| [`gap_follow/gap_follow_node.py`](gap_follow/gap_follow_node.py) | The ROS node and pipeline orchestration, including the deadman gate. |
-| [`gap_follow/gap_logic.py`](gap_follow/gap_logic.py) | Importable, unit-tested scan-processing math, including disparity extension, the safety bubble, and gap scoring. |
+| [`gap_follow/gap_follow_node.py`](gap_follow/gap_follow_node.py) | ROS orchestration: deadman, odometry watchdog, TTC brake, diagnostics, and drive publisher. |
+| [`gap_follow/gap_logic.py`](gap_follow/gap_logic.py) | Unit-tested footprint, TTC, disparity extension, safety bubble, and gap-selection math. |
 | [`config/gap_follow.yaml`](config/gap_follow.yaml) | Every tunable parameter, loaded at launch. Change behavior here, not in the code. |
 | [`launch/gap_follow_launch.py`](launch/gap_follow_launch.py) | Starts the node with the YAML above as its parameters. |
 | `resource/gap_follow` | Empty marker file required by `ament_python` — not code. |
 
 ## Interface
 
-- **Subscribes:** `/scan` (`sensor_msgs/LaserScan`), `/joy` (`sensor_msgs/Joy`, for the deadman button — see below)
+- **Subscribes:** `/scan` (`sensor_msgs/LaserScan`), `/odom` (`nav_msgs/Odometry`, for TTC), `/joy` (`sensor_msgs/Joy`, for the deadman button)
 - **Publishes:** `/drive` (`ackermann_msgs/AckermannDriveStamped`)
+
+The launch file sends ROS logs to the terminal. Each controller state change is
+printed immediately as `STOP [reason]` or `DRIVE [reason]`, including the sensor
+measurement and threshold behind the decision plus the final steering/speed
+command. An unchanged decision is repeated every `decision_log_period_sec`
+(1.0 s by default); set it to `0.0` for transitions only. A small status timer
+also reports a missing/stale `/scan`, which otherwise stops this callback-driven
+node by letting `/drive` time out silently at the mux.
 
 ## The algorithm, step by step
 
@@ -23,7 +46,7 @@ All of this happens in `scan_callback`, once per incoming `LaserScan` message (t
 
 ### 0. Deadman button (checked first)
 
-Before touching the scan at all: if LB (button index `deadman_button`, default `4`) isn't currently held on a live `/joy` stream (received within `joy_timeout_sec`, default `0.5s`), publish `0.0 / 0.0` and return immediately. This is a **mandatory, workspace-wide safety policy** — see [docs/architecture.md](../../docs/architecture.md#workspace-policy-the-lb-deadman-button-is-mandatory-for-every-node-that-can-move-the-car) — not specific to this algorithm; every other step below only ever runs while LB is held.
+Before touching the scan at all: if LB (button index `deadman_button`, default `4`) isn't currently held on a live `/joy` stream (received within `joy_timeout_sec`, default `0.5s`), publish speed `0.0` (steering held where the rack already is — see below) and return immediately. This is a **mandatory, workspace-wide safety policy** — see [docs/architecture.md](../../docs/architecture.md#workspace-policy-the-lb-deadman-button-is-mandatory-for-every-node-that-can-move-the-car) — not specific to this algorithm; every other step below only ever runs while LB is held.
 
 ```python
 def _deadman_engaged(self) -> bool:
@@ -37,14 +60,22 @@ def _deadman_engaged(self) -> bool:
 
 `enable_deadman` defaults `true` and should stay that way — see the linked policy doc before ever changing it.
 
-### 1. Sanitize the scan and restrict to a forward field of view
+### 1. Require live odometry for TTC
+
+The [official F1TENTH automatic-emergency-braking lab](https://github.com/f1tenth/f1tenth_lab2_template) defines instantaneous TTC from LiDAR range and measured longitudinal odometry speed. With `enable_ttc: true`, no drive command is allowed until `/odom` has arrived, and a sample older than `odom_timeout_sec` produces `STOP [odometry_stale]`.
+
+### 2. Sanitize the scan and restrict to a forward field of view
 
 ```python
-ranges = np.nan_to_num(ranges, nan=0.0, posinf=self.max_range, neginf=0.0)
-ranges = np.clip(ranges, 0.0, self.max_range)
+clean, valid = gap_logic.sanitize_ranges(
+    scan.ranges, max_range=self.max_range, range_min=scan.range_min)
 ```
 
-LIDAR scans can contain `NaN`/`inf` for out-of-range or invalid returns; both get mapped to sane finite values before any math touches them (a `NaN` propagating into `np.argmin`/comparisons would silently corrupt the result).
+LIDAR scans can contain `NaN`, `inf`, and sub-`range_min` values. Unknown
+beams remain non-free (`0.0`) for gap selection and are excluded from
+clearance/TTC with `valid`; positive infinity means no return within sensor
+range and becomes `max_range` for gap selection. This prevents both steering
+into a blind beam and treating a scan dropout as a zero-range collision.
 
 Then the array is sliced down to a forward-facing window (`forward_fov_deg`, default `180°`, i.e. ±90° from straight ahead) via `_fov_indices()`, which converts the angular window into array index bounds using the scan's own `angle_min`/`angle_increment`:
 
@@ -55,19 +86,71 @@ hi_idx = int((hi_angle - scan.angle_min) / scan.angle_increment)
 
 This exists so the car never steers toward a "gap" that's actually behind or beside it — LIDAR returns outside the driving direction are simply never considered.
 
-### 2. Find the closest obstacle; emergency-stop if it's too close
+### 3. Check footprint clearance and instantaneous TTC
 
-```python
-closest_idx = int(np.argmin(window))
-closest_dist = float(window[closest_idx])
-if closest_dist < self.emergency_stop_distance:
-    self._publish_drive(0.0, 0.0)
-    return
+The collision model is a rectangle around `base_link` (rear axle). This car measures 0.30m over the tires and 0.36m between the axles (tape-measured 2026-08-24, see [hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)); the configured rectangle is deliberately inflated to 0.31m × 0.58m. `vehicle_boundary_distances()` ray-casts from the measured LiDAR origin (+0.26m forward, 0.10m behind the front axle) to that padded rectangle. Subtracting this per-beam distance from the scan produces clearance from the body rather than from the sensor.
+
+Collision detection has three layers. The all-direction contact floor stops at `emergency_stop_clearance` (0.0m from the body, cut from 0.02m on 2026-08-25). A separate odometry-independent fallback covers `forward_stop_clearance` (0.20m, cut from 0.25m on 2026-08-25) within the narrow `forward_stop_fov_deg` cone (60°, or ±30°); close side walls outside that cone do not trigger it. The speed-aware layer then evaluates every approaching beam:
+
+```text
+iTTC = max(0, range - body_boundary) / (v_x * cos(beam_angle))
 ```
 
-A hard, unconditional floor (`emergency_stop_distance`, default `0.15m`) — no gap-finding logic runs at all if something is this close; the car simply stops.
+**The forward-cone layer crawls rather than latches.** Inside
+`forward_stop_clearance` the car does not command zero — it drops to
+`escape_creep_speed` (0.40m/s, raised from 0.25m/s on 2026-08-25), still steering at the gap. That cone points
+where the car is *aimed*, not where it is *going*, so a car turning out of a
+corner trips it on the wall it is already steering around; a hard stop there
+cannot be recovered from, because stopping removes the very motion that would
+clear the cone. On 2026-07-27 the car sat frozen mid-corner, 0.58m from the
+nearest wall with full lock dialled in and an exit already found, until an
+operator noticed. The crawl spends at most *half* the reserve — below that it
+tapers to zero with 0.10m of padded-body clearance still in hand (halved from
+the 0.25m `forward_stop_clearance` cut on 2026-08-25) — and every
+independent layer is untouched: contact clearance, TTC, and the no-gap stop
+each still stop the car outright, so a genuine dead end still ends in a full
+stop. Recovery must never depend on someone noticing the car.
 
-### 3. Extend obstacle edges by the car's physical clearance (disparity extender)
+**2026-08-25: the contact floor and TTC gained the same escape.** Both used
+to be pure, unconditional latches — real run logs the day this changed
+showed exactly that: negative modelled clearance (-10mm to -13mm) latching
+the car dead 44 times in one run with no escape attempt at all, and TTC
+logging a viable escape gap it never acted on 23 times. Now, before either
+stops the car outright, a **directional gate** asks whether the worst point
+driving the trip is dead ahead: `forward_clearance` (the same cone
+`forward_stop_clearance` uses) equalling the all-round `min_clearance`
+(within float slop) means it is — the one geometry an escape is sound for,
+since a car can turn away from what's ahead of it but cannot escape a
+contact at its *flank* by steering into a forward-facing gap (that would
+drag the body along whatever the flank is already touching, exactly the
+2026-07-27 failure mode this workspace already has regression tests for).
+Only then is an escape attempted, reusing the same gap search and creep
+mechanism described above, and logged as `DRIVE [emergency_escape]` /
+`DRIVE [ttc_escape]`. A flank trip, or a directional trip with no real gap
+to aim at, still hard-stops exactly as before — `STOP [emergency_clearance]`
+/ `STOP [ttc_brake]` are not gone, they are what a genuinely boxed-in or
+sideways contact still produces.
+
+**TTC only counts obstacles inside the corridor the car will actually sweep.**
+The radial projection above (`v * cos(angle)`) is valid for something the car
+is driving *at*; for an obstacle off to the side it manufactures a collision
+that cannot happen, because the car passes beside it. That error scales with
+how close the walls are, so it is invisible on a wide track and dominant on a
+1m course: measured on this car, perfectly centred in a 1.0m corridor, a wall
+**0.50m to the side** held it to **1.42m/s**, falling to **0.27m/s** once it
+drifted to 0.22m from that wall. That is the brake being wrong, not cautious.
+
+A beam is therefore only counted if its obstacle lies within
+`car_width/2 + safety_margin` of the path — and the path is the *arc* implied
+by the current steering, not a straight line. A car at full lock curves around
+the outside of its own corner; judging it as though it were going straight
+made TTC brake for the very wall it was negotiating, which then fought the
+escape creep to a standstill mid-corner. Straight-line travel is the
+zero-curvature case of the same test.
+
+Beams with no positive closing speed have infinite TTC, so a close wall exactly beside the car does not create the old closest-range corner false positive. When fresh odometry is effectively zero (at or below `ttc_command_fallback_max_odom_speed`, 0.10m/s), TTC uses the larger of odometry and the latest drive command when that command is positive and no older than `ttc_command_speed_timeout_sec` (0.5s). Once odometry reports meaningful motion, TTC uses measured speed. This catches a stuck-zero/lagging reading without treating full requested speed as instantaneous in a healthy tight corner. A zero brake command supersedes the prior positive command, preventing stale intent from latching the stop. If minimum TTC is at or below `ttc_threshold_sec` (0.30s, cut from 0.35s on 2026-08-25), the tier trips: directional (see above), it escapes and logs `DRIVE [ttc_escape]`; otherwise (or if no gap exists) it publishes zero speed and logs `STOP [ttc_brake]`, exactly as before 2026-08-25. The brake is only armed above `ttc_min_brake_speed` (0.6m/s): TTC is clearance divided by closing speed, so a crawling car reaches the threshold on a few centimetres of clearance -- precisely the state of a car that has already eased up to the inside of a corner, where braking removes the only motion that would clear it. Below that speed the clearance layers own the car instead, and they are the ones built to escape: `emergency_stop_clearance`'s own directional gate (or the forward reserve's ordinary creep) still lets a car with a visible way out move, and still stops it outright when there genuinely is none. Invalid LiDAR beams are excluded from all three checks.
+
+### 4. Extend obstacle edges by the car's physical clearance (disparity extender)
 
 Yes — this implementation includes the standard follow-the-gap **disparity extender**. It finds every sharp range jump between adjacent beams whose size exceeds `disparity_threshold` (default `0.4m`). At each jump, it identifies the nearer side and copies that nearer distance onto the far side for as many beams as `car_width / 2 + safety_margin` subtends at the obstacle's distance:
 
@@ -79,7 +162,7 @@ window = gap_logic.disparity_extend(
 
 This models the car's width rather than treating it as a point. The closer the obstacle edge, the more angular beams are extended. The operation only lowers range values (`np.minimum`), so it cannot invent free space.
 
-### 4. Carve a distance-aware "safety bubble" around the closest obstacle
+### 5. Carve a distance-aware "safety bubble" around the closest obstacle
 
 ```python
 window = gap_logic.safety_bubble(
@@ -88,13 +171,13 @@ window = gap_logic.safety_bubble(
 
 The same `car_width / 2 + safety_margin` clearance is converted to an angle using the closest obstacle's actual distance (`atan2(clearance, distance)`) and zeroed. Unlike a fixed-angle bubble, this demands more angular clearance close to the car and less at a distance. Together with disparity extension, it prevents the selected gap from grazing obstacle edges.
 
-### 5. Find every candidate gap, score them, pick the best one
+### 6. Pick a preferred gap, with a tight-corner fallback
 
 ```python
 free = window > min_gap_distance
 ```
 
-A "gap" is a contiguous run of scan points all farther than `min_gap_distance` (default `2.0m`). `_best_gap()` finds every such run, then scores each one — **not by angular width alone**:
+A preferred gap is a contiguous run deeper than `min_gap_distance` (2.0m in the physical config). `find_best_gap()` scores each run — **not by angular width alone**:
 
 ```python
 def score(run):
@@ -107,63 +190,327 @@ def score(run):
 
 $$\text{score} = \text{width} \times \overline{\text{depth}}$$
 
-**Why not just pick the widest gap?** A shallow dead end — say a doorway-sized alcove only 1m deep — can subtend a *wider* angle than a genuinely open corridor or track section that's angularly narrower but far deeper. Scoring by `width × average_depth` means a gap has to actually stay open for a while, not just be wide at its mouth, to win. This is the single biggest behavioral difference between this implementation and a textbook "pick the widest gap" follow-the-gap.
+**Why not just pick the widest gap?** A shallow dead end can subtend a wider angle than a genuinely open corridor. Scoring by `width × average_depth` rewards useful depth.
 
-### 6. Steer at the middle of the winning gap
+The former implementation stopped whenever no run remained continuously deeper than 2.0m. A blind 90-degree corner can be physically wide enough while hiding everything beyond the turn, so that rule created `no_safe_gap` immediately before turn-in. The new second pass accepts `fallback_min_gap_distance` (0.8m) and caps speed at `corner_speed` (`1.1m/s`, raised from `0.8` -- see [Corner speed](#corner-speed) below). That cap governs a lot of a lap in a tight room -- a 2026-08-06 measured run spent roughly four of every five driving ticks in this fallback -- so it, not `max_speed`, is often the knob that sets the pace through corners. `corner_speed_wide` (default `1.4m/s`) raises that ceiling further when the sensed corridor is wide -- see [Adaptive corridor width](#adaptive-corridor-width) below. It still uses the inflated scan and `min_centerline_gap_width`, so a boxed-in scene still stops.
+
+Candidate selection also carries hysteresis against the previous tick's aim (`gap_switch_margin`) -- see [Gap-selection hysteresis](#gap-selection-hysteresis-not-driving-drunk) below.
+
+Obstacle inflation has already removed `car_width / 2 + safety_margin` from both sides of every edge. The old candidate filter required another `car_width + safety_margin` after inflation, effectively demanding roughly a 0.9m raw opening for a 0.31m car (the pre-2026-08-24 car_width — a coincidence that it's numerically the same as the current value in the table below, not the same derivation). `min_centerline_gap_width` now checks only the small corridor remaining for candidate center points, eliminating that double-padding.
+
+### 7. Steer at the middle of the winning gap — proportional to its bearing
+
+The midpoint of the chosen gap gives a **bearing** $\alpha$. Steering is
+proportional to it, clipped to the rack's physical envelope:
+
+$$\delta = \mathrm{clip}\big(K \cdot \alpha,\ \pm\delta_{max}\big)$$
+
+with $K$ = `steering_gain` (default `1.0`, i.e. "point the wheels at the
+gap"). The bearing is read from the *processed* window — after disparity
+extension and the safety bubble — so it already encodes "how far can the
+car's centre actually go this way", not a raw beam.
+
+**This replaced a Pure Pursuit arc, and the reason is worth recording.**
+Pure pursuit converted the target to a rear-axle point and followed
+$\kappa = 2y/(x^2+y^2)$, $\delta = \arctan(L\kappa)$. That is the right law
+for tracking a *path* — which is what `pure_pursuit` does — but follow-the-gap
+does not produce a path. It produces a direction to head, and the two
+disagree badly in exactly the situation that matters. A gap bearing of 13°
+reads to pure pursuit as a gentle 2.9 m-radius arc, even when the car is
+0.24 m from the wall it is trying to leave.
+
+Worse, that was a *ceiling* rather than a tuning problem. The LiDAR sits
+`laser_offset_x` ahead of the rear axle, so the target point is always at
+least that far forward and nearly on-axis, which bounds the achievable
+curvature no matter what lookahead is configured:
+
+| gap bearing | best $\delta$ pure pursuit can *ever* ask for | bearing law ($K$=1) |
+|---|---|---|
+| 10° | 0.086 rad (3.8 m radius) | 0.175 rad (1.8 m) |
+| 13° | 0.111 rad (2.9 m radius) | 0.227 rad (1.4 m) |
+| 20° | 0.171 rad (1.9 m radius) | 0.260 rad (1.2 m) |
+
+> The numbers in that table were computed with the geometry the workspace
+> believed in at the time: a 0.324 m wheelbase and a 0.33 m LiDAR offset.
+> The car was tape-measured on 2026-08-24 as 0.36 m and 0.26 m
+> ([hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)),
+> so every radius and angle here shifts a little. The comparison the table
+> is making — pure pursuit on a raw gap bearing asks for far less steering
+> than the bearing law does — is between two columns that both scale with
+> the wheelbase, so the conclusion is unchanged. Do not quote the
+> individual figures as current.
+
+
+On the 2026-07-27 run this held every command between 0.064 and 0.118 rad
+while the rack had 0.26 rad available, and the car hugged a wall until its
+forward cone closed and the clearance stop deadlocked it. The bearing law
+is also what the standard F1TENTH follow-the-gap reference uses.
+
+$\delta$ is then clipped to `max_steering_angle`. **This default changed
+from `0.4189 rad` (~24°) to `0.26 rad` (~15°)**, matching `pure_pursuit`.
+`0.4189` was never physically achievable symmetrically: this car's servo
+calibration reaches `+0.313 rad` one way and only `-0.263 rad` the other, so
+anything past `0.26` was a command the servo saturated on one side and not
+the other — see
+[docs/racing-autonomy.md](../../docs/racing-autonomy.md#where-026-rad-comes-from).
+Gap follow now turns *less* far than it used to ask for; it compensates by
+choosing gaps at a proper lookahead rather than chasing raw bearings.
+
+### 8. Speed: the lowest of a curvature ceiling and a stopping-distance ceiling
+
+The old law scaled speed linearly off the commanded steering angle. That used
+steering as a crude proxy for "how straight is the track", with no physical
+meaning: nothing in it knew what speed the car could actually hold through
+the turn, or how much room it had to stop. It is replaced by two physical
+ceilings, both in `gap_logic`, plus the existing corner-fallback cap:
+
+$$v_{curve} = \sqrt{\frac{a_{lat,max}}{|\kappa|}} \qquad v_{clear} = \sqrt{2\, a_{brake,max}\,(c - c_{reserve})}$$
+
+- **`curvature_speed_limit`** is the friction-circle bound — the fastest the
+  car can take the arc it just committed to without exceeding
+  `max_lateral_accel`. It is computed from the *requested* curvature, before
+  the steering rate limit below, so the car slows down as the turn is asked
+  for rather than after the rack has caught up.
+- **`braking_speed_limit`** is the speed the car could still stop from within
+  the forward clearance $c$ it can actually see, holding
+  `forward_stop_clearance` back as reserve. No obstacle in view (infinite
+  clearance) leaves `max_speed` untouched.
 
 ```python
-target_idx_in_window = (gap_start + gap_end) // 2
-target_idx = lo_idx + target_idx_in_window
-steering_angle = scan.angle_min + target_idx * scan.angle_increment
-steering_angle = float(np.clip(steering_angle, -self.max_steering_angle, self.max_steering_angle))
+normal_speed    = max(self.min_speed, curve_speed)
+desired_speed   = min(normal_speed, clearance_speed)
+if used_fallback:
+    desired_speed = min(desired_speed, self.corner_speed)
+speed = min(desired_speed, self.last_commanded_speed + self.max_acceleration * dt)
 ```
 
-The steering angle is simply the LIDAR bearing of the midpoint of the chosen gap, converted from an array index back into radians via the scan's own `angle_min`/`angle_increment` — the inverse of the conversion in step 1 — then clipped to what the servo can physically achieve (`max_steering_angle`, default `0.4189 rad` ≈ 24°; see [docs/racing-autonomy.md](../../docs/racing-autonomy.md#where-026-rad-comes-from) for how this car's actual servo limits were derived, though `gap_follow`'s default here is less conservative than `pure_pursuit`'s).
+`min_speed` floors only the curvature ceiling, never the clearance one — the
+car must always be allowed to brake below its cruising floor when something
+is close. With the default `max_lateral_accel: 1.0` and the `0.26 rad`
+steering clamp, the curvature ceiling spans `2.0 m/s` straight-ahead down to
+about `1.10 m/s` at full lock; the clearance ceiling starts biting below
+roughly `0.92m` of forward room.
 
-### 7. Speed: slow down proportionally to how hard you're turning
+### 9. Bound how fast a command may change
 
-```python
-speed_scale = 1.0 - (abs(steering_angle) / self.max_steering_angle)
-speed = self.min_speed + speed_scale * (self.max_speed - self.min_speed)
-```
+Both final commands are rate-limited against the previous one
+(`gap_logic.slew_rate_limit`), so a single noisy scan cannot produce a step
+change at the servo or the motor:
 
-$$v = v_{min} + \left(1 - \frac{|\delta|}{\delta_{max}}\right)(v_{max} - v_{min})$$
+- steering slews at most `max_steering_rate` (default `1.0 rad/s`, i.e. the
+  full `±0.26` envelope in about half a second);
+- speed may only *rise* at `max_acceleration`. Falling is never rate-limited
+  — braking is always allowed to be immediate.
 
-Straight ahead ($\delta = 0$) drives at `max_speed`; steering at the full clamp drives at `min_speed`; everything in between scales linearly. There's no explicit curvature/lookahead model here (unlike `pure_pursuit`) — this is a simple, cheap proxy for "the harder I'm turning, the more likely I'm near something," appropriate for a purely reactive controller with no map to plan braking zones against.
+`dt` is the measured interval since the last command, capped at
+`command_slew_max_dt` (default `0.10s`) so that a stalled scan followed by a
+resumed one cannot cash in a large accumulated interval as one big jump.
+
+**Every emergency path bypasses all of the above.** `_stop()` publishes
+speed `0.0` directly, with no rate limiting, for the deadman check, footprint
+clearance, forward clearance, TTC brake, empty scan window, and no-safe-gap
+cases. It deliberately does **not** centre the steering: it re-publishes the
+current rack angle, because re-centring on every stop defeated escape
+steering in two real runs (the reasoning is in `_stop()`'s comment). A
+stopped car's steering angle cannot move it. Command shaping only ever
+applies to a normal drive command.
+
+If `scan_callback` itself raises, it publishes `0.0` speed / `0.0` steering
+straight to the publisher, logs the exception, and re-raises so the node
+exits — the same contract as `pure_pursuit`'s control loop. Nothing in
+the ROS chain downstream (`ackermann_mux`, `ackermann_to_vesc`, the VESC
+driver) publishes a zero when a driving node goes silent, so the stop has to
+come from the node on its way out.
+
+## Three additions from a real-hallway report
+
+Added together after a report from driving this car on the Applied
+Sciences Building's 10000-level hallway loop (`asb_10000` in
+`racerbot_sim`, docs/asb-10000-sim-results.json): the car made it through
+without touching anything, but too slowly, took corners "too slowly and
+too tightly", and drove "kind of drunk, side to side". None of these three
+are backed by a real weaving/cornering log from that report -- there isn't
+one recent enough to read (checked; the closest saved
+`gap_follow_node` logs on disk predate this file's current architecture
+entirely, from a `least_squares`/`drive_best_point` implementation this
+node no longer resembles). Each is a hypothesis grounded in this file's
+own documented history of similar failures, not a measured fix -- **all
+three need real, low-speed, wheels-off-ground validation before trusting
+them on the floor**, same as any other change here.
+
+### Gap-selection hysteresis (not driving drunk)
+
+Candidate gap selection had no memory between scans -- every tick scored
+every candidate fresh and picked the single best one, with nothing
+damping a flip between two similarly-open candidates trading first place
+on ordinary LiDAR noise. That is the same shape of bug `aim_within_gap`'s
+2026-07-27 incident documents (there, a FOV-clipped edge caused the flip;
+ordinary near-tied candidates can too), and centring already had to work
+around an equivalent instability by fading in and out as a ramp rather
+than a switch. Gap selection had no equivalent.
+
+`gap_switch_margin` (default `1.2`) fixes that: a new candidate must score
+at least 20% better than the one containing the previous tick's aim to
+win the car away from it. `1.0` reproduces the old behaviour exactly. It
+only ever chooses among candidates that already passed every existing
+safety filter (depth, post-inflation width) -- it cannot keep the car
+aimed somewhere that stopped being safe, only reduce how often it re-aims
+somewhere equally safe for no real reason. See
+`gap_logic.find_best_gap`/`find_gap_with_fallback`.
+
+### Corner speed
+
+`corner_speed` (the flat cap whenever `used_fallback` is true) raised from
+`0.8` to `1.1m/s`. On the 2026-08-06 measured run this was the actual
+binding constraint roughly four ticks in five, and 0.8 was well below what
+`max_lateral_accel` already permits independently: at this car's
+near-rack-limit corner curvature (~0.82/m, see
+docs/asb-10000-sim-results.json), `curvature_speed_limit` alone already
+caps speed to `sqrt(max_lateral_accel / 0.82) ≈ 1.1m/s`, so raising
+`corner_speed` to exactly that removes no safety ceiling -- it only stops
+`corner_speed` being the *tighter* one, letting `curve_speed`'s own
+curvature-proportional cap (already variable by how sharp a given corner
+actually is) bind instead in most fallback situations. That is also most
+of why this should help "no variable speed for a big corner vs a small
+one": a flat cap lower than the curvature-proportional one flattens
+everything to the same number regardless of how sharp the turn is.
+
+### Adaptive corridor width
+
+Live per-tick sensing of the corridor width (`left_distance +
+right_distance`, the same measurement corridor centring already takes
+every tick) that can raise `corner_speed`'s ceiling on a sensed-wide
+corner (`corner_speed_wide`, default `1.4m/s`) and, if configured to,
+shrink `safety_margin` on a sensed-narrow one (`min_safety_margin`).
+Measured on `indoor_wide` (2.6m corridor, `racerbot_sim`): a clean win,
+about 9-10% higher average speed, wall contact still zero, because the
+margin never actually moves there (`width_factor` stays at 1.0).
+
+`min_safety_margin` ships equal to `safety_margin`, i.e. margin-shrinking
+is a no-op out of the box. Measured on `asb_10000`'s real 1.5m hallway --
+uniformly narrow rather than narrow-in-spots -- shrinking the margin
+there sensed as "narrow" almost continuously rather than only where it
+would unlock a gap, and just drove the car permanently closer to the
+walls: wall-contact steps rose with no speed or distance gain, because
+what actually limited that course was corner curvature near the car's own
+turning circle, not a margin-driven "no gap found" stop. See
+`gap_logic.corridor_width_factor`/`scale_between`, and
+`gap_follow_node._adaptive_width`.
+
+### Cornering anticipation (implemented, off by default)
+
+An extra speed cap from how much the chosen gap's near-only bearing
+(`gap_logic.near_gap_bearing`, beams within `anticipation_near_depth`)
+disagrees with `aim_within_gap`'s own choice -- meant to slow the car
+before it fully commits to a bend it hasn't started steering into yet,
+reusing the same `steering_gain -> tan(.)/wheelbase ->
+curvature_speed_limit` chain the real command already goes through.
+
+**Ships disabled** (`enable_cornering_anticipation: false`). Measured on
+`indoor_wide` -- a wide-open, gently-curving room with zero wall contact
+either way -- this capped speed on 49 of 65 driving ticks and was the
+actually-binding cap on most of them, for about a 25% average speed drop
+versus the same run with only the two changes above. A wide gap's own
+angular span naturally leans toward whichever edge is more open, which
+this reads as "a bend is coming" even in a straight, open room. The
+mechanism and its unit/integration tests stay in the tree because a
+course that is narrow-in-spots rather than narrow-throughout is exactly
+the case `test_cornering_anticipation_caps_speed_beyond_ordinary_
+curvature` (`test_gap_follow_node.py`) shows it can help -- but it needs a
+better-normalized trigger (e.g. scaled by the gap's own angular width)
+before it is worth turning back on. Even if it is: `aim_within_gap` still
+aims at the same point either way, so this cannot by itself widen a tight
+apex, only change the car's pace approaching one.
 
 ## Parameters (`config/gap_follow.yaml`)
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `scan_topic` / `drive_topic` | `/scan` / `/drive` | Topics |
-| `max_range` | `10.0` m | Range clip ceiling (also fills in `inf` returns) |
-| `forward_fov_deg` | `180.0°` | Total forward field of view considered |
-| `car_width` | `0.30` m | Chassis width used by the physical-clearance model |
-| `safety_margin` | `0.10` m | Extra clearance added to each side of the half-width |
-| `disparity_threshold` | `0.4` m | Minimum adjacent-range jump treated as an obstacle edge |
-| `min_gap_distance` | `2.0` m | Minimum depth for a run of scan points to count as a "gap" |
-| `max_speed` / `min_speed` | `2.0` / `0.8` m/s | Speed range, scaled by steering angle |
-| `max_steering_angle` | `0.4189` rad (~24°) | Hard clamp on commanded steering |
-| `emergency_stop_distance` | `0.15` m | Unconditional hard-stop floor |
-| `joy_topic` | `/joy` | Deadman button input |
-| `deadman_button` | `4` | Button index (LB on the F710 in XInput mode) |
-| `joy_timeout_sec` | `0.5` s | Deadman button staleness watchdog |
+| `scan_topic` / `drive_topic` / `odom_topic` | `/scan` / `/drive` / `/odom` | Sensor, command, and measured-speed topics |
+| `max_range` / `forward_fov_deg` | `10.0m` / `180°` | Scan clipping and planning window |
+| `car_width` / `car_length` | `0.31` / `0.58` m | Padded: width is the measured 0.30m over the tires plus 5mm a side (cut from 14.5mm/side on 2026-08-25). Length is still padding over an **unmeasured** overall length |
+| `wheelbase` | `0.36` m | Measured rear-to-front axle distance; also centers the padded body from rear-axle `base_link` |
+| `laser_offset_x` / `laser_offset_y` | `0.26` / `0.0` m | Measured LiDAR origin relative to `base_link` (0.10m behind the front axle) |
+| `safety_margin` / `disparity_threshold` | `0.18` / `0.4` m | Edge inflation clearance and range-jump threshold |
+| `min_centerline_gap_width` | `0.10` m | Minimum center corridor remaining after obstacle inflation |
+| `min_gap_distance` / `fallback_min_gap_distance` | `2.0` / `0.8` m | Preferred depth and tight-corner fallback depth |
+| `gap_switch_margin` | `1.2` | Hysteresis: how much better a new candidate must score than the one containing the previous tick's aim before the car re-aims. `1.0` disables it |
+| `max_speed` / `min_speed` / `corner_speed` | `2.5` / `0.8` / `1.1` m/s | Normal speed range and fallback cap |
+| `enable_adaptive_width` / `adaptive_width_narrow` / `adaptive_width_reference` | `true` / `1.4` / `2.6` m | Live corridor-width sensing (see below); the sensed-width range the two knobs after it scale between |
+| `min_safety_margin` | `0.18` m (== `safety_margin`, i.e. off) | Floor `safety_margin` may shrink to on a sensed-narrow straight |
+| `corner_speed_wide` | `1.4` m/s | Ceiling `corner_speed` may rise to on a sensed-wide corner |
+| `enable_cornering_anticipation` / `anticipation_near_depth` | `false` / `2.5` m | Extra speed cap from near/far gap-bearing disagreement (see below) — ships off, measured to over-brake in open rooms |
+| `max_steering_angle` | `0.26` rad (~15°) | Hard command clamp — the symmetric envelope this car's servo can actually reach |
+| `steering_gain` | `1.0` | Steering per radian of gap bearing, before the `max_steering_angle` clip. `1.0` points the wheels at the gap. Raise only if the car is slow to leave a wall; too high weaves |
+| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$ |
+| `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
+| `max_acceleration` | `3.0` m/s² | Cap on how fast a speed *command* may rise; braking is never limited |
+| `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew |
+| `command_slew_max_dt` | `0.10` s | Longest interval one slew step may integrate, so a scan gap isn't cashed in as a jump |
+| `emergency_stop_clearance` | `0.0` m (was `0.02`, cut 2026-08-25) | All-direction final contact floor measured from the padded body |
+| `forward_stop_clearance` / `forward_stop_fov_deg` | `0.20m` (was `0.25m`, cut 2026-08-25) / `60°` | Odom-independent forward-cone braking fallback |
+| `escape_creep_speed` | `0.40` m/s (was `0.25`, raised 2026-08-25) | Crawl allowed *inside* `forward_stop_clearance` so a car mid-corner can drive out instead of latching. Contact clearance, TTC and the no-gap stop all still stop the car outright |
+
+### Turning circle vs. course width — a hard geometric limit
+
+`max_steering_angle` 0.26 rad is the **symmetric physical envelope** of the
+servo, not a tuning choice: the calibration `servo = -1.2135*delta + 0.5304`
+over the usable `servo_min`/`servo_max` 0.15–0.85 range gives +0.3135 rad one
+way and −0.2634 rad the other, so ±0.26 is all the car has both ways. That
+fixes the **minimum turn radius at 1.218 m**, and no parameter in this file
+changes it.
+
+> **Car 1:** that derivation is car 2's servo. Car 1's calibration
+> (`servo = -1.1135*delta + 0.4` over 0.05–0.75) reaches ±0.314 rad, so on
+> car 1 0.26 is a conservative limit inside the envelope, not the envelope
+> itself. It was kept at 0.26 when car 2's workspace was ported (October
+> 2026); raising it is a tuning decision to test wheels-up first.
+
+On a 1.0 m course that is the binding constraint on what the car can drive:
+
+| corner | outcome |
+|---|---|
+| gentle/rounded bend (≥1.0 m inner radius) | fine — validated closed-loop, 0.047 m clearance |
+| S-bend / chicane | fine — validated closed-loop |
+| **sharp 90°, taken on the centreline** | **not physically possible** |
+
+A centreline arc through a square 90° corner between two 1.0 m corridors
+clears the inner corner by only **0.048 m** with the bare padded body, and is
+a *collision* once `safety_margin` is added at all. Reaching such a corner
+requires a racing line — approaching hard against the outer wall so the arc
+starts wide — which a reactive gap follower that tracks the middle of the
+visible opening does not do. If the course has square 1 m corners, that is a
+planner/route problem, not something to tune out of this node, and the honest
+options are to round the corner, widen it, or drive it under `pure_pursuit` on
+a recorded line.
+| `enable_ttc` / `ttc_threshold_sec` | `true` / `0.30s` (was `0.35s`, cut 2026-08-25) | Enable iTTC braking and set its trigger |
+| `ttc_min_brake_speed` | `0.6m/s` | Speed below which the TTC brake is not armed at all; the clearance stops and the forward-reserve creep still run |
+| `ttc_min_closing_speed` / `odom_timeout_sec` | `0.05m/s` / `0.5s` | Ignore negligible closing rates; fail closed on stale odometry |
+| `ttc_command_speed_timeout_sec` | `0.5s` | Freshness limit for a latest positive command used as TTC backup |
+| `ttc_command_fallback_max_odom_speed` | `0.10m/s` | Use command backup only while fresh odometry is effectively zero |
+| `joy_topic` / `deadman_button` / `joy_timeout_sec` | `/joy` / `4` / `0.5s` | Mandatory LB deadman input |
 | `enable_deadman` | `true` | **Do not disable** — see the workspace policy link above |
+| `decision_log_period_sec` / `scan_timeout_sec` | `1.0` / `0.5s` | Decision-log repeat and scan-staleness diagnostics |
 
 ## Simulator validation
 
 The exact `gap_logic` pipeline above is exercised in the official F1TENTH Gym,
-including the disparity extender, width-aware bubble, noisy LiDAR, vehicle
-dynamics, and collision model. On the current deterministic matrix it completed
+including the footprint clearance, TTC brake, corner fallback, disparity
+extender, noisy LiDAR, vehicle dynamics, and collision model. On the current
+deterministic matrix it completed
 Spielberg, Silverstone, and Brands Hatch without a collision. The full setup,
 commands, metrics, and checked-in JSON report are in
 [docs/simulator.md](../../docs/simulator.md).
 
 ## Tuning notes
 
-- **Car cuts into shallow pockets it shouldn't:** raise `min_gap_distance` so shallower alcoves stop qualifying as candidate gaps at all.
-- **Car won't take an opening it should be able to fit through:** lower `safety_margin` cautiously (less clearance demanded around obstacle edges), reduce `car_width` only if the configured chassis width is wrong, or lower `min_gap_distance` to accept shallower gaps. `car_width + safety_margin` is also the minimum physical gap width used during candidate filtering.
+- **Fallback enters an alcove it should reject:** raise `fallback_min_gap_distance` or lower `corner_speed`; keep the preferred 2.0m threshold for normal selection.
+- **Car still refuses a real tight corner:** inspect the logged `STOP` reason first. For `no_safe_gap`, cautiously lower `fallback_min_gap_distance` or `min_centerline_gap_width`. Never reduce `car_width` below the measured body width.
+- **`forward_clearance` brakes at a corner:** verify the LiDAR transform first, then cautiously narrow `forward_stop_fov_deg`; do not reduce the padded vehicle dimensions.
+- **TTC brakes too early/late:** compare logged odometry and recent-command speeds, then validate odometry scale and the footprint/LiDAR offsets before tuning `ttc_threshold_sec`. Do not compensate for wrong geometry by lowering the threshold.
 - **Disparity extension is too aggressive or misses obstacle edges:** lower `disparity_threshold` to detect smaller range jumps, or raise it to ignore more scan noise.
-- **Car oscillates rapidly between two nearby gaps:** this implementation has no gap "memory"/hysteresis between scans — each `LaserScan` is scored completely independently. If this becomes a real problem, the fix is adding a bias term favoring the previous tick's chosen gap, which doesn't exist here today.
-- **Speed always feels too conservative/too aggressive:** the `speed_scale` formula is linear and only looks at the *chosen* steering angle, not any measure of how open the track actually is — retune `max_speed`/`min_speed` directly rather than expecting curvature-aware pacing like `pure_pursuit` has.
+- **Car oscillates rapidly between two nearby gaps:** raise `gap_switch_margin` above its default `1.2` — see [Gap-selection hysteresis](#gap-selection-hysteresis-not-driving-drunk) below. `1.0` reproduces the old behavior (no hysteresis, plain best score every tick), useful for isolating whether a weave is this mechanism or something else.
+- **Too slow through corners:** the binding limit is logged every tick as `curve cap=` / `clearance cap=` — read it before changing anything. A low `curve cap` means `max_lateral_accel` is the constraint; raise it only as far as the tires actually grip. A low `clearance cap` means the car genuinely cannot see far enough ahead to stop, and the fix is `min_gap_distance`/LiDAR geometry, not a bigger `max_braking_decel` the car doesn't have.
+- **Sluggish to react to a gap that just opened:** `max_steering_rate` bounds how fast the rack moves. Raising it makes the car snappier and twitchier in equal measure; the emergency stops are unaffected either way, since they bypass rate limiting entirely.
+- **Car crawls after every emergency stop:** that is `max_acceleration` ramping the command back up from zero. Raise it if the recovery is too slow to be useful — an over-tight ramp is worse than none, because a car that cannot re-accelerate out of a stop just sits there.
 - Change one parameter at a time and re-test wheels-off-ground (see [docs/writing-your-own-node.md](../../docs/writing-your-own-node.md#testing-before-its-on-wheels)) — the interactions between the physical-clearance parameters, `min_gap_distance`, and `forward_fov_deg` are not always intuitive.

@@ -1,5 +1,9 @@
 # Hardware reference
 
+> **Who this is for:** anyone who needs an exact value — a port, an address, a config constant — for this specific car.
+> **Read first:** nothing. This is a lookup table, not a tutorial.
+> **What's in it:** VESC, LiDAR, joystick and network specifics, plus the gotchas that look like bugs and aren't.
+
 Physical connections, addresses, and config values for this specific car. Everything here is what's actually configured on this machine, verified against the live hardware — not generic F1TENTH/roboracer defaults.
 
 ## Compute
@@ -19,17 +23,46 @@ Physical connections, addresses, and config values for this specific car. Everyt
 
 **Config** (`src/f1tenth_system/f1tenth_stack/config/vesc.yaml`):
 ```yaml
-speed_to_erpm_gain: 4614.0
+speed_to_erpm_gain: 3650.0       # /** block: sets the motor command
 speed_to_erpm_offset: 0.0
-steering_angle_to_servo_gain: -1.2135
-steering_angle_to_servo_offset: 0.5304
-servo_min: 0.15
-servo_max: 0.85
-wheelbase: 0.25  # meters, used for odometry
+steering_angle_to_servo_gain: -1.1135
+steering_angle_to_servo_offset: 0.4
+servo_min: 0.05
+servo_max: 0.75
+# vesc_to_odom_node block only:
+speed_to_erpm_gain: -3650.0      # negated on purpose -- see below
+wheelbase: 0.36   # meters -- car 2's measurement, assumed for car 1 (see Physical dimensions)
 ```
-The servo formula: `servo_position = -1.2135 × steering_angle + 0.5304`. Steering angle `0.0` → servo position `0.5304` (center). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.5304` is neutral, not a bug.
+The servo formula: `servo_position = -1.1135 × steering_angle + 0.4`. Steering angle `0.0` → servo position `0.4` (center on this car). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.4` is neutral, not a bug. (Car 2's neutral is a different value; each car's servo is calibrated separately.)
+
+**The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-3650.0` to cancel that; the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
 
 **Servo output must be enabled in the VESC's own firmware config** — this is separate from anything in this repo and isn't visible to `ros2`/`colcon` at all. If a freshly-flashed or reset VESC has steering that does nothing despite `fault_code: 0` and a clean serial connection, check this first. Requires **VESC Tool** (official app, vesc-project.com) connected over USB — which means stopping the ROS bringup first, since only one process can hold the serial port. Full story in [troubleshooting.md](troubleshooting.md).
+
+**The onboard IMU reports all zeros.** Measured 2026-08-19: `/sensors/imu/raw` publishes steadily at **50 Hz**, and every field — all three gyro axes, all three accelerometer axes — is exactly `0.0`. There is no gravity vector on any accelerometer axis, which is the giveaway: a working IMU lying still still reads about 9.81 m/s² somewhere.
+
+So the VESC is answering the driver's IMU poll with an empty packet. That is either a board without the IMU fitted, or an IMU left disabled in the firmware — **VESC Tool → App Settings → IMU**, where a sample rate of 0 means off. Same caveat as the servo-output flag above: it can only be checked in VESC Tool, not from ROS.
+
+This matters more than it looks. The car's heading in `/odom` is integrated from the *commanded* steering angle through a bicycle model, with nothing measuring the actual rotation. A working gyro is the single biggest available improvement to that. See [localization.md](localization.md).
+
+To re-check after changing anything in VESC Tool:
+
+**Terminal 1** — the VESC driver on its own. Nothing publishes commands to it, so the car cannot move.
+
+```bash
+ros2 run vesc_driver vesc_driver_node --ros-args \
+  --params-file install/f1tenth_stack/share/f1tenth_stack/config/vesc.yaml
+```
+
+**Working when:** it logs `Connected to VESC with firmware version 7.0` and keeps running. Leave it up.
+
+**Terminal 2** — read the gyro.
+
+```bash
+ros2 topic echo /sensors/imu/raw --field angular_velocity
+```
+
+**Working when:** `z` moves when you rotate the car by hand, and the accelerometer shows roughly 9.81 on one axis at rest. All zeros means the IMU is still off.
 
 Reading or writing the VESC's app configuration (including that servo-output flag) is **not possible from this ROS stack** — `vesc_driver` only implements motor/servo *control* commands (`COMM_SET_SERVO_POS`, `COMM_SET_RPM`, etc.), not the config read/write protocol (`COMM_GET_APPCONF`/`COMM_SET_APPCONF`) that VESC Tool uses. Don't go looking for a `ros2 service`/CLI way to do this — there isn't one here.
 
@@ -41,15 +74,15 @@ Reading or writing the VESC's app configuration (including that servo-output fla
 | udev rule | `/etc/udev/rules.d/99-hokuyo.rules` — matches idVendor `15d1`, idProduct `0000` (Hokuyo Data Flex for USB, URG-Series USB Driver), `MODE=0666`, `SYMLINK+="sensors/hokuyo"` |
 | Config | `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` sets `serial_port: "/dev/sensors/hokuyo"` (`ip_address`/`ip_port` are commented out — this car doesn't use `urg_node`'s Ethernet mode at all) |
 | Scan rate | ~40Hz, ±180° (`angle_min`/`angle_max`: ±3.14 rad in `sensors.yaml`) |
-| Frame | `laser`, offset from `base_link`: +0.27m forward, +0.11m up, no rotation — **verify this offset if the UST-30LX's mount differs from the UST-10LX this figure was originally measured for** |
+| Frame | `laser`, offset from `base_link`: +0.26m forward, +0.11m up, no rotation — **car 2's measurement, assumed for car 1; not yet measured on this chassis** (see [Physical dimensions](#physical-dimensions-used-in-config)) |
 
 If `/dev/sensors/hokuyo` doesn't show up after plugging the LiDAR in: `lsusb` should list `ID 15d1:0000`, and `ls -la /dev/ttyACM*` should show a device owned by group `dialout`/mode `0666`. `sudo udevadm control --reload-rules && sudo udevadm trigger` re-applies the rule without a reboot.
 
-No static IP, dedicated NIC, or `nmcli` connection is needed for this car's LiDAR — that's a Car 2–specific detail (Ethernet Hokuyo UST-10LX) that doesn't apply here.
+No static IP, dedicated NIC, or `nmcli` connection is needed for this car's LiDAR — that's a car 2–specific detail (Ethernet Hokuyo UST-10LX) that doesn't apply here.
 
 ## Camera — UVC USB webcam
 
-Car 1 uses a standard UVC webcam at `/dev/video0`; it does **not** have an Intel RealSense camera. `src/usb_cam_stream/config/usb_cam_stream.yaml` captures it at 1280×720 and 30 FPS and serves the monitoring stream on port 9090. Verify the device path with `v4l2-ctl --list-devices` if USB enumeration changes. See [usb-camera-livestream.md](usb-camera-livestream.md).
+Car 1 uses a standard UVC webcam at `/dev/video0`; it does **not** have an Intel RealSense camera. The stream is `usb_cam_stream` from the `src/web_dashboards` submodule, started with car 1's settings by `ros2 launch racerbot_launch webcam_launch.py`; the device path lives in the `usb_cam_stream_node` section of `src/racerbot_launch/config/web_dashboard_rb1.yaml` (resolution and frame rate are the package defaults, 1280×720 at 30 FPS). It serves the dashboard's camera stream on port 9090. Verify the device path with `v4l2-ctl --list-devices` if USB enumeration changes. See [usb-camera-livestream.md](usb-camera-livestream.md).
 
 ## Joystick — Logitech F710
 
@@ -63,7 +96,7 @@ Car 1 uses a standard UVC webcam at `/dev/video0`; it does **not** have an Intel
 | RB (button index 5) | Bound to an `autonomous_control` profile in `joy_teleop.yaml` that currently does nothing functional — publishes to `/dev/null`. See [architecture.md](architecture.md#the-safety-model-read-this-before-writing-autonomy-code). |
 | Group access | Joystick device nodes are group `input`; `racerbotcar-1` and `racermember1` are both members |
 
-**Don't trust assumed Xbox-style axis numbering** — it was wrong here too (upstream config had steering on axis 2, which is actually the left trigger on this pad in XInput mode, not the right stick). This car's `f1tenth_system` is vendored specifically so this fix (and the LiDAR serial-port fix above) can be committed — see [git-setup.md](git-setup.md). If you ever swap controllers, re-verify empirically:
+**Don't trust assumed Xbox-style axis numbering** — it was wrong here (upstream config had steering on axis 2, which is actually the left trigger on this pad in XInput mode, not the right stick). If you ever swap controllers, re-verify empirically:
 ```bash
 ros2 topic echo /joy
 ```
@@ -71,10 +104,53 @@ watch which `axes[]` index moves as you work each stick/trigger, and which `butt
 
 ## Network
 
-- `wlP1p1s0`: WiFi, normal DHCP, used for everything (internet, SSH, ROS traffic, etc.) — the LiDAR is USB, not Ethernet, so there's no dedicated wired NIC or static IP for it on this car
+- `wlP1p1s0`: WiFi, normal DHCP, used for everything else (internet, SSH, etc.)
 - `tailscale0`: Tailscale VPN interface, present for remote access if configured
 
 ## Physical dimensions used in config
 
-- Wheelbase: 0.25m (`vesc.yaml`, used for odometry — verify this matches the actual chassis if it's ever swapped)
-- LiDAR mount offset from `base_link`: +0.27m forward, +0.11m up (`static_transform_publisher` args in `bringup_launch.py`) — carried over from the UST-10LX's measured mount; **re-verify against the UST-30LX's actual physical mount** if it hasn't been re-measured yet
+> **Car 1: these are car 2's measurements.** When car 2's workspace was ported here (October 2026), car 1 took car 2's measured geometry on the assumption that the two chassis are built the same. Nobody has yet put a tape measure on car 1. **TODO(verify on car 1):** measure the wheelbase, the track width, and how far the LiDAR sits behind the front axle; if any differ, change every file in its row below together.
+
+The chassis is a Traxxas Ford Fiesta ST Rally VXL 74276-4, but **car 2 is not stock, and the published figures were wrong for it.** Three dimensions were put on a tape measure on car 2 on **2026-08-24**, and two of them moved enough to change how the car drives.
+
+| What was measured | Value | What the configs said before |
+|---|---|---|
+| Wheelbase — front axle centre to rear axle centre | **0.36 m** | 0.324 m, the Traxxas published figure |
+| Width — outer edge of one tire to outer edge of the other | **0.30 m** | 0.281 m, the Traxxas published *body* width |
+| LiDAR position — how far behind the **front axle** it sits | **0.10 m** | an estimate of 0.10 m behind the **nose**, a different reference point |
+
+`base_link` — the origin every pose, every scan overlay and every collision check is measured from — is the **rear axle**. So the LiDAR's `base_link` offset is `0.36 − 0.10 = `**`0.26 m`** forward, not the 0.33 m the workspace used to assume.
+
+### Where each number lives
+
+Change any of these and you must change all of its row together, or two parts of the stack will be modelling different cars.
+
+| Number | Files |
+|---|---|
+| Wheelbase `0.36` | `vesc.yaml`, `pure_pursuit.yaml`, `gap_follow.yaml`, `auto_map_race.yaml` (`profile_wheelbase`), `odom_calibration.yaml`, `racerbot_sim/sim_bridge.py`, `tools/f1tenth_sim/sim_fidelity/calibration.py` |
+| LiDAR offset `0.26` | the `base_link`→`laser` static transform in `bringup_launch.py`, `no_lidar_bringup_launch.py`, `sick_bringup_launch.py`, `racerbot_sim/launch/sim_bringup_launch.py`, `racerbot_launch/launch/dashboard_test_launch.py`; and `laser_offset_x` in `gap_follow.yaml`, `pure_pursuit.yaml`, `racerbot_launch/config/web_dashboard_rb1.yaml` (the web dashboard's car-1 settings; `racerbot_launch/test/test_web_dashboard_rb1_config.py` checks it against the bringup transforms), `auto_map_race.yaml`, `waypoint_recorder.yaml` (the last two, and `pure_pursuit.yaml`/`web_dashboard_rb1.yaml` again, also use it to turn the particle filter's LiDAR pose into the rear-axle pose — [localization.md](localization.md#which-point-on-the-car-the-position-means)) |
+| Collision width `0.31` | `gap_follow.yaml`, `pure_pursuit.yaml`, `auto_map_race.yaml` (`optimize_car_width`), both simulators |
+
+### The collision envelope is padded on purpose
+
+`car_width` and `car_length` are **not** the measured car. They are a rectangle deliberately drawn bigger than it, so a clearance of zero means "the padding is gone", not "the paint is touching".
+
+- **Width `0.31 m`** = the measured 0.30 m plus 5 mm on each side. Cut down from 14.5 mm/side on 2026-08-25, after real run logs showed the car latching at a false `emergency_clearance` stop (-10mm to -13mm reported clearance with nothing actually in contact) that tracked the old padding almost exactly. Confusingly, the number `0.31 m` was *also* the car_width before the 2026-08-24 remeasurement — that was 14.5 mm padding on the wrong 0.281 m Traxxas body figure. Same digits, unrelated derivation; do not read one as evidence for the other.
+- **Length `0.58 m`** is **unchanged, and this is the loose end.** Nobody has measured this car bumper to bumper.
+  If the overhangs are still the Traxxas-published 0.211 m total, the real car is now about 0.571 m long.
+  That would leave the envelope only ~4.5 mm at each end, instead of the 22.5 mm it was designed for.
+
+**TODO(verify): measure rear-axle centre to the front bumper, and bumper to bumper.**
+
+That distance matters more than it looks. The code models the nose as sitting 0.21 m ahead of the LiDAR, and subtracts that from every forward range before any stop decision is made.
+
+Right now the 0.21 m rests on an assumption of symmetric overhang, not on a measurement.
+
+### What re-measuring invalidated
+
+The wheelbase and LiDAR offset are inputs to things that were recorded *before* they were corrected:
+
+- **Racing lines** recorded under the old 0.33 m LiDAR offset are about 0.07 m out along the car's heading. Re-record rather than re-using them for a race.
+- **`odom` heading** was integrated as `speed × tan(steering) / wheelbase` with a wheelbase 10% too short. Every commanded steering angle therefore produced about 10% more yaw in the estimate than the car actually turned. Re-run [odom calibration](../src/odom_calibration/README.md).
+- **The minimum turning radius grew**, from 1.22 m to **1.35 m** (`tan(0.26) / 0.36`). A longer wheelbase turns *wider* for the same rack angle, so a course the optimizer previously accepted may now be refused — that refusal is correct, and the old acceptance was not.
+- **Saved maps** are still usable; the map itself does not change. What changed is where `base_link` sits relative to the scan that built it.

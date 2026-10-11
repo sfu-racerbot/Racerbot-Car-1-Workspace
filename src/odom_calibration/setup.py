@@ -1,0 +1,45 @@
+from setuptools import find_packages, setup
+
+
+package_name = 'odom_calibration'
+
+setup(
+    name=package_name,
+    version='0.1.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', [
+            'launch/odom_calibration_launch.py',
+        ]),
+        ('share/' + package_name + '/config', [
+            'config/odom_calibration.yaml',
+        ]),
+        ('share/' + package_name + '/web', [
+            'web/index.html',
+            'web/wizard.js',
+            'web/style.css',
+            'web/icon.png',
+        ]),
+        ('share/' + package_name + '/web/fonts', [
+            'web/fonts/saira-condensed-700.woff2',
+            'web/fonts/saira-condensed-800.woff2',
+            'web/fonts/public-sans.woff2',
+            'web/fonts/ibm-plex-mono-500.woff2',
+        ]),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='racerbotcar-1',
+    maintainer_email='bryanmaubc@gmail.com',
+    description='Guided odometry and steering calibration wizard (no ROS publishers).',
+    license='MIT',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'calibration_node = odom_calibration.calibration_node:main',
+        ],
+    },
+)

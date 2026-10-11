@@ -1,17 +1,17 @@
 # MIT License
-
+#
 # Copyright (c) 2025 Hongrui Zheng
-
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -20,28 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.substitutions import Command
-from launch.substitutions import LaunchConfiguration
-from launch.actions import DeclareLaunchArgument
-from launch.actions import IncludeLaunchDescription
-from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
-from ament_index_python.packages import get_package_share_directory
 import os
 
-def generate_launch_description():
-    """The shared foundation layer (no-LiDAR variant): hardware drivers +
-    arbitration, no control layer of its own.
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
-    Same split as bringup_launch.py -- starts joy_node, the VESC driver
-    stack, and ackermann_mux, but no LiDAR node and deliberately no
-    joy_teleop (that's its own control layer now, see teleop_launch.py).
-    Run this first, in its own terminal, then launch exactly one control
-    layer on top of it in a second terminal: teleop_launch.py (manual
-    driving), gap_follow_launch.py, or pure_pursuit_launch.py. See
-    docs/operations.md.
-    """
+
+def generate_launch_description():
     joy_teleop_config = os.path.join(
         get_package_share_directory('f1tenth_stack'),
         'config',
@@ -88,8 +76,10 @@ def generate_launch_description():
         name='joy',
         parameters=[LaunchConfiguration('joy_config')]
     )
-    # joy_teleop is its own control layer now -- see teleop_launch.py.
-    # Deliberately not started here; only joy_node (raw input) is shared.
+    # joy_teleop is deliberately NOT started here, same as bringup_launch.py:
+    # its default profile publishes /teleop continuously, and /teleop
+    # (priority 100) then masks every /drive (priority 10) command. Run
+    # teleop_launch.py on top for manual driving.
     ackermann_to_vesc_node = Node(
         package='vesc_ackermann',
         executable='ackermann_to_vesc_node',
@@ -119,7 +109,13 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_baselink_to_laser',
-        arguments=['0.27', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser']
+        # 0.26 m = the measured 0.36 m wheelbase less the 0.10 m the LiDAR
+        # sits behind the FRONT axle (measured 2026-08-24). The previous
+        # 0.33 m came from assuming 0.10 m behind the physical NOSE --
+        # a different reference point, and 0.07 m too far forward.
+        # Keep in step with docs/hardware-reference.md, gap_follow.yaml,
+        # pure_pursuit.yaml, racerbot_launch web_dashboard_rb1.yaml and racerbot_sim.
+        arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser']
     )
 
     # finalize

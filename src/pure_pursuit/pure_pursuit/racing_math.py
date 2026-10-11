@@ -71,6 +71,36 @@ def world_to_body(dx: float, dy: float, yaw: float):
     return x_body, y_body
 
 
+def laser_pose_to_base_link(x: float, y: float, yaw: float,
+                            laser_offset_x: float, laser_offset_y: float):
+    """The rear-axle (base_link) pose of a car whose LiDAR is at (x, y, yaw).
+
+    particle_filter ray-casts each particle's scan from the particle's own
+    pose, so every particle -- and therefore /pf/viz/inferred_pose -- is a
+    pose of the *LiDAR*, not of base_link. The LiDAR sits
+    (laser_offset_x, laser_offset_y) from base_link in the car's own frame
+    (0.26 m forward on this car, docs/hardware-reference.md); both frames
+    share one heading, so only the position moves:
+
+        base = laser - R(yaw) @ offset
+    """
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    return (x - (laser_offset_x * cos_yaw - laser_offset_y * sin_yaw),
+            y - (laser_offset_x * sin_yaw + laser_offset_y * cos_yaw),
+            yaw)
+
+
+def base_link_pose_to_laser(x: float, y: float, yaw: float,
+                            laser_offset_x: float, laser_offset_y: float):
+    """Inverse of laser_pose_to_base_link: where the LiDAR is, given base_link."""
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    return (x + laser_offset_x * cos_yaw - laser_offset_y * sin_yaw,
+            y + laser_offset_x * sin_yaw + laser_offset_y * cos_yaw,
+            yaw)
+
+
 # ============================================================================
 # 2. Pure pursuit steering geometry
 # ============================================================================
@@ -137,6 +167,42 @@ def adaptive_lookahead(speed: float, gain: float, min_lookahead: float, max_look
     """
     ld = gain * abs(speed) + min_lookahead
     return float(np.clip(ld, min_lookahead, max_lookahead))
+
+
+def curvature_speed_limit(curvature: float, max_lateral_accel: float,
+                          max_speed: float) -> float:
+    """Online speed ceiling from the final commanded curvature.
+
+    The offline profile accounts for the recorded path's curvature. This
+    second ceiling covers runtime corrections, avoidance, and overtakes whose
+    steering can be sharper than the recorded line.
+    """
+    if not all(math.isfinite(value) for value in (
+            curvature, max_lateral_accel, max_speed)):
+        raise ValueError('curvature speed-limit inputs must be finite')
+    if max_lateral_accel <= 0.0 or max_speed < 0.0:
+        raise ValueError('max_lateral_accel must be positive and max_speed non-negative')
+    if abs(curvature) < 1e-9:
+        return max_speed
+    return min(max_speed, math.sqrt(max_lateral_accel / abs(curvature)))
+
+
+def slew_rate_limit(target: float, previous: float, dt: float,
+                    increase_rate: float, decrease_rate: float = None) -> float:
+    """Limit a normal command's rise and fall per second.
+
+    Safety stops bypass this helper and remain immediate.
+    """
+    if decrease_rate is None:
+        decrease_rate = increase_rate
+    if not all(math.isfinite(value) for value in (
+            target, previous, dt, increase_rate, decrease_rate)):
+        raise ValueError('slew-rate inputs must be finite')
+    if dt < 0.0 or increase_rate < 0.0 or decrease_rate < 0.0:
+        raise ValueError('dt and slew rates must be non-negative')
+    lower = previous - decrease_rate * dt
+    upper = previous + increase_rate * dt
+    return float(np.clip(target, lower, upper))
 
 
 # ============================================================================
@@ -499,12 +565,31 @@ def load_profiled_csv(path: str):
                 f"(expected a header with 3 columns, 'x,y,speed'). "
                 f"Run generate_velocity_profile on it first."
             )
-        for row in reader:
+        for line_no, row in enumerate(reader, start=2):
             if not row:
                 continue
+            if len(row) < 3:
+                raise ValueError(
+                    f"'{path}' line {line_no}: expected 3 columns (x, y, speed), "
+                    f"got {len(row)}")
             rows.append((float(row[0]), float(row[1])))
             speeds.append(float(row[2]))
-    return np.array(rows, dtype=np.float64), np.array(speeds, dtype=np.float64)
+    xy = np.array(rows, dtype=np.float64).reshape(-1, 2)
+    speed = np.array(speeds, dtype=np.float64)
+    # float() happily parses 'nan', 'inf' and '-1'. A NaN or inf point
+    # poisons nearest-waypoint search; a NaN speed survives np.clip all the
+    # way to /drive or raises mid-control-step; a negative speed is a
+    # reverse command nothing upstream ever meant. Refuse the file instead.
+    bad = ~np.isfinite(xy).all(axis=1) | ~np.isfinite(speed)
+    if np.any(bad):
+        raise ValueError(
+            f"'{path}' has a non-finite value on data row "
+            f"{int(np.argmax(bad)) + 1}")
+    if np.any(speed < 0.0):
+        raise ValueError(
+            f"'{path}' has a negative speed on data row "
+            f"{int(np.argmax(speed < 0.0)) + 1}; profiled speeds must be >= 0")
+    return xy, speed
 
 
 def save_profiled_csv(path: str, xy: np.ndarray, speed: np.ndarray) -> None:
@@ -724,6 +809,102 @@ def track_progress_gap(ego_arc_length: float, other_arc_length: float, total_len
     return float((other_arc_length - ego_arc_length) % total_length)
 
 
+def track_lead_distance(ego_arc_length: float, other_arc_length: float,
+                        total_length: float) -> float:
+    """How far the ego car is *past* another point, as a signed distance.
+
+    Positive means the ego is ahead by that many meters; negative means the
+    other point is still ahead of the ego. Unlike track_progress_gap, which
+    wraps everything into [0, total_length) and so cannot tell "3 m behind"
+    from "all but 3 m ahead", this picks the shorter way round -- which is
+    the only sensible reading for two cars racing near each other.
+
+    This distinction caused a real collision. Asking track_progress_gap
+    whether a pass is finished invites `gap > total_length - clear_margin`,
+    which looks like "at least clear_margin past" and in fact means "at
+    most clear_margin past" -- true the instant the ego's nose edges in
+    front, while the two cars are still side by side. Compare against this
+    function instead: `track_lead_distance(...) >= clear_margin`.
+    """
+    if total_length <= 0.0:
+        return 0.0
+    half = total_length / 2.0
+    behind = (other_arc_length - ego_arc_length + half) % total_length - half
+    return float(-behind)
+
+
+def side_clearance(ranges: np.ndarray, angle_min: float, angle_increment: float,
+                   side: int, half_span: float, range_min: float,
+                   range_max: float) -> float:
+    """Perpendicular distance to the wall on one side of the car.
+
+    Mirrors gap_logic.side_wall_distance (the two packages deliberately keep
+    separate copies of their framework-free helpers). The *minimum* valid
+    range in a window centred on the side beam is the correct estimator, not
+    a conservative fudge: a beam striking a locally straight wall at angle
+    theta off the perpendicular reads d/cos(theta), minimised exactly at the
+    perpendicular, so the window recovers the true perpendicular distance
+    even with the car yawed relative to the wall.
+
+    ``side`` is +1 for the left wall, -1 for the right. Returns ``inf`` when
+    no beam in the window came back usable, which callers must read as "no
+    wall seen here", not "very far away".
+    """
+    values = np.asarray(ranges, dtype=np.float64)
+    if not math.isfinite(half_span) or half_span <= 0.0:
+        raise ValueError('half_span must be finite and positive')
+    angles = angle_min + np.arange(values.size, dtype=np.float64) * angle_increment
+    # A reading at exactly range_max is "nothing out there", not a wall; the
+    # node clips inf to max_range before this ever sees it.
+    valid = np.isfinite(values) & (values > range_min) & (values < range_max)
+    inside = valid & (np.abs(angles - side * (math.pi / 2.0)) <= half_span)
+    if not np.any(inside):
+        return math.inf
+    return float(np.min(values[inside]))
+
+
+def overtake_side_has_room(ranges: np.ndarray, angle_min: float,
+                           angle_increment: float, side: int,
+                           required_clearance: float, half_span: float,
+                           range_min: float, range_max: float) -> bool:
+    """Is there physically room to sit ``required_clearance`` off the line?
+
+    pick_pass_side answers "which side is *more* open", and always names one.
+    It never asks whether that side is open *enough*. Without this check the
+    car commits to a pass, steers overtake_lateral_offset toward a wall with
+    the avoidance tier suppressed for the duration, and only reacts at the
+    emergency-stop distance -- measured stopping dead with 0.19-0.34 m of
+    forward clearance, which is where the traffic scenario deadlocks.
+
+    Seeing no wall at all on that side counts as room: an open side is the
+    easy case, not a missing measurement.
+    """
+    if required_clearance <= 0.0:
+        return True
+    clearance = side_clearance(ranges, angle_min, angle_increment, side,
+                               half_span, range_min, range_max)
+    return clearance >= required_clearance
+
+
+def braking_speed_limit(clearance: float, reserve_distance: float,
+                        max_braking_decel: float, max_speed: float) -> float:
+    """Speed ceiling that still allows stopping short: v^2 <= 2*a*(d - reserve).
+
+    Mirrors gap_logic.braking_speed_limit. Infinite clearance means nothing
+    was seen, so the configured top speed stands.
+    """
+    if clearance == math.inf:
+        return max_speed
+    if not all(math.isfinite(value) for value in (
+            clearance, reserve_distance, max_braking_decel, max_speed)):
+        raise ValueError('braking speed-limit inputs must be finite')
+    if reserve_distance < 0.0 or max_braking_decel <= 0.0 or max_speed < 0.0:
+        raise ValueError(
+            'reserve_distance/max_speed must be non-negative and braking decel positive')
+    usable_distance = max(0.0, clearance - reserve_distance)
+    return min(max_speed, math.sqrt(2.0 * max_braking_decel * usable_distance))
+
+
 def lateral_offset_point(xy: np.ndarray, index: int, next_index: int, offset: float):
     """A point `offset` meters to the *left* of waypoint `index` (negative
     offset = right), measured perpendicular to the track's local
@@ -835,3 +1016,114 @@ def detect_dynamic_cluster(measured: np.ndarray, expected: np.ndarray,
                 best = (start, end, centroid_range, centroid_angle)
             start = i if split else None
     return best
+
+
+def vehicle_boundary_distances(angles: np.ndarray, car_width: float,
+                               car_length: float, wheelbase: float,
+                               laser_offset_x: float,
+                               laser_offset_y: float = 0.0) -> np.ndarray:
+    """Distance from the LiDAR to the rectangular vehicle edge, per beam.
+
+    Subtracting this from a raw LiDAR range converts "how far is that thing
+    from the *sensor*" into "how far is it from the *car body*" -- the only
+    form that answers whether the car is about to touch something. A forward
+    cone minimum cannot: a wall alongside the car reads as a comfortable
+    range on a beam pointing sideways while the bodywork is millimetres away.
+
+    ``base_link`` is the rear axle in this workspace; following the F1TENTH
+    collision model the rectangle is centred halfway along the wheelbase with
+    symmetric overhang, and the LiDAR sits at ``laser_offset_x/y`` from
+    ``base_link``. A sensor outside the footprint means the transform or the
+    footprint is wrong, which would silently *understate* collision distance,
+    so that raises rather than returning a dangerous number.
+
+    Deliberately duplicated from ``gap_follow``'s ``gap_logic.py`` rather
+    than imported: packages in this workspace talk over topics only, never
+    by direct cross-package import (see CLAUDE.md). Keep the two in sync --
+    ``gap_logic.vehicle_boundary_distances`` is the reference implementation.
+    """
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    dimensions = (car_width, car_length, wheelbase)
+    if not all(math.isfinite(value) and value > 0.0 for value in dimensions):
+        raise ValueError('car_width, car_length, and wheelbase must be finite and positive')
+    if not math.isfinite(laser_offset_x) or not math.isfinite(laser_offset_y):
+        raise ValueError('LiDAR offsets must be finite')
+
+    half_width = car_width / 2.0
+    half_length = car_length / 2.0
+    body_center_x = wheelbase / 2.0
+    x_min = body_center_x - half_length
+    x_max = body_center_x + half_length
+    y_min, y_max = -half_width, half_width
+    tolerance = 1e-9
+    if not (x_min - tolerance <= laser_offset_x <= x_max + tolerance
+            and y_min - tolerance <= laser_offset_y <= y_max + tolerance):
+        raise ValueError('LiDAR origin must lie inside the configured vehicle footprint')
+
+    direction_x = np.cos(beam_angles)
+    direction_y = np.sin(beam_angles)
+    epsilon = 1e-12
+    distance_x = np.full(beam_angles.shape, np.inf, dtype=np.float64)
+    distance_y = np.full(beam_angles.shape, np.inf, dtype=np.float64)
+
+    positive_x = direction_x > epsilon
+    negative_x = direction_x < -epsilon
+    distance_x[positive_x] = (x_max - laser_offset_x) / direction_x[positive_x]
+    distance_x[negative_x] = (x_min - laser_offset_x) / direction_x[negative_x]
+
+    positive_y = direction_y > epsilon
+    negative_y = direction_y < -epsilon
+    distance_y[positive_y] = (y_max - laser_offset_y) / direction_y[positive_y]
+    distance_y[negative_y] = (y_min - laser_offset_y) / direction_y[negative_y]
+
+    return np.minimum(distance_x, distance_y)
+
+
+def minimum_footprint_clearance(ranges: np.ndarray, valid: np.ndarray,
+                                boundary_distances: np.ndarray) -> float:
+    """Smallest obstacle clearance measured from the vehicle body, over
+    every valid beam in any direction. ``inf`` when nothing is usable."""
+    measured = np.asarray(ranges, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    boundaries = np.asarray(boundary_distances, dtype=np.float64)
+    if measured.shape != validity.shape or measured.shape != boundaries.shape:
+        raise ValueError('ranges, validity, and boundary distances must have matching shapes')
+    usable = validity & np.isfinite(boundaries)
+    if not np.any(usable):
+        return math.inf
+    return float(np.min(measured[usable] - boundaries[usable]))
+
+
+def minimum_footprint_clearance_in_cone(
+        ranges: np.ndarray, valid: np.ndarray, angles: np.ndarray,
+        boundary_distances: np.ndarray, cone_width_rad: float) -> float:
+    """Smallest body clearance inside a forward-centred angular cone.
+
+    The narrower sibling of ``minimum_footprint_clearance`` above: a
+    minimum over a strict subset of the same beams, so this always returns
+    a value ``>=`` the wider function's result on the same scan -- equality
+    (within float slop) means the point driving the wider minimum is also
+    inside this narrower cone, i.e. dead ahead rather than at the flank.
+    That comparison is the entire directional escape gate both driving
+    nodes use to tell a forward contact (escapable by steering toward a
+    gap) from a flank one (not -- steering "toward the gap" would drag the
+    body along whatever the flank is already touching).
+
+    Deliberately duplicated from ``gap_follow``'s ``gap_logic.py`` rather
+    than imported -- see ``vehicle_boundary_distances`` above for why.
+    ``gap_logic.minimum_footprint_clearance_in_cone`` is the reference
+    implementation; keep the two in sync.
+    """
+    measured = np.asarray(ranges, dtype=np.float64)
+    validity = np.asarray(valid, dtype=bool)
+    beam_angles = np.asarray(angles, dtype=np.float64)
+    boundaries = np.asarray(boundary_distances, dtype=np.float64)
+    if not (measured.shape == validity.shape == beam_angles.shape == boundaries.shape):
+        raise ValueError('all forward-clearance inputs must have matching shapes')
+    if not math.isfinite(cone_width_rad) or not (
+            0.0 < cone_width_rad <= 2.0 * math.pi):
+        raise ValueError('cone_width_rad must be finite and in (0, 2*pi]')
+
+    inside_cone = np.abs(beam_angles) <= cone_width_rad / 2.0
+    return minimum_footprint_clearance(
+        measured[inside_cone], validity[inside_cone], boundaries[inside_cone])

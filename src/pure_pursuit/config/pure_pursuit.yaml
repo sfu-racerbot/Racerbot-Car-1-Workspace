@@ -4,6 +4,15 @@ pure_pursuit_node:
     # on purpose -- an empty/missing waypoints file makes the node refuse
     # to start rather than silently drive nothing, or an old/wrong track.
     waypoints_file: ''
+    # Read-only broadcast of the active racing line for the dashboard to
+    # draw. Latched and published once per loaded profile, never per
+    # control tick. The line only exists once a profile is active, which
+    # is what makes seeing it on the map a reliable answer to 'is pure
+    # pursuit actually racing yet' -- on the 2026-08-19 run it never was.
+    racing_line_topic: /racing_line
+    # Waypoints are decimated to this before broadcast. A 126m course at
+    # 0.15m spacing is ~840, so this only bites on something much denser.
+    racing_line_max_points: 2000
     # Only auto_map_race_launch.py overrides this to true. In normal modes,
     # retaining false preserves fail-fast behavior for a missing raceline.
     wait_for_waypoints: false
@@ -11,12 +20,44 @@ pure_pursuit_node:
 
     # --- Topics ---
     pose_topic: /pf/viz/inferred_pose   # geometry_msgs/PoseStamped, published by particle_filter
+    # Which point on the car pose_topic describes. particle_filter's pose is
+    # the LiDAR's (it ray-casts each scan from the particle's own pose), so
+    # 'laser': converted to the rear-axle base_link on arrival, using
+    # laser_offset_x/y below. auto_map_race_launch.py sets 'base_link'
+    # together with pose_topic:=/slam_pose. Get the pair wrong and the car
+    # believes it is 0.26 m from where it is -- see docs/localization.md.
+    pose_frame: laser
     scan_topic: /scan
+    odom_topic: /odom
     drive_topic: /drive
 
     # --- Control loop ---
     control_rate_hz: 40.0
-    wheelbase: 0.25          # meters -- matches src/f1tenth_system/f1tenth_stack/config/vesc.yaml
+    wheelbase: 0.36          # meters -- MEASURED 2026-08-24; matches vesc.yaml
+    # Print every state change immediately, plus a periodic summary of the
+    # path/LIDAR/opponent decision and final command. Set 0.0 for transitions only.
+    decision_log_period_sec: 1.0
+
+    # --- Drive intent (docs/drive-intent.md) ---
+    # Publishes a JSON description of what this controller is trying to do
+    # -- the predicted path along the racing line, the speed ceilings that
+    # competed, and the reason for the current decision -- for the web
+    # dashboard's intent arrow and decision panel. Read-only diagnostics:
+    # it goes out only after the drive command for the tick has already
+    # been published, and disables itself rather than the node if it ever
+    # starts failing.
+    publish_intent: true
+    intent_topic: /drive_intent
+    intent_rate_hz: 20.0
+    # How far ahead the arrow predicts. The arrow's *length* is distance
+    # travelled over this horizon, so a stopped car draws a stub and a fast
+    # one draws a long arrow -- that is the intended reading. While the
+    # racing line is being followed the prediction re-runs the pure pursuit
+    # law at each sample, so the arrow bends through the corner ahead.
+    intent_horizon_sec: 1.5
+    intent_samples: 16
+    # Never draw an arrow longer than this, however fast the plan is.
+    intent_max_length: 8.0
 
     # --- Pure pursuit geometry ---
     # Validated headlessly on Spielberg, Silverstone, and Brands Hatch in
@@ -29,25 +70,124 @@ pure_pursuit_node:
     # --- Speed limits (safety ceiling -- the .csv profile is still clipped to this) ---
     max_speed: 4.0
     min_speed: 0.5
+    # Runtime corrections/overtakes can be sharper than the profiled line.
+    # Cap their speed from commanded curvature and shape normal commands.
+    max_lateral_accel: 2.5     # m/s^2 -- online ceiling: v <= sqrt(a_lat/|kappa|)
+    # m/s^2. Ceiling on how fast a speed *command* may rise. Not a demand on
+    # the motor. Braking is never rate-limited on the way down.
+    #
+    # This value is bounded on BOTH sides and 6.0 is near the top of the
+    # usable band -- do not raise it without re-running the traffic scenario.
+    #   Too low  (3.0): the car cannot rebuild speed between safety stops and
+    #                   stalls outright behind a slower car.
+    #   Too high (7.0+): it arrives behind that slower car too fast for the
+    #                   overtake to commit, hard-stops inside
+    #                   emergency_stop_distance, and enters a stop-go cycle
+    #                   it does not get out of.
+    # 5.0 and 6.0 both pass; 7.0 fails. See docs/simulator.md.
+    max_acceleration: 6.0
+    max_braking_decel: 8.0     # m/s^2 -- only shapes normal commands; a safety stop is immediate
+    max_steering_rate: 1.0     # rad/s -- caps steering slew between commands
+    command_slew_max_dt: 0.10  # s -- longest interval a single slew step may integrate over
+    # Fresh measured speed sizes lookahead; a stale/missing stream falls back
+    # to the profiled target speed without weakening any existing watchdog.
+    odom_timeout_sec: 0.5
 
     # --- Steering limit ---
-    # Derived from this car's actual servo calibration in vesc.yaml:
-    #   servo = -1.2135 * steering_angle + 0.5304, servo clamped to [0.15, 0.85]
-    # Solving both ends: +0.313 rad at servo=0.15, -0.263 rad at servo=0.85.
-    # Using the smaller magnitude (0.26) keeps every command physically
-    # achievable in both directions, with a small margin. Re-derive this
+    # Derived from car 1's servo calibration in vesc.yaml:
+    #   servo = -1.1135 * steering_angle + 0.4, servo clamped to [0.05, 0.75]
+    # Solving both ends: +0.314 rad at servo=0.05, -0.314 rad at servo=0.75.
+    # 0.26 (car 2's limit, ported unchanged) stays inside that in both
+    # directions with margin, so every command is physically achievable. Re-derive this
     # if vesc.yaml's gain/offset/servo_min/servo_max ever change.
     max_steering_angle: 0.26
 
     # --- Safety watchdogs ---
     pose_timeout_sec: 0.5         # stop if localization hasn't updated within this long
     max_cross_track_error: 1.0    # stop if further than this from every waypoint (lost/kidnapped)
+    # --- Off-line recovery (2026-08-25) ---
+    # Between max_cross_track_error and here, attempt a bounded recovery
+    # crawl aimed at the nearest point instead of latching a permanent stop
+    # -- chosen from a real, non-kidnapped overshoot documented in
+    # docs/racing-autonomy.md that landed in the 1.0-2.0m band, while
+    # staying well short of a genuinely lost/kidnapped pose. Beyond this,
+    # always hard-stop unconditionally, unchanged from before this session.
+    off_racing_line_recovery_max_error: 2.0
+    # A crawl, not a drive -- recovering means "aimed at the line", not
+    # "back on it".
+    off_racing_line_recovery_speed: 0.30
+    # Give up and hard-stop if recovery has not closed the error back under
+    # max_cross_track_error within this long.
+    off_racing_line_recovery_timeout_sec: 5.0
+
+    # Frozen-localization watchdog. pose_timeout_sec above cannot catch a
+    # pose that keeps *arriving* on time while no longer *tracking* the car
+    # -- which is what auto_map_race_node republishing a stalled SLAM
+    # transform looks like, and what drove the car into a wall on
+    # 2026-07-27. Odometry is the independent witness: if it reports real
+    # motion while the pose stands still, localization is lying.
+    # Only armed above pose_frozen_min_speed, so a parked car never trips it;
+    # at 0.30m/s the car covers 0.15m in 0.50s, 3x the 0.05m travel floor.
+    pose_frozen_timeout_sec: 0.5
+    pose_frozen_min_speed: 0.3
+    pose_frozen_min_travel: 0.05
+
+    # --- Rectangular collision envelope (matches gap_follow.yaml) ---
+    # This car measures 0.30 m over the tires (2026-08-24); car_width is that
+    # measurement plus 5 mm a side (cut from 14.5 mm/side on 2026-08-25 --
+    # negative-clearance latches in real run logs tracked the old padding
+    # almost exactly). car_length is unchanged: nobody has measured this
+    # car bumper to bumper -- see gap_follow.yaml for the full note. Feeds
+    # the all-round body-clearance stop below, which -- unlike
+    # safety_fov_deg's forward cone -- can see a wall the car is *alongside*.
+    car_width: 0.31
+    car_length: 0.58
+    # All-direction contact floor measured from the body, not the sensor.
+    # gap_follow uses 0.0m (as of 2026-08-25); 0.03m here because this
+    # controller is the one travelling at racing speed, so it deliberately
+    # keeps a wider margin than gap_follow's -- trimmed proportionally from
+    # 0.05m to track the padding cut from car_width above, not zeroed out.
+    emergency_stop_clearance: 0.03
+    # Forward window for that check, matching gap_follow's forward_fov_deg.
+    # NOT the full 270deg this Hokuyo sweeps: its rearmost beams look back
+    # along the car and return its own chassis, which is inside the
+    # footprint by construction and pins the car at a permanent negative
+    # clearance. 180deg still covers both flanks, which is the point.
+    body_clearance_fov_deg: 180.0
 
     # --- Reactive LIDAR safety net (independent of the planned line -- for
     # opponents, spun-out cars, or anything else not in the map) ---
     enable_lidar_safety: true
     safety_fov_deg: 60.0
-    emergency_stop_distance: 0.4
+    # Cut from 0.4 to 0.35 on 2026-08-25, directional per the user's
+    # general risk-tolerance mandate this session -- FLAGGED AS UNTESTED:
+    # pure_pursuit never took control in any run that day (every attempt
+    # died during gap_follow's mapping phase), so this has no real-run
+    # evidence behind it yet. Validate in racerbot_sim before trusting it
+    # on the car.
+    emergency_stop_distance: 0.35
+    # Escape from that hard stop rather than latching in it. A stopped car
+    # cannot clear its own safety cone -- nothing about the scene changes at
+    # zero speed -- so the stop above, on its own, ends the run wherever it
+    # fires. gap_follow has had escape_creep_speed for exactly this since the
+    # 2026-08-06 run; this is the same idea, kept narrower: a crawl, only
+    # toward an opening that is genuinely there, and only while the whole
+    # body still has room. Contact and stale-scan stops still win outright.
+    # Set emergency_escape_speed to 0.0 for the old latching behaviour.
+    emergency_escape_speed: 0.25
+    # The opening has to be a real one, not the least-bad direction.
+    emergency_escape_min_gap: 0.8
+    # Minimum clearance around the entire body (every beam, not the cone)
+    # before crawling is allowed at all. Above emergency_stop_clearance, so
+    # a car that is nearly touching stops instead of nudging.
+    emergency_escape_clearance: 0.10
+    # --- Escape from body contact itself (tier 0, 2026-08-25) ---
+    # The strictest of the escape floors, deliberately: this tier fires
+    # closest to genuine contact (body_clearance <= emergency_stop_clearance,
+    # 0.03m), below emergency_escape_clearance above -- reusing that floor
+    # here would reject every body_contact escape before it started. Must
+    # sit below emergency_stop_clearance to ever be reachable at all.
+    body_contact_escape_clearance: 0.0
     scan_timeout_sec: 0.5
     max_range: 10.0   # range readings beyond this (and inf/NaN) are clipped/filled before any math touches them
 
@@ -61,7 +201,11 @@ pure_pursuit_node:
     avoidance_trigger_distance: 1.5
     # Before a map is available, raw scans cannot distinguish walls from
     # traffic. This shorter simulator-validated threshold limits false turns.
-    avoidance_fallback_trigger_distance: 0.7
+    # Cut from 0.7 to 0.6 on 2026-08-25: already documented (see
+    # docs/racing-autonomy.md's reactive-avoidance table) as firing on
+    # ordinary track walls before map subtraction is ready -- a known
+    # false-positive source this narrows rather than eliminates.
+    avoidance_fallback_trigger_distance: 0.6
     avoidance_min_gap_distance: 1.0
     avoidance_speed: 1.0
 
@@ -80,6 +224,22 @@ pure_pursuit_node:
     overtake_closing_margin: 0.3      # m/s -- must be closing at least this fast to bother attempting a pass
     overtake_clear_margin: 1.0        # meters of track distance past the opponent before resuming the racing line
     overtake_lateral_offset: 0.35      # meters, sideways nudge to the steering target while passing
+    # meters. Room the passing side must actually have before the car will
+    # commit. pick_pass_side only reports which side is *more* open and always
+    # names one; without this floor the car commits, steers
+    # overtake_lateral_offset toward a wall with generic avoidance suppressed
+    # for the whole pass, and only reacts at emergency_stop_distance -- ending
+    # up parked against the barrier. 0.70 = the 0.35 offset + half a 0.31m car
+    # + 0.15 margin (the pre-2026-08-24 car_width -- coincidentally the same
+    # digits as the current car_width above, not the same derivation).
+    # Raise it to make the car choosier about passing places;
+    # declining a pass is always safe.
+    overtake_min_side_clearance: 0.70
+    # meters. While passing, the offset above is applied to a waypoint this
+    # far ahead instead of the normal max_lookahead target, so reaching the
+    # passing line is a gentle arc rather than a sharp turn the online
+    # curvature speed cap would answer by braking. Must be >= max_lookahead.
+    overtake_lookahead_distance: 4.0
     # Mid-pass the opponent is *expected* to leave the forward LIDAR cone
     # (it's alongside), so opponent_lost_timeout_sec deliberately does NOT
     # cancel an active overtake -- the pass completes on ego progress past
@@ -87,7 +247,7 @@ pure_pursuit_node:
     # blind for longer than this and the dead-reckoned position is no
     # longer trustworthy, so the pass is abandoned.
     overtake_max_blind_sec: 3.0
-    laser_offset_x: 0.27              # meters -- LIDAR mounting offset from base_link, matches hardware-reference.md
+    laser_offset_x: 0.26              # meters -- MEASURED rear-axle base_link to LiDAR
     laser_offset_y: 0.0
 
     # --- How opponents are recognized in the scan ---
@@ -107,6 +267,29 @@ pure_pursuit_node:
     map_topic: /map
     map_beam_step: 4              # ray-cast every Nth beam -- plenty for a car-sized object, keeps the per-tick cost tiny
     map_subtraction_margin: 0.4   # meters -- measured must be this much shorter than the map predicts to count as dynamic
+    # 2026-08-25: auto_map_race_node deliberately leaves slam_toolbox
+    # running for the whole race (its own documented fallback if the
+    # particle filter goes quiet), so map_topic above keeps evolving after
+    # the particle filter's localization -- and the racing line -- were
+    # both frozen against one saved-map snapshot at handover. Ray-casting
+    # against the still-live map at that point compares two different
+    # maps: verified on racerbot_sim (solo scenario, zero real opponents)
+    # to make an already-mapped wall look like an unmapped object, right
+    # at the seam where loop-closure correction is heaviest, parking the
+    # car at the racing handoff. These track which map matches the
+    # *current* pose source; with no auto_map_race_node in the graph (or
+    # an older one, before this existed), neither ever publishes and
+    # behavior is exactly today's: always the live map.
+    localization_source_topic: /auto_map_race/localization_source
+    frozen_map_topic: /auto_map_race/frozen_map
+    # 2026-08-25, found on the same racerbot_sim run: even fully on the
+    # live map with no particle-filter handover involved yet, /map can be
+    # stale by up to slam_toolbox's own map_update_interval (5.0s,
+    # f1tenth_online_async.yaml) relative to the pose, right when the
+    # just-closed mapping lap's loop-closure correction is heaviest. Map
+    # subtraction is suppressed for this long after the racing profile
+    # activates, giving at least one full interval a chance to land first.
+    opponent_detection_settle_sec: 6.0
 
     # --- Deadman button (workspace policy -- see docs/architecture.md) ---
     # Mandatory workspace-wide safety policy: the car must not move under

@@ -4,33 +4,352 @@ auto_map_race_node:
     racing_drive_topic: /auto_race/drive
     drive_topic: /drive
     pose_topic: /slam_pose
+    # Read-only: names the controller currently selected (gap_follow_node
+    # while mapping, pure_pursuit_node while racing) so the dashboard's
+    # tuning panel can say which node's knobs actually reach the car.
+    # Latched, published only on change. See auto_map_race_node.
+    controller_topic: /auto_map_race/controller
     map_frame: map
     base_frame: base_link
+    # Frame the lap recorder counts turning in. Odometry is never
+    # re-optimised, so the turn gate stops depending on how busy SLAM's
+    # pose graph was -- the 2026-08-19 run absorbed 106 corrections in one
+    # 136s lap and measured 335deg for a genuine revolution, against a
+    # 300deg gate. Geometry still comes entirely from map_frame.
+    odom_frame: odom
     control_rate_hz: 40.0
     command_timeout_sec: 0.5
+    # Print every state change immediately and periodically repeat the current
+    # command-selection/lap decision in the launch terminal (0 = changes only).
+    decision_log_period_sec: 1.0
 
     # Two laps are intentional: lap 1 discovers the course and closes the
     # SLAM loop; lap 2 records a cleaner map-frame raceline after closure.
+    # As of 2026-08-25, lap 2 is no longer accepted unconditionally -- see
+    # the adaptive-lap-count block below. mapping_laps keeps this same
+    # meaning (how many laps to record before evaluating); it is just no
+    # longer the unconditional stopping point.
     mapping_laps: 2
+    # --- Adaptive mapping-lap count (2026-08-25) ---
+    # The discovery lap (the first) is always discarded, unconditionally,
+    # never raced. Past that, a lap is accepted only if it passes the
+    # quality checks below; otherwise one more lap is recorded instead, up
+    # to this many laps total. This is a strict improvement over committing
+    # to mapping_laps' data unconditionally, which is what a fixed count
+    # used to do with no quality check at all.
+    max_mapping_laps: 3
+    # Well under the documented 106-correction pathological case from
+    # 2026-08-19. UNVALIDATED: no run this session closed even once, so
+    # tune against real "good" and "bad" lap data before trusting it.
+    mapping_lap_max_reanchors: 20
+    # Closed against the *original* fixed closure_distance gate, not one
+    # that had already widened past closure_widen_after_revolutions -- a
+    # lap that only closed because the gate opened up is a weaker signal
+    # that the car actually found its way back to the start.
+    mapping_lap_require_unwidened_closure: true
+    # Closed with heading comfortably inside closure_heading_deg's gate,
+    # not just barely under it.
+    mapping_lap_max_heading_margin_fraction: 0.5
+    # Closed within this many revolutions of turning, not two overlapping
+    # ones. NOT 1.0: real closure detection on this car's laps -- both
+    # good and bad -- consistently fires a little past exactly one
+    # revolution (1.03-1.06 measured across multiple mapping runs, sim and
+    # real), because the proximity gate requires getting *close to* the
+    # start point again, which the car's actual driven path does slightly
+    # after completing 360 degrees of turning, not exactly at it. A
+    # zero-tolerance "no trim at all" version of this check was verified
+    # (2026-08-25, racerbot_sim solo scenario) to reject essentially every
+    # lap unconditionally -- including a lap that produced a perfectly
+    # good raceline -- wasting the one extra retry this feature grants and
+    # landing on a worse lap by chance. 1.5 sits comfortably above the
+    # normal range and above closure_widen_after_revolutions (1.25, where
+    # the gate itself starts loosening -- already covered independently by
+    # mapping_lap_require_unwidened_closure above), while staying well
+    # under a genuine double-wrap (~2.0).
+    mapping_lap_max_revolutions: 1.5
     waypoint_spacing: 0.15
-    minimum_lap_distance: 20.0
+    # A sanity floor, not the closure gate. It WAS the gate, at 20.0m, which
+    # is longer than the ~15m loop this car is driven on -- so closure could
+    # not fire until the car had been round twice, and every racing line it
+    # ever generated was two overlapping laps. See recorded_path.py.
+    minimum_lap_distance: 5.0
+    # The closure gate that does not need to be told how big the course is:
+    # by the turning-tangent theorem one lap of a closed circuit is 360deg of
+    # accumulated yaw whatever its size. 300 leaves room for a lap driven
+    # with some counter-steer in it.
+    minimum_lap_turn_deg: 300.0
     minimum_lap_duration_sec: 15.0
     departure_distance: 2.0
-    closure_distance: 0.75
+    # How close to its start the car has to pass for the lap to count as
+    # closed. This was 0.75m, which existed to keep the start/finish seam
+    # short, because the seam used to be a single naked chord from the last
+    # recorded point to the first. It is not any more -- recorded_path trims
+    # to the last revolution by finding the earlier point nearest the final
+    # one, then resamples the whole loop -- so the gate can be what it should
+    # always have been: "did the car come back past its start".
+    #
+    # 0.75m was also simply too tight for a reactive controller weaving
+    # around traffic: the two-car scenario drove 413m and 3726 degrees of
+    # turning -- ten laps -- passing 6.5m wide of its start every time,
+    # without ever closing.
+    closure_distance: 1.5
+    # Above this, a map-frame pose step between control ticks is slam_toolbox
+    # correcting its pose graph rather than the car moving -- 0.12m at 40Hz is
+    # 4.8m/s, well past anything this car does while mapping. Corrections are
+    # applied to the already-recorded path instead of being recorded as
+    # geometry (LapRecorder._reanchor). 0 disables.
+    max_pose_jump_m: 0.12
     closure_heading_deg: 30.0
+    # A reactive controller does not repeat its line, so the car can lap
+    # a course indefinitely passing just outside a fixed closure_distance
+    # -- and every miss costs a full revolution, about 2.3 minutes on the
+    # 126m course this car actually maps. Past this many revolutions the
+    # proximity gate opens in proportion to the extra turning, up to
+    # max_closure_distance; the recording is then trimmed back to its
+    # final revolution so the raceline is still one lap. Set either to 0
+    # to restore a fixed gate.
+    closure_widen_after_revolutions: 1.25
+    max_closure_distance: 4.0
     transition_stop_sec: 2.0
+    # slam_toolbox's save_map/serialize_map block its executor, freezing the
+    # map->odom TF (and so /slam_pose) while they run. Racing does not start
+    # until both finish, so that freeze always lands while the car is
+    # deliberately stopped. If they overrun this, the handover proceeds
+    # anyway with a logged error -- the racing line is already on disk, and
+    # pure_pursuit's pose_frozen watchdog is the backstop.
+    map_save_timeout_sec: 20.0
     output_directory: ~/.ros/racerbot_auto
 
-    # Conservative simulator-validated profile. Raise physical limits only
-    # after wheels-off and low-speed validation on the real car.
+    # The speed profile for a course the car has just discovered at
+    # mapping_max_speed, on a line recorded from a live SLAM pose, in a room
+    # nobody has measured. Deliberately far below what pure_pursuit.yaml uses
+    # on a surveyed track with a hand-checked raceline.
+    #
+    # What sets the ceiling is not grip, it is *width*. The line comes from
+    # gap_follow, which drives about 0.25-0.35m from the wall at a corner,
+    # leaving roughly 0.1-0.2m once the car's own half-width is taken out --
+    # and pure pursuit's cross-track error through a corner near this car's
+    # turning circle was measured at 0.39-0.57m at 2.5-3.0 m/s. Those two
+    # numbers are the whole story: on a 1.8m indoor corridor the car runs
+    # wide and touches the wall, at any speed where the error exceeds the
+    # room. Raise these only on a course wide enough to absorb the error --
+    # and use `supervisor_config:=` to keep that per-course rather than
+    # editing the default for the narrow one.
+    #
+    # 2026-08-22: RAISED from 2.0 / 1.2 / 3.0 to match the ceilings
+    # pure_pursuit_node already enforces online (max_speed 4.0,
+    # max_lateral_accel 2.5, max_acceleration 6.0), so the profile is no
+    # longer the binding limit and the controller's own curvature cap
+    # v <= sqrt(2.5/|kappa|) becomes the backstop. Asked for deliberately,
+    # to race the newly optimized line as fast as the controller allows.
+    #
+    # READ THE PARAGRAPH ABOVE BEFORE RUNNING THIS ON A NARROW COURSE. The
+    # 0.39-0.57m cross-track error it reports was measured at 2.5-3.0 m/s --
+    # inside this range, not above it. On the 1.8m indoor corridor these
+    # numbers are expected to put the car into a wall. Use
+    # `supervisor_config:=` with a copy holding the old 2.0 / 1.2 / 3.0 for
+    # anywhere tight; this default now assumes a course wide enough to
+    # absorb half a metre of running wide.
     profile_max_speed: 4.0
     profile_min_speed: 0.5
     profile_max_lateral_accel: 2.5
-    profile_max_accel: 3.0
-    profile_max_brake: 8.0
-    profile_smoothing_window: 3
+    profile_max_accel: 6.0
+    # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit.yaml's
+    # max_braking_decel. Here it is the braking authority the *profile
+    # generator* assumes the car has when deciding how late it may still be
+    # at speed approaching a corner (the backward pass enforces
+    # v[i]^2 <= v[i+1]^2 + 2*a_brake*ds). Set above what the car can really
+    # achieve, it plans a line the car cannot slow down for. In
+    # pure_pursuit.yaml the identically named parameter is only a command
+    # slew rate and carries no such risk -- do not copy a value across.
+    # 3.0 is what gap_follow.yaml is willing to assume for this same car;
+    # this was 8.0, i.e. 2.7x that, and the car carried speed into the first
+    # corner of its first simulated race and hit the wall.
+    profile_max_brake: 3.0
     profile_smoothing_passes: 5
+
+    # --- Racing-line cleanup and acceptance (pure_pursuit/recorded_path.py) ---
+    # Must match the car: these decide what "the rack cannot steer this" means.
+    profile_max_steering_angle: 0.26
+    profile_wheelbase: 0.36
+    # Shortest wiggle kept before filtering harder. Just over the 1.35m
+    # minimum turning radius 0.26rad implies on the measured 0.36m
+    # wheelbase -- anything tighter in a recorded line is localisation, not
+    # driving. (It read 1.22m while the wheelbase was believed to be
+    # 0.324m; a longer wheelbase turns WIDER, so the car needs more room
+    # for the same rack angle, not less, and this 1.5m sits closer to the
+    # limit than it used to.)
+    profile_min_feature_wavelength: 1.5
+    # Fraction of the rack the finished line may need. 1.0 uses all of it;
+    # lower reserves steering for cross-track correction but refuses courses
+    # whose corners are near the car's own turning circle -- and this car's
+    # room, at roughly 1.4m corner radius, is one of those.
+    profile_curvature_margin: 1.0
+    # How far cleanup may move the line off the one actually driven. Filtering
+    # harder always looks better by curvature and eventually stops describing
+    # the same track; in a 1.4m corridor, 0.35m is most of the room there is.
+    profile_max_deviation: 0.35
+    # Refuse the handover outright past these: a line needing more than 1.5x
+    # the rack anywhere, or asking for more than the rack has over more than a
+    # quarter of the lap. Not quality gates -- they exist to stop pure pursuit
+    # being handed something it can only saturate against.
+    profile_reject_ratio: 1.5
+    profile_reject_fraction: 0.25
+    # The finished line is also checked against SLAM's own occupancy grid.
+    # Filtering a recorded lap rounds its corners *inward*, toward the chord
+    # and therefore toward the wall, and on a course whose corners sit near
+    # this car's 1.22m turning circle that is the direction that hurts: one
+    # measured simulator run finished with the line 0.05m from a wall while
+    # every other reported number looked healthy.
+    #
+    # This answers "does the car fit on this line", not "is there room to
+    # race it": 0.20m is the car's own 0.155m half-width plus a little,
+    # matching what optimize_raceline refuses an offline raceline for.
+    # Racing margin is the speed profile's job -- a line the car fits on but
+    # cannot hold at speed is a speed problem, and pure pursuit's cross-track
+    # error is what has to fit in whatever is left over. Raising this instead
+    # will simply refuse tight courses outright: gap_follow drives them with
+    # about 0.25-0.35m of clearance at the corners, because its own
+    # safety_margin puts it there, and no filter can add room that the
+    # driven line never had.
+    # 0.0 disables the check; so does never receiving a map, which is logged.
+    map_topic: /map
+    profile_wall_clearance: 0.20
+    profile_map_occupied_threshold: 50
+    # Stray-return cleanup, in cells, at the 0.05m map resolution: 8 cells
+    # is a ~20cm patch (raised from 4/10cm on 2026-08-25, per a "the map
+    # looks kinda dirty" report -- UNVALIDATED against a current map; the
+    # 4-cell figure below came from a measured blob-size breakdown, and 8
+    # has not had the same measurement done yet, so it could as easily be
+    # 6 or 12 -- re-measure before trusting it). Applied to the map written
+    # to disk and to the copy the generated racing line is checked against
+    # -- NOT to the live /map pure_pursuit uses for opponent detection,
+    # which must keep every obstacle the mapper reported. Only blobs with
+    # clear observed space all around them are removed: a real object
+    # occludes and so keeps an unknown shadow behind it, while a stray beam
+    # is a direction the LiDAR swept clear on every other pass -- so this
+    # is a strictly-scoped increase in cleanup aggressiveness, not a new
+    # risk: a real, occluding object is still never removed regardless of
+    # size. Set 0 to disable.
+    # At the old 4-cell/10cm value, measured on this car's own saved map:
+    # 12 phantom blobs in clear track removed, 34 near walls and the map
+    # edge deliberately kept.
+    map_despeckle_max_cells: 8
     pure_pursuit_node_name: pure_pursuit_node
+
+    # --- Minimum-curvature raceline optimization (Phase 4b, now inline) ---
+    # Without this the car races the lap gap_follow happened to drive, with
+    # the wobble filtered out. That line is safe but it is not fast: it was
+    # produced by a reactive controller aiming for the middle of the gap in
+    # front of it, which is not where the fast line goes.
+    #
+    # With it on, the recorded lap becomes a *seed*. refine_centerline walks
+    # it to the middle of the corridor it measures either side, and the
+    # optimizer then re-derives the least-curved line that fits inside the
+    # real track width. Cornering speed goes as sqrt(a_lat/|kappa|), so less
+    # curvature is directly more speed everywhere at once.
+    #
+    # Measured on a synthetic 126m circuit: mean |curvature| 0.0673 -> 0.0433,
+    # a 36% reduction, in 13.9s of the time the car is already stopped for
+    # the map save. It runs in _write_profile and cannot delay anything the
+    # car is doing, because the car is not doing anything.
+    #
+    # It fails safe. No map, a track too narrow to measure, a solver error,
+    # or a result that fails the same wall-clearance and steering checks the
+    # recording must pass -- any of these logs the reason and races the
+    # cleaned recording instead. Set false to skip it entirely.
+    optimize_raceline: true
+    # Arc-length resolution the optimization runs at. Cost scales with this;
+    # 0.30 is the TUM reference's own default.
+    optimize_spacing: 0.30
+    # Resolution of the waypoints actually handed to pure pursuit.
+    optimize_output_spacing: 0.15
+    # Re-linearisation passes. The objective should settle by 6-8; more is
+    # mostly wasted time.
+    optimize_iterations: 8
+    # Largest lateral step one pass may take, in meters. Caps how far the
+    # line can jump on a bad linearisation.
+    optimize_trust_region: 0.30
+    # Extra second-difference penalty. 0 is off, and off is right unless the
+    # line looks restless on a noisy recording -- it buys smoothness by
+    # giving up curvature, which is the thing being minimised.
+    optimize_smoothing_weight: 0.0
+    # Widths beyond this are treated as a measurement escaping through a
+    # gap in the wall rather than real track.
+    optimize_max_track_width: 6.0
+    optimize_centerline_passes: 4
+    optimize_centerline_smoothing: 3
+    # SAFETY: the corridor the optimizer is allowed to use is the measured
+    # track width minus (optimize_car_width / 2 + optimize_safety_margin) on
+    # each side. Understate either and the line is planned through space the
+    # car does not fit in. The car measures 0.30 m over the tires; 0.31
+    # matches the padded envelope in gap_follow.yaml / pure_pursuit.yaml
+    # (5 mm/side padding as of 2026-08-25, cut from 14.5 mm/side).
+    # Keep the margin at or above profile_wall_clearance.
+    optimize_car_width: 0.31
+    # Cut from 0.15 to 0.10 on 2026-08-25 -- deliberately the OPPOSITE of
+    # docs/racing-autonomy.md's own documented guidance for this dial
+    # ("the fast-versus-safe dial... raise it, don't lower it"). This is an
+    # intentional, user-directed departure that session, not an oversight:
+    # "the car can be riskier overall as we have the deadman switch...
+    # narrow the walls used in the route calculation to ensure it gets the
+    # best route."
+    #
+    # "Keep the margin at or above profile_wall_clearance" above refers to
+    # the COMBINED reduction (optimize_car_width/2 + optimize_safety_margin
+    # = 0.155 + 0.10 = 0.255m), not this value alone (0.10m, which is by
+    # itself below profile_wall_clearance's 0.20m and always has been --
+    # the old 0.15 was too). The combined figure is what actually bounds
+    # the corridor the optimizer plans inside, and it still clears
+    # profile_wall_clearance's separate, hard absolute refusal comfortably
+    # (0.255 > 0.20) -- that hard check (see its own comment above) is what
+    # actually enforces the floor, unconditionally, regardless of what this
+    # dial is set to; this dial only changes how often the optimizer's own
+    # line clears it on the first try.
+    optimize_safety_margin: 0.10
+
+    # --- Handing localization to the particle filter for the race ---
+    # During mapping there is no map to localize against, so slam_toolbox
+    # has to do both jobs at once. By the racing phase the map is finished
+    # and saved, and localizing against a known-correct map is a much easier
+    # problem than building one. slam_toolbox was measured making 106 pose
+    # jumps larger than 0.12m in a single 136s lap, and dropping scans while
+    # it did -- see docs/localization.md.
+    #
+    # So once the map is on disk this node starts particle_filter against
+    # it, seeds it with the pose SLAM already knows, waits for it to settle,
+    # and then republishes *its* estimate on pose_topic instead. pure_pursuit
+    # is not reconfigured and does not notice: this node has always been the
+    # thing publishing that topic.
+    #
+    # The particle filter's ray casting runs on the GPU and is ~4.8x faster
+    # than the CPU path, which is what makes it affordable at racing speed --
+    # see docs/gpu-acceleration.md. The launch it starts re-checks that the
+    # GPU ray caster is actually usable before bringing anything up.
+    #
+    # Fails safe at every step: no saved map, a filter that will not start,
+    # one that never converges, or one that goes quiet later -- each logs the
+    # reason and leaves the car racing on slam_toolbox, as it did before this
+    # existed. Set false to skip the handover entirely.
+    localize_after_mapping: true
+    pf_pose_topic: /pf/viz/inferred_pose
+    pf_initialpose_topic: /initialpose
+    # How long the filter gets to produce pf_settle_poses before this gives
+    # up on it. It has to load and index the map first, which on a saved
+    # course map measured 0.06s but scales with map area.
+    pf_startup_timeout_sec: 45.0
+    # Consecutive poses required before the car will steer on it. At the
+    # filter's update rate this is well under a second of standing still.
+    pf_settle_poses: 20
+    # The filter's pose is the LiDAR's, not the rear axle's: it ray-casts each
+    # scan from the particle's own pose. The seed sent to it is moved forward
+    # by this offset, and its estimate moved back before it is republished on
+    # pose_topic (which pure_pursuit reads as base_link).
+    laser_offset_x: 0.26              # meters -- MEASURED rear-axle base_link to LiDAR
+    laser_offset_y: 0.0
+    # Older than this and the estimate is treated as gone, not late. One
+    # lapse demotes it back to slam_toolbox for the rest of the run.
+    pf_pose_timeout_sec: 0.5
 
     enable_deadman: true
     joy_topic: /joy
