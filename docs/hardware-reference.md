@@ -25,7 +25,7 @@ Physical connections, addresses, and config values for this specific car. Everyt
 ```yaml
 speed_to_erpm_gain: 3650.0       # /** block: sets the motor command
 speed_to_erpm_offset: 0.0
-steering_angle_to_servo_gain: -1.1135
+steering_angle_to_servo_gain: -0.83
 steering_angle_to_servo_offset: 0.366
 servo_min: 0.05
 servo_max: 0.75
@@ -33,7 +33,7 @@ servo_max: 0.75
 speed_to_erpm_gain: -4040.0      # negated on purpose -- see below
 wheelbase: 0.36   # meters -- car 2's measurement, assumed for car 1 (see Physical dimensions)
 ```
-The servo formula: `servo_position = -1.1135 × steering_angle + 0.366`. Steering angle `0.0` → servo position `0.366` (center on this car, set 2026-10-21 from a drive-straight run: 16 cm left over 2.83 m at 0.35). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.366` is neutral, not a bug. (Car 2's neutral is a different value; each car's servo is calibrated separately.)
+The servo formula: `servo_position = -0.83 × steering_angle + 0.366` (gain fitted 2026-10-21 from five floor half circles; the old -1.1135 under-predicted real steering by about 30%). Steering angle `0.0` → servo position `0.366` (center on this car, set 2026-10-21 from a drive-straight run: 16 cm left over 2.83 m at 0.35). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.366` is neutral, not a bug. (Car 2's neutral is a different value; each car's servo is calibrated separately.)
 
 **The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-4040.0` to cancel that (magnitude calibrated 2026-10-21 from five short tape runs, median of implied gains: 3959, 3936, 4044, 4088, 4179); the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
 

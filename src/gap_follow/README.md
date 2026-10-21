@@ -461,7 +461,7 @@ fixes the **minimum turn radius at 1.218 m**, and no parameter in this file
 changes it.
 
 > **Car 1:** that derivation is car 2's servo. Car 1's calibration
-> (`servo = -1.1135*delta + 0.4` over 0.05–0.75) reaches ±0.314 rad, so on
+> (`servo = -0.83*delta + 0.366` over 0.05–0.75, measured 2026-10-21) reaches +0.381 / −0.463 rad, so on
 > car 1 0.26 is a conservative limit inside the envelope, not the envelope
 > itself. It was kept at 0.26 when car 2's workspace was ported (October
 > 2026); raising it is a tuning decision to test wheels-up first.

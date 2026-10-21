@@ -1,8 +1,12 @@
 """Writing vesc.yaml: only the asked-for values change, in the right block.
 
-Runs against a copy of the real, committed vesc.yaml so its comments and
-layout are what the editor has to survive. The filesystem is used for real
-(pytest tmp_path), not mocked.
+Most tests run against data/vesc_car1_f03f784.yaml, car 1's vesc.yaml frozen
+at commit f03f784, so their exact expected values (offset 0.4, odom gain
+-3650.0, steering gain -1.1135) do not change every time the car is
+recalibrated. test_live_vesc_yaml_survives_the_editor runs the editor on the
+current, real vesc.yaml so its comments and layout are still what the editor
+is proven to survive. The filesystem is used for real (pytest tmp_path), not
+mocked.
 """
 
 import math
@@ -20,9 +24,12 @@ REAL_VESC_YAML = (Path(__file__).resolve().parents[2]
                   / 'f1tenth_system' / 'f1tenth_stack' / 'config' / 'vesc.yaml')
 
 
+FROZEN_VESC_YAML = Path(__file__).resolve().parent / 'data' / 'vesc_car1_f03f784.yaml'
+
+
 @pytest.fixture
 def original():
-    return REAL_VESC_YAML.read_text(encoding='utf-8')
+    return FROZEN_VESC_YAML.read_text(encoding='utf-8')
 
 
 def _params(text, block):
@@ -206,3 +213,30 @@ def test_real_file_round_trips_unchanged_values(original):
     })
     assert new == original
     assert math.isclose(current['steering_angle_to_servo_gain'], -1.1135)
+
+
+@pytest.mark.parametrize('key', [
+    'steering_angle_to_servo_gain',
+    'steering_angle_to_servo_offset',
+    'speed_to_erpm_gain',
+])
+def test_live_vesc_yaml_survives_the_editor(key):
+    # Oracle: invariants, not values. The live file holds whatever car 1 is
+    # calibrated to today; editing one key must change exactly one line, to
+    # the new value, keep every comment, and leave every other value alone.
+    live = REAL_VESC_YAML.read_text(encoding='utf-8')
+    before = vesc_yaml.read_values(live)
+    target = round(before[key] * 1.1 + 0.01, 4)   # always differs from today's
+    new = vesc_yaml.update_text(live, {key: target})
+    vesc_yaml.verify(live, new, {key: target})
+    after = vesc_yaml.read_values(new)
+    assert after[key] == target
+    for other in before:
+        if other != key:
+            assert after[other] == before[other], other
+    assert _comments(new) == _comments(live)
+    changed = [b for a, b in zip(live.splitlines(), new.splitlines()) if a != b]
+    assert len(changed) == 1, changed
+    assert changed[0].strip().startswith(key + ':')
+    # And writing today's value back reproduces the file byte for byte.
+    assert vesc_yaml.update_text(new, {key: before[key]}) == live

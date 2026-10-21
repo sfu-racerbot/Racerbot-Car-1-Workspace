@@ -181,7 +181,7 @@ Now look at where `current_steering_angle` comes from. The config sets `use_serv
 
 So the car's heading is an open-loop integration of what it *asked* the steering to do. Every one of these becomes unbounded heading error:
 
-- servo calibration error (the `-1.1135` gain and `0.4` offset on car 1, in [hardware-reference.md](hardware-reference.md))
+- servo calibration error (the `-0.83` gain and `0.366` offset on car 1, in [hardware-reference.md](hardware-reference.md))
 - mechanical slop in the steering linkage
 - tyre slip, which grows with speed and cornering force
 - understeer — at speed the car simply does not turn as tightly as the model says

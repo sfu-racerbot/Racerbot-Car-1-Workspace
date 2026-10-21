@@ -95,8 +95,9 @@ pure_pursuit_node:
 
     # --- Steering limit ---
     # Derived from car 1's servo calibration in vesc.yaml:
-    #   servo = -1.1135 * steering_angle + 0.4, servo clamped to [0.05, 0.75]
-    # Solving both ends: +0.314 rad at servo=0.05, -0.314 rad at servo=0.75.
+    #   servo = -0.83 * steering_angle + 0.366, servo clamped to [0.05, 0.75]
+    # Solving both ends: +0.381 rad at servo=0.05, -0.463 rad at servo=0.75
+    # (gain measured from floor circles 2026-10-21, docs/hardware-reference.md).
     # 0.26 (car 2's limit, ported unchanged) stays inside that in both
     # directions with margin, so every command is physically achievable. Re-derive this
     # if vesc.yaml's gain/offset/servo_min/servo_max ever change.
