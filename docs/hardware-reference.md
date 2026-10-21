@@ -30,12 +30,12 @@ steering_angle_to_servo_offset: 0.4
 servo_min: 0.05
 servo_max: 0.75
 # vesc_to_odom_node block only:
-speed_to_erpm_gain: -3650.0      # negated on purpose -- see below
+speed_to_erpm_gain: -4040.0      # negated on purpose -- see below
 wheelbase: 0.36   # meters -- car 2's measurement, assumed for car 1 (see Physical dimensions)
 ```
 The servo formula: `servo_position = -1.1135 × steering_angle + 0.4`. Steering angle `0.0` → servo position `0.4` (center on this car). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.4` is neutral, not a bug. (Car 2's neutral is a different value; each car's servo is calibrated separately.)
 
-**The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-3650.0` to cancel that; the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
+**The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-4040.0` to cancel that (magnitude calibrated 2026-10-21 from five short tape runs, median of implied gains: 3959, 3936, 4044, 4088, 4179); the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
 
 **Servo output must be enabled in the VESC's own firmware config** — this is separate from anything in this repo and isn't visible to `ros2`/`colcon` at all. If a freshly-flashed or reset VESC has steering that does nothing despite `fault_code: 0` and a clean serial connection, check this first. Requires **VESC Tool** (official app, vesc-project.com) connected over USB — which means stopping the ROS bringup first, since only one process can hold the serial port. Full story in [troubleshooting.md](troubleshooting.md).
 
