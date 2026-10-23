@@ -12,6 +12,7 @@ mocked.
 import math
 import os
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -90,7 +91,7 @@ def test_read_values_reports_what_each_node_uses(original):
 
 
 @pytest.mark.parametrize('updates,match', [
-    ({'servo_max': 1.0}, 'not a calibration value'),
+    ({'brake_max': 1.0}, 'not a calibration value'),   # servo_max became writable 2026-10-16
     ({'speed_max': 1.0}, 'not a calibration value'),
     ({'steering_angle_to_servo_gain': float('nan')}, 'finite number'),
     ({'steering_angle_to_servo_gain': float('inf')}, 'finite number'),
@@ -123,7 +124,12 @@ def test_refuses_a_duplicated_key():
 
 def test_verify_catches_any_other_change(original):
     tampered = vesc_yaml.update_text(original, {'steering_angle_to_servo_offset': 0.6})
-    tampered = tampered.replace('servo_max: 0.75', 'servo_max: 0.95')
+    # Tamper with whatever servo_max the file holds, and prove the
+    # tamper landed, so a recalibration cannot turn this into a no-op edit.
+    tampered, count = re.subn(r'^(\s*servo_max:\s*)\S+', r'\g<1>0.123', tampered,
+                              flags=re.MULTILINE)
+    assert count == 1
+    assert _params(tampered, '/**')['servo_max'] != _params(original, '/**')['servo_max']
     with pytest.raises(ValueError, match='changed other values in the /\\*\\* block'):
         vesc_yaml.verify(original, tampered, {'steering_angle_to_servo_offset': 0.6})
 
@@ -167,7 +173,7 @@ def test_apply_writes_nothing_when_the_edit_is_refused(tmp_path, original):
     target = tmp_path / 'vesc.yaml'
     target.write_text(original, encoding='utf-8')
     with pytest.raises(ValueError):
-        vesc_yaml.apply(target, {'servo_max': 1.0}, tmp_path / 'backups')
+        vesc_yaml.apply(target, {'brake_max': 1.0}, tmp_path / 'backups')
     assert target.read_text(encoding='utf-8') == original
     assert not (tmp_path / 'backups').exists()
 
@@ -213,6 +219,12 @@ def test_real_file_round_trips_unchanged_values(original):
     })
     assert new == original
     assert math.isclose(current['steering_angle_to_servo_gain'], -1.1135)
+    # And a value nobody calibrates to, so a reader that returns today's
+    # number without parsing it fails.
+    edited = re.sub(r'^(\s+steering_angle_to_servo_gain:\s*)\S+', r'\g<1>-1.234567',
+                    original, flags=re.MULTILINE)
+    assert math.isclose(vesc_yaml.read_values(edited)['steering_angle_to_servo_gain'],
+                        -1.234567, abs_tol=0.0)
 
 
 @pytest.mark.parametrize('key', [

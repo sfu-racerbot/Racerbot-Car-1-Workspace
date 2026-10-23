@@ -40,9 +40,11 @@ After that, follow whichever branch below matches what you're doing.
 
 | Doc | What's in it, and who it's for |
 |---|---|
+| [launchstart.md](launchstart.md) | The daily cheat sheet: one copy-paste command per mode (drive, gap_follow, map a course in 3 laps, race on the saved map, dashboard, record, simulator, stop), with what you see when it works. For anyone running the car today. |
 | [operations.md](operations.md) | Step-by-step procedures: driving, mapping, localizing, running autonomy, racing, shutting down. For anyone actually using the car. |
 | [sim-validation.md](sim-validation.md) | Test your driving code against simulated physics without the car, and watch it on the dashboard from your laptop. For anyone who changed driving code and wants to know if it works. |
 | [run-diagnostics.md](run-diagnostics.md) | Recording a run so it can be diagnosed afterwards, plus the AI-agent prompt template. For anyone debugging a run that went wrong. |
+| [run-analysis.md](run-analysis.md) | Turning a recorded run into a report: why every stop happened, how the car really responded to its commands, a replay through the simulator, fitting the simulator to the car, and adding a SLAM map as a simulator track. For anyone who has just recorded a run. |
 | [wiimote.md](wiimote.md) | Drive the car with a Nintendo Wiimote: one-time Bluetooth pairing, auto-reconnect, the controls, and building the Jetson kernel driver. For anyone who wants a second manual controller. |
 | [odom-calibration.md](odom-calibration.md) | A browser wizard for tape-measure calibration of wheel odometry and steering. For anyone whose distances read wrong or whose car pulls to one side. |
 | [git-setup.md](git-setup.md) | Which `src/` packages are real submodules vs. vendored code, and how to update them safely. Read before pulling upstream changes into `f1tenth_system`. |
@@ -60,6 +62,8 @@ After that, follow whichever branch below matches what you're doing.
 | Doc | What's in it, and who it's for |
 |---|---|
 | [racing-autonomy.md](racing-autonomy.md) | The map-based race stack end to end: SLAM, localization, racing line, velocity profile, pure pursuit, overtaking. The biggest doc here; it opens with a plain-language summary. |
+| [steering-laws.md](steering-laws.md) | The four ways the race controller can steer along the racing line (pure pursuit, Stanley, LQR, MPC): how each works, how to pick one at launch, and how to tune and judge one in the simulator. For anyone who wants to try something other than the default. |
+| [gap-follow.md](gap-follow.md) | What changed in `gap_follow` in October 2026 (swept-path clearance, arc guard, corner setup): what each does, how to turn it off, the simulator results, and the order to bring it up on the car. Read before running `gap_follow`. |
 | [localization.md](localization.md) | Where the car's position estimate comes from, why it used to arrive late, what was tuned, and what would improve it next. For anyone whose car is slow to know where it is, or whose map will not close. |
 | [web-dashboard.md](web-dashboard.md) | The browser dashboard on car 1 (`rb1`): starting it, opening it at dashboard.sfuracerbot.ca, car 1's settings file, the live-tuning contract with the driving nodes, and reinstalling the bridge's boot service. The full manual moved to the `src/web_dashboards` submodule; this page links it. Safe to run alongside anything. |
 | [foxglove-bridge.md](foxglove-bridge.md) | foxglove_bridge for Lichtblick (moved to the `src/web_dashboards` submodule; this page links it): what a remote user can see and change, and why they can publish to **no topic at all**. For anyone opening Lichtblick, or changing what it may do. |

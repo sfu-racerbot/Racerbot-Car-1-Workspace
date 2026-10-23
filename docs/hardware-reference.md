@@ -37,6 +37,14 @@ The servo formula: `servo_position = -0.83 × steering_angle + 0.366` (gain fitt
 
 **The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-4040.0` to cancel that (magnitude calibrated 2026-10-21 from five short tape runs, median of implied gains: 3959, 3936, 4044, 4088, 4179); the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
 
+**Steering limits, 2026-10-22.** Car 1's 2026-10-21 check circles at the `-0.83` gain gave **0.388 rad right and 0.401 rad left** for a 0.380 rad command (full stick, +2% and +5%). Left full stick lands on `servo_min` (0.366 − 0.83 × 0.38 = 0.051), so 0.38 rad is the most full stick can be without clipping. Car 2 has its own, different numbers (its own circles, 2026-10-16); they don't apply here.
+
+- Full stick (`joy_teleop.yaml` scale) is **0.38 rad**, which both sides reach.
+- Autonomy is held below that: `max_steering_angle` **0.33 rad = 19°** in `gap_follow.yaml` and `pure_pursuit.yaml` (1.05 m minimum turning radius). The race planner's `profile_max_steering_angle` is **0.30 rad = 17°** in `auto_map_race.yaml` (1.16 m), so the controller has steering left on the tightest planned corner. Both were 0.26 until the 2026-10-22 car 2 port. **Not yet validated on car 1:** wheels off the ground, then low speed.
+- `src/racerbot_launch/test/test_steering_limits_fit_servo.py` fails if any of these four limits would be clipped by `servo_min`/`servo_max`, or if the planner is not below the controller.
+- The calibration wizard can run the circle procedure itself: see [odom-calibration.md](odom-calibration.md#finding-how-far-the-steering-really-goes).
+- Re-centring the servo horn, a different servo, or any linkage change invalidates all of this. Redo the drive-straight run and the circles (`docs/odom-calibration.md`).
+
 **Servo output must be enabled in the VESC's own firmware config** — this is separate from anything in this repo and isn't visible to `ros2`/`colcon` at all. If a freshly-flashed or reset VESC has steering that does nothing despite `fault_code: 0` and a clean serial connection, check this first. Requires **VESC Tool** (official app, vesc-project.com) connected over USB — which means stopping the ROS bringup first, since only one process can hold the serial port. Full story in [troubleshooting.md](troubleshooting.md).
 
 **The onboard IMU reports all zeros.** Measured 2026-08-19: `/sensors/imu/raw` publishes steadily at **50 Hz**, and every field — all three gyro axes, all three accelerometer axes — is exactly `0.0`. There is no gravity vector on any accelerometer axis, which is the giveaway: a working IMU lying still still reads about 9.81 m/s² somewhere.
@@ -152,5 +160,6 @@ The wheelbase and LiDAR offset are inputs to things that were recorded *before* 
 
 - **Racing lines** recorded under the old 0.33 m LiDAR offset are about 0.07 m out along the car's heading. Re-record rather than re-using them for a race.
 - **`odom` heading** was integrated as `speed × tan(steering) / wheelbase` with a wheelbase 10% too short. Every commanded steering angle therefore produced about 10% more yaw in the estimate than the car actually turned. Re-run [odom calibration](../src/odom_calibration/README.md).
-- **The minimum turning radius grew**, from 1.22 m to **1.35 m** (`tan(0.26) / 0.36`). A longer wheelbase turns *wider* for the same rack angle, so a course the optimizer previously accepted may now be refused — that refusal is correct, and the old acceptance was not.
+- **The minimum turning radius grew**, from 1.22 m to **1.35 m** (`0.36 / tan(0.26)`).
+- Since 2026-10-22 car 1's limits are 0.33 rad for the controllers and 0.30 rad for the race planner: **1.05 m** and **1.16 m** (see the steering limits above). A longer wheelbase turns *wider* for the same rack angle, so a course the optimizer previously accepted may now be refused — that refusal is correct, and the old acceptance was not.
 - **Saved maps** are still usable; the map itself does not change. What changed is where `base_link` sits relative to the scan that built it.

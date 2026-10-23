@@ -688,7 +688,7 @@ A target to the left ($y_{body}>0$) gives positive curvature; a target to the ri
 
 $$\delta = \arctan(L \cdot \kappa)$$
 
-That's finally clipped to `max_steering_angle` (default `0.26 rad`, ≈15°, derived from this car's real servo limits below) and rate-limited against the previous command by `max_steering_rate`.
+That's finally clipped to `max_steering_angle` (`0.33 rad`, 19°, on car 1 since 2026-10-22, from car 1's measured circles in `docs/hardware-reference.md`; car 2's history below) and rate-limited against the previous command by `max_steering_rate`.
 
 </details>
 
@@ -785,7 +785,11 @@ None of the above replaces wheels-off-ground testing, or a human ready to cut po
 ### Where `0.26 rad` comes from
 
 <details>
-<summary><b>The derivation</b> — from this car's real servo calibration, and asymmetric. Re-derive it if the servo ever changes.</summary>
+<summary><b>The derivation</b> — from car 2's old servo calibration (history; car 1's numbers are in hardware-reference.md).</summary>
+
+> **Car 1, 2026-10-22:** `max_steering_angle` **0.33 rad**, planner **0.30 rad**, from car 1's own circles (`-0.83` / `0.366`, full stick 0.38 rad reached both sides). Not yet validated on car 1.
+>
+> **Car 2, 2026-10-16:** car 2's steering was recalibrated with measured circles (`docs/hardware-reference.md`): gain `-0.78`, offset `0.5904`, `servo_max: 0.95`. Both sides now reach about 25°. `max_steering_angle` is now **0.349 rad (20°)**, leaving 5° for gain error below 19° where nothing was measured, and the race planner's `profile_max_steering_angle` is **0.30 rad (17°)**, so the controller has steering left to correct with on the tightest planned corner. `racerbot_launch/test/test_steering_limits_fit_servo.py` checks every shipped limit against `vesc.yaml`'s servo clip. The derivation below is the history of the old, unmeasured `-1.2135` calibration.
 
 This car's actual servo calibration lives in `src/f1tenth_system/f1tenth_stack/config/vesc.yaml`:
 
@@ -998,6 +1002,48 @@ But it needs an accurate dynamics model, a QP or NLP solver running fast enough 
 
 ---
 
+## Choosing a steering law
+
+The controller can steer with one of four laws, selected at launch with
+`steering_law` (or `ros2 launch pure_pursuit pure_pursuit_launch.py steering_law:=<law>`).
+Everything else the node does — the LB deadman, the localization and cross-track
+watchdogs, off-line recovery, overtaking, the reactive LiDAR safety net, and the
+steering slew and curvature speed caps — is **unchanged** by the choice. The law
+is swapped in *between* those, and only ever picks a steering angle; speed stays
+with the profile and the node's caps no matter what is selected.
+
+The four laws, in plain words:
+
+- **`pure_pursuit`** (the default) steers toward a point some distance ahead on the
+  line. Simple, robust, and the baseline every other law must beat.
+- **`stanley`** looks at the *front axle* instead: how far it is to the side of the
+  line and which way the car is pointing. It corrects sideways error directly and
+  has no lookahead to tune.
+- **`lqr`** describes how far off the line the car is and how crooked it is as two
+  numbers, and applies a fixed feedback rule (`steering = feedforward − K·[e, θ]`)
+  tuned to trade hugging the line against gentle steering. The gain `K` is scheduled
+  on speed.
+- **`mpc`** plans the next second of steering moves (20 moves, 50 ms apart) that keep
+  the car on the line through the bends ahead, while never exceeding the servo's
+  angle or speed limits — then applies the first and re-plans next tick. It is the
+  only law that sees a bend coming precisely and respects the steering rate as a
+  hard limit. It needs the `osqp` solver
+  ([install](steering-laws.md#installing-osqp-for-mpc)).
+
+How each law works, its parameters, how they were tuned, and the judged results
+are in **[steering-laws.md](steering-laws.md)**. In short: all three alternatives
+beat pure pursuit narrowly in the simulator (2026-10-19), none has driven the real
+car yet, and pure pursuit stays the default.
+
+**A law is only selected on the car after it has beaten pure pursuit in the
+simulator comparison harness** — selecting a law is never evidence it is better.
+The harness, the promotion rule, and the judging protocol live in
+[docs/sim-validation.md](sim-validation.md). The law and its gains are launch-time
+only (never live-tunable from the dashboard), because the node builds the law once
+at startup and a runtime change would report a value the control loop never uses.
+
+---
+
 ## Parameter reference
 
 All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that file for inline comments too.
@@ -1025,7 +1071,7 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `max_braking_decel` | `8.0` | m/s²; cap on how fast a *normal* command may fall. Emergency stops are never rate-limited |
 | `max_steering_rate` | `1.0` | rad/s; steering slew limit between commands |
 | `command_slew_max_dt` | `0.10` | s; longest interval one slew step may integrate, so a stalled loop can't cash in a jump |
-| `max_steering_angle` | `0.26` | rad; derived from this car's real servo limits, see above |
+| `max_steering_angle` | `0.33` | rad (19°) on car 1; from car 1's measured steering calibration, see above |
 | `odom_timeout_sec` | `0.5` | Lookahead falls back to the profiled speed past this. Not a stop watchdog |
 | `pose_timeout_sec` | `0.5` | Localization watchdog |
 | `max_cross_track_error` | `1.0` | Lost/kidnapped watchdog, meters |

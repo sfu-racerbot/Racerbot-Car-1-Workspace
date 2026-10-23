@@ -13,10 +13,10 @@
 #                       (on the 2026-08-06 run: ~80% of all driving ticks)
 #   corner_speed_wide   the same cap on a corner sensed as wide
 #   max_lateral_accel   curvature cap: v <= sqrt(max_lateral_accel / curvature).
-#                       At this car's tightest corners (~0.82/m) 1.0 gives
-#                       ~1.1 m/s, so above that raising corner_speed alone
-#                       changes nothing in those corners. A grip limit --
-#                       raise in small steps.
+#                       Since 2026-10-19 (2.0) this and the acceleration ramp
+#                       are what bind most ticks in simulation. A grip limit --
+#                       raise in small steps, and drop it back to 1.0 first if
+#                       the car feels too fast in corners on the floor.
 #   max_acceleration    SAFETY-CRITICAL: the braking the car assumes it has
 #                       for the clearance it sees. Raising it lets the car
 #                       drive faster than it can stop. Do not raise to go
@@ -79,12 +79,16 @@ gap_follow_node:
     #
     # Raised 2026-09-26 (1.1 -> 1.5, max 2.5 -> 3.5, min 0.8 -> 1.0) to make
     # the car faster. NOT yet validated on the car. Note max_lateral_accel
-    # below still caps the tightest corners near 1.1 m/s.
+    # below still caps the tightest corners near 1.0 m/s (full lock 0.33).
     corner_speed: 1.5
     max_speed: 3.5
     min_speed: 1.0
-    # Symmetric achievable envelope from the calibrated servo mapping.
-    max_steering_angle: 0.26
+    # 0.33 rad = 19 deg (was 0.26). Car 1's 2026-10-21 check circles reached
+    # 0.388 rad right and 0.401 rad left at full stick (0.38 rad,
+    # docs/hardware-reference.md); 0.33 leaves ~3 deg for gain error. Must fit
+    # inside vesc.yaml's servo clip (test_steering_limits_fit_servo.py).
+    # NOT yet validated on car 1: wheels up first.
+    max_steering_angle: 0.33
     # Steering is proportional to the selected gap's bearing, clipped to
     # max_steering_angle: 1.0 means "point the wheels at the gap". This
     # replaced a Pure Pursuit curvature law that could not physically ask for
@@ -92,7 +96,18 @@ gap_follow_node:
     # so it hugged walls instead of leaving them. Raise above 1.0 only if the
     # car is still slow to leave a wall; too high will make it weave.
     steering_gain: 1.0
-    max_lateral_accel: 1.0
+    # Above this speed (m/s) the bearing gain falls as 1/speed, which keeps
+    # the steering loop's phase margin roughly constant: with the 0.15 s
+    # steering lag measured on run 20261019-200703 and full gain, the car
+    # weaves at speed (docs/gap-follow.md).
+    # 0 disables. Simulator-validated only.
+    steering_gain_speed_ref: 1.8
+    # Raised 1.0 -> 2.0 on 2026-10-19 with the swept-path / corner-setup
+    # rework: 1.0 m/s^2 (~0.1 g) held the car near 1.4 m/s through every
+    # corner. 2.0 is still below pure_pursuit's 2.5 on the same car and well
+    # under the simulator's grip limit (0.7 g). Simulation only, not yet
+    # validated on the floor -- see docs/gap-follow.md#validation.
+    max_lateral_accel: 2.0
     max_acceleration: 3.0
     # SAFETY-CRITICAL, and NOT the same knob as pure_pursuit's identically
     # named one. Here it is the braking authority the car *assumes it has*
@@ -102,9 +117,35 @@ gap_follow_node:
     # In pure_pursuit the same name is only a command slew rate and carries no
     # such risk -- do not copy a value across from there.
     max_braking_decel: 3.0
-    max_steering_rate: 1.0
+    # The car keeps going at full speed for this long after a slower command:
+    # ROS -> VESC transport plus the VESC speed loop. Measured ~0.28 s on run
+    # 20261019-200703 (docs/run-analysis.md); the stopping-distance ceiling
+    # subtracts speed * latency from the room it sees before applying
+    # max_braking_decel. 0 restores the old formula. Simulator-validated only.
+    braking_latency_sec: 0.25
+    # Raised from 1.0 on 2026-10-20: at 1.0 rad/s the rack needs 0.35 s to
+    # reach full lock, and in the recalibrated simulator square corners were
+    # lost to that alone. The servo's real slew rate is not measured; the
+    # simulator models it at 3.2 rad/s (vesc.yaml max_servo_speed, a smoother
+    # bringup does not run). Simulator-validated only.
+    max_steering_rate: 2.0
     # Never let a long scan pause turn into one unbounded command jump.
     command_slew_max_dt: 0.10
+    # Hold the lowest desired speed of this many seconds instead of following
+    # every scan's ceiling up and down: the car's speed loop takes ~0.3 s to
+    # answer, so chasing each wobble means accelerating into a dip and braking
+    # out of it. Only ever lowers speed. 0 disables. Simulator-validated only.
+    speed_hold_sec: 0.0
+    # Narrow-corridor ceiling (2026-10-20), the condition the TTC corridor
+    # change was approved on: the speed falls linearly from max_speed when the
+    # body is open_corridor_clearance (m) from the nearer side wall, to
+    # narrow_corridor_speed at narrow_corridor_clearance and below. Replaces
+    # the hard stops the old 0.18 m TTC corridor made for side walls with a
+    # smooth slowdown. narrow_corridor_speed >= max_speed turns it off.
+    # Simulator-validated only.
+    narrow_corridor_speed: 2.5
+    narrow_corridor_clearance: 0.05
+    open_corridor_clearance: 0.15
     # --- Rectangular vehicle footprint ---
     # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
     # published figures the earlier values came from:
@@ -295,6 +336,116 @@ gap_follow_node:
     centering_full_side_distance: 4.0
     centering_zero_side_distance: 5.0
 
+    # --- Swept-path clearance (docs/gap-follow.md#swept-path-clearance) ---
+    # The braking speed ceiling uses how far the BODY can drive along the arc
+    # it is on before reaching an obstacle, instead of the minimum range in
+    # the +/-30deg forward cone. In a 1.5m hallway that cone reads the side
+    # walls (~1.25m) and capped the car at ~2.4m/s on empty straights.
+    # Creeping and the escape logic still use the cone, unchanged.
+    enable_swept_clearance: true
+    # Extra width on each side of the body counted as "in the path". Small on
+    # purpose: the 0.20m forward_stop_clearance reserve is the longitudinal
+    # margin, and the TTC brake has its own corridor (ttc_path_margin).
+    swept_clearance_margin: 0.05
+    swept_clearance_max_length: 3.0   # m -- beyond this the path counts as clear
+
+    # --- Arc guard (docs/gap-follow.md#arc-guard) ---
+    # If the steering the gap logic asks for would sweep the body into
+    # something within arc_guard_length (or the stopping distance, if longer),
+    # use the nearest steering angle whose arc is clear. This is what stops
+    # the rear of the car clipping an inner corner. Never acts on open track.
+    enable_arc_guard: true
+    arc_guard_length: 1.0          # m
+    arc_guard_margin: 0.05         # m each side of the body
+    # Authority bound, checked at startup: at most half of max_steering_angle.
+    # Car 1: 0.165 = half of its 0.33 (car 2 uses 0.1745, half of its 0.349);
+    # gap_follow_node refuses to start if this exceeds half.
+    arc_guard_max_correction: 0.165
+    arc_guard_candidates: 29       # steering angles tried across the full range
+    # When no arc within the bound is clear: 'freest' takes the one with the
+    # most free length, 'request' leaves the gap's own choice. 'freest' can
+    # unwind a needed turn into the outer wall (docs/gap-follow.md).
+    arc_guard_blocked_fallback: request
+
+    # --- Corner setup (docs/gap-follow.md#corner-setup) ---
+    # On the approach to a turn in a corridor, move toward the OUTSIDE wall so
+    # the car turns in late (a racing line) instead of hugging the inside from
+    # the moment the bend appears. Off on straights and in open rooms.
+    enable_corner_setup: true
+    # Target position: this fraction of the room between the middle and the
+    # outside wall (room = corridor_half - car_width/2 - wall_margin).
+    corner_setup_fraction: 0.6
+    corner_setup_wall_margin: 0.10
+    corner_setup_gain: 0.6            # rad per m of lateral error
+    # Authority bound, checked at startup: at most half of max_steering_angle.
+    corner_setup_max_steering: 0.10
+    # Turn detection (gap_logic.side_opening_signal): in a forward-diagonal
+    # sector on each side, the fraction of beams that reach more than
+    # excess_threshold past where that side's wall would be if it carried on
+    # -- i.e. that see around the end of the wall. Left fraction minus right.
+    # Setup starts at zero_signal and is fully on at full_signal.
+    corner_setup_zero_signal: 0.03
+    corner_setup_full_signal: 0.12
+    corner_setup_sector_lo_deg: 10.0
+    corner_setup_sector_hi_deg: 80.0
+    corner_setup_excess_threshold: 0.30   # m
+    # Distance the body can drive straight ahead (to the end of the straight):
+    # setup fades in from far_zero to far_full, and back out from near_full to
+    # near_zero, which is the turn-in point -- below it the car must be free
+    # to turn. Must satisfy near_zero < near_full <= far_full < far_zero.
+    corner_setup_far_zero: 4.0
+    corner_setup_far_full: 2.5
+    corner_setup_near_full: 1.6
+    corner_setup_near_zero: 1.1
+    # Both side walls must be within this (corridor, not open room).
+    corner_setup_full_side_distance: 1.5
+    corner_setup_zero_side_distance: 2.5
+
+    # --- Opponent awareness: other cars on track (simulator-validated only) ---
+    # Off by default: with one car on track nothing below runs, and the
+    # node's commands are identical to having no such feature
+    # (test_opponent_awareness_off_is_identical). Turn it on when two or
+    # more cars share the track. What it does: finds free-standing,
+    # car-sized clusters in the scan, tracks them across scans against this
+    # car's dead-reckoned motion, and for those that MOVE (a parked car is
+    # just an obstacle, as before) it (1) makes the gap search treat the
+    # space the car will occupy over the next prediction_horizon as blocked,
+    # widened by passing_margin, so it only passes with real room, and (2)
+    # caps speed to (gap - follow_min_gap) / follow_time_gap behind one
+    # ahead in the path. TTC, contact, swept-path and arc-guard checks keep
+    # reading the real scan. Full write-up and simulator results:
+    # docs/gap-follow.md#several-cars-at-once. Nothing here is car-tested.
+    enable_opponent_awareness: false
+    opponent_min_width: 0.15         # m, smallest cluster chord that can be a car
+    opponent_max_width: 0.70         # m, a 0.30 x 0.58 car seen diagonally
+    opponent_max_range: 6.0          # m
+    opponent_segment_jump: 0.25      # m, range step between two objects
+    opponent_min_beams: 3
+    opponent_gate: 0.5               # m, scan-to-scan association radius (+ v*dt)
+    opponent_alpha: 0.5              # position filter gain
+    opponent_beta: 0.15              # velocity filter gain
+    opponent_min_hits: 8             # scans (0.2 s) before a track may count as moving
+    opponent_max_misses: 6           # scans unseen before a track is dropped
+    opponent_moving_speed: 0.6       # m/s over the ground; odometry error makes walls drift ~0.2-0.4
+    opponent_radius: 0.30            # m, footprint around the cluster centre
+    opponent_passing_margin: 0.15    # m, extra room demanded beside a moving car
+    opponent_prediction_horizon: 0.8 # s of predicted path treated as blocked
+    opponent_prediction_step: 0.1    # s
+    opponent_follow_min_gap: 0.5     # m, bumper gap at which the follow cap reaches 0
+    opponent_follow_time_gap: 1.0    # s: 0.6 stalled 6 of 8 two-car runs on the 1.2 m loop, 1.0 none
+    opponent_follow_lateral: 0.45    # m, |y| within which a car ahead is "in the path"
+    opponent_relevant_lateral: 1.0   # m, |y| beyond which a moving car is ignored
+    opponent_pass_max_steering: 0.10 # rad, no new pass while steering harder (a bend)
+    opponent_pass_max_heading_deg: 15.0  # no new pass while the car ahead turns more
+    opponent_max_track_speed: 8.0    # m/s, clamp on the velocity estimate
+    # The rack the dead reckoning turns with: the command delayed and slewed
+    # like the servo, not the command itself, which made parked clutter 0.9 m
+    # away read as a 1 m/s car. Fitted to run 20261019-200703, same values as
+    # tools/f1tenth_sim/sim_fidelity/calibration.py.
+    opponent_steer_delay: 0.075      # s (steering_delay_ticks 3 at 40 Hz)
+    opponent_steer_gain: 15.0        # 1/s (steering_servo_gain)
+    opponent_steer_rate_max: 3.2     # rad/s (steering_rate_max)
+
     # --- Time-to-collision automatic emergency braking ---
     enable_ttc: true
     # Lowered from 0.5, then again from 0.35 on 2026-08-25. At the 1.6m/s
@@ -309,6 +460,13 @@ gap_follow_node:
     # braking to zero at all, so a trip that still does hard-stop is one
     # that was genuinely boxed in.
     ttc_threshold_sec: 0.30
+    # TTC counts an obstacle only if it lies within car_width/2 + this of the
+    # arc the car is on. It was the full safety_margin (0.18) until
+    # 2026-10-20; on the 2026-10-19 run every one of the 97 TTC stop ticks
+    # was the inside wall of a bend 0.12-0.18 m outside the body, which the
+    # car was passing, not approaching. Approved change; simulator-validated
+    # and checked against that run's scans only -- see docs/gap-follow.md.
+    ttc_path_margin: 0.05
     ttc_min_closing_speed: 0.05
     # TTC uses max(fresh odom speed, latest command when it is positive),
     # so brief odom under-reporting cannot suppress braking. A zero brake

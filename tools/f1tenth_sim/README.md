@@ -13,6 +13,12 @@ top of upstream from the outside. Nothing here is ever pushed upstream, and a
 tools/f1tenth_sim/
 ├── setup.sh              # clones upstream, pinned; refuses a dirty checkout
 ├── run_validation.py     # the scenarios and the controllers under test
+├── law_compare.py        # the steering-law promotion rule (pure Python, tested)
+├── law_sweep.py          # steering-law comparison, runs in parallel (docs/steering-laws.md)
+├── gap_mirror.py         # gap_follow's per-scan pipeline, held to the node by a test
+├── eval_gap.py           # gap_follow on the indoor layouts and gym circuits, scored
+├── sweep_gap.py          # eval_gap over tracks x seeds in parallel (docs/gap-follow.md)
+├── trace_gap.py          # per-tick CSV/plot of every gap_follow decision on one track
 ├── README.md             # this file
 └── sim_fidelity/         # our fidelity layer
     ├── calibration.py    # this car's parameters, each tagged with provenance
@@ -91,12 +97,15 @@ The good news from re-running with working detection: **`gap_solo` and
 | 2 | Friction circle on steering | F2–F5, R4 | car can no longer corner past `μg`; braking now costs cornering |
 | 3 | Proportional steering servo | F6, R3 | removes a permanent 0.08 rad limit cycle |
 | 4 | 1081 LiDAR beams | F9, R2 | matches the Hokuyo UST-10LX; measured free |
-| 5 | Real steering limits, +0.313/−0.263 rad | F12 | the car's servo travel, from `vesc.yaml` |
+| 5 | Real steering limits, +0.509/−0.448 rad | F12 | measured full lock, 2026-10-16 circles (`docs/hardware-reference.md`); was +0.313/−0.263 from the old unmeasured servo map |
 | 6 | Real speed ceiling, 5.039 m/s | F13 | the VESC eRPM cap |
 | 7 | `a_max = μg` = 6.87 m/s² | F1 | was 9.51 (0.97 g), an asphalt figure |
 | 8 | Pose/odometry/scan error | F7–F9, R5 | controllers no longer see ground truth |
 | 9 | Command transport lag | R7 | one tick, steering *and* speed |
 | 10 | Parameter provenance | F11, R1 | every constant says where it came from |
+| 11 | This car's speed loop, fitted to a run | — | accelerates harder than it brakes, as the real car does; gym's `pid_accl` braked 4× harder than it accelerated (2026-10-20, below) |
+| 12 | Gym's collision response switched off | — | gym rotated a car it judged collided to heading 0; two cars ended up lapping backwards (2026-10-20, below) |
+| 13 | Real maps as tracks | — | `track_import.py`: any occupancy map → gym track, centreline found automatically ([docs/run-analysis.md](../../docs/run-analysis.md#adding-a-map-to-the-simulator)) |
 
 ### 2. A friction circle (`grip.py`)
 
@@ -170,6 +179,42 @@ There is a `freeze_pose()` hook for the stalled-localisation failure that put
 this car into a wall on 2026-07-27. It is not yet wired into a scenario,
 because the harness re-implements the controller and so does not contain the
 `pose_frozen_*` guards being tested — that needs audit R6 first.
+
+### 11. A speed loop fitted to the real car (2026-10-20)
+
+Gym's `pid_accl` drives the car toward the commanded speed with a gain of
+3.4 /s speeding up and 13.7 /s slowing down, both up to the friction limit.
+Run `20261019-200703` showed the real car the other way round: about
+2.9 m/s² of acceleration for a 0.5–1 m/s step up, but a median of only
+~1.7 m/s² of braking with the command 1–4 m/s below its speed.
+
+`FidelityProfile.speed_loop_model` (on in `plant` and `car`) replaces it
+with an asymmetric loop, `speed_loop_*` in `calibration.py`, and converts
+each tick's demand into the speed command gym needs to produce it. Feeding
+gym's own gains through the same path reproduces gym (0.422 vs 0.420 m/s
+RMS against the run), which is how the conversion was checked. The fit
+itself is `tools/run_analysis/fit_sim.py`; speed error against the run fell
+from 0.46 to 0.24 m/s.
+
+### 12. Gym's collision response is switched off (2026-10-20)
+
+The measured LiDAR offset (0.26 m) put the sensor back inside gym's collision
+box, so gym's own TTC flag (see the headline above) can fire again. It fires
+when the *padded* envelope touches a wall, or two cars' padded boxes close
+on each other, and its response is `state[3:] = 0`: speed, steering,
+**yaw**, yaw rate and slip zeroed. The car is turned in place to heading 0.
+
+Two `gap_follow` cars on `indoor_wide`, 0.48 m apart with no real-chassis
+contact, were both snapped to heading 0 in one tick and lapped backwards for
+the rest of the run. With `body_collisions` on, `FidelityPlant` already makes
+every contact verdict itself, so it now sets gym's TTC threshold to `-inf`.
+`legacy` keeps gym's behaviour. `tests/test_gym_collision_response.py` holds
+it: a car closing on a parked one must keep its heading.
+
+Single-car runs were not affected: the full `gap_follow` sweep (11 tracks,
+6 seeds, both directions) gave identical numbers before and after the fix.
+A lone car's padded body only touches a wall when it is already nearly
+stopped, and gym's TTC needs closing speed to fire.
 
 ## Profiles
 
@@ -324,7 +369,8 @@ count to 1081 measured marginally *faster* than 819. See
 `python3 sim_fidelity/calibration.py` prints every constant with where it came
 from, least trustworthy first:
 
-- `MEASURED` — measured on this car. *Currently none.*
+- `MEASURED` — measured on this car: the actuation lags, servo gain, speed
+  loop and surface friction fitted to run `20261019-200703` (2026-10-20)
 - `DERIVED` — computed from this car's committed configs (`vesc.yaml` etc.)
 - `SPEC` — datasheet for a part actually fitted
 - `ESTIMATED` — physics-based estimate, not this car
@@ -358,7 +404,12 @@ Two deliberate non-changes worth knowing about, both cases where the obvious
   introduce unseeded randomness; reproducibility is what the harness is for.
 - **`run_validation.py` re-implements the node's command stage.** Audit R6 is
   still open, and it remains the highest-probability way for the harness to
-  pass while the real node does something different.
+  pass while the real node does something different. Since 2026-10-19 its
+  steering limit, rate, accelerations and lookahead defaults are read from
+  `src/pure_pursuit/config/pure_pursuit.yaml` rather than copied (the copy
+  had drifted to a 0.26 rad limit). `gap_follow`'s copy, `gap_mirror.py`, is
+  held to the node by `src/gap_follow/test/test_gap_mirror_parity.py`
+  ([docs/gap-follow.md](../../docs/gap-follow.md#keeping-the-mirror-honest)).
 - **None of this makes the simulator a safety argument.** Passing here is
   evidence against algorithm and regression errors, nothing more. The
   wheels-off-the-ground → low speed → open space order in

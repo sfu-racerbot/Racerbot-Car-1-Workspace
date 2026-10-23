@@ -6,7 +6,229 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-11 (latest) — Car 1: port car 2's workspace, dashboard as `rb1`
+## 2026-10-22 (latest) — Car 1: second port from car 2 (to `38c35a0`)
+
+A per-file three-way merge of car 2's `38c35a0` onto car 1, against car 2's
+`7ec6ae6` (what the 2026-10-11 port took). The last three car 2 commits
+(2026-10-23) make `map_course` refuse to start without `bringup_launch.py`
+already running, instead of starting a second copy of the drivers that
+fights the first over the VESC and LiDAR. The three sections directly below
+this one were written in car 2's workspace; "this car" there means car 2.
+Explicitly requested; car 2 is still not an upstream.
+
+Taken from car 2: gap_follow's corridor rework and opponent awareness (off by
+default), the pluggable steering laws (pure pursuit stays the default),
+`map_course` one-command mapping and saved-map racing without RViz, the
+calibration wizard's circle step and overrides, simulator track import and
+`tools/run_analysis`, and their docs and tests.
+
+**Not** taken — car 2's steering calibration (commit `d7456e7`):
+`vesc.yaml` (`-0.78`/`0.5904`, `servo_max 0.95`) and `joy_teleop.yaml`
+(full stick 0.436) are untouched. Car 1 keeps `-0.83`/`0.366`,
+`0.05`–`0.75` and full stick 0.38.
+
+**Behaviour change — car 1's autonomy steers harder.** Car 2 raised its limits
+from its own circles; car 1 now does the same from **its own** 2026-10-21
+circles (0.388 / 0.401 rad reached at the 0.38 rad full stick):
+
+- `max_steering_angle` **0.26 → 0.33** rad in `gap_follow.yaml` and
+  `pure_pursuit.yaml` (minimum radius 1.35 → 1.05 m).
+- `profile_max_steering_angle` **0.26 → 0.30** rad in `auto_map_race.yaml`
+  (1.35 → 1.16 m), below the controller as car 2's new
+  `test_steering_limits_fit_servo.py` requires.
+- `odom_calibration.yaml` `planner_max_steering_rad` 0.26 → 0.33.
+- `gap_follow.yaml` `arc_guard_max_correction` 0.1745 → **0.165**. It must be
+  at most half of `max_steering_angle`; car 2's value is half of *its* 0.349,
+  and with car 1's 0.33 `gap_follow_node` refused to start.
+- **Not yet validated on car 1:** wheels off the ground, then low speed.
+
+Test fixed, not loosened: `test_arc_guard_blocked_fallback_reaches_the_guard`
+measured the gap's request under the shipped steering limit, which car 1's
+0.33 clips (the scene's gap sits at 20°), and its "freest moves" precondition
+was met by steering slew from the previous command, not by the guard. It now
+uses its own 0.5 rad limit and lets the command settle before reading each
+mode; seen to fail with either fallback branch broken.
+
+Known gaps:
+
+- Both simulators' vehicle models now carry **car 2's** measured servo map and
+  full-lock limits (+0.509 / −0.448 rad); before this port they carried car 2's
+  older ones. They have never modelled car 1's steering. Car 1's controllers
+  cap at 0.33 rad, inside both, so sim results are not limited by it, but a
+  sim run is not evidence about car 1's linkage.
+- Car 2's calibration-wizard and steering-curve tests use car 2's recorded
+  sessions as fixtures; they test the maths, not car 1's values.
+
+## 2026-10-22 — gap_follow opponent awareness; one-command mapping; launch cheat sheet
+
+All of it is **simulator-validated only**. Bring it up wheels-off first, then at
+low speed ([docs/gap-follow.md](docs/gap-follow.md#validation)).
+
+### gap_follow
+
+- **Opponent awareness** (`enable_opponent_awareness`, **off by default**;
+  `gap_follow_launch.py opponent_awareness:=true`). New
+  `gap_follow/opponent_tracking.py`, no ROS needed:
+  - it finds free-standing, car-sized clusters and tracks them against this
+    car's dead-reckoned motion (the steering modelled as the servo follows it);
+  - behind a moving car it caps speed to `(gap − 0.5 m) / 1.0 s`;
+  - it passes only on a straight, and only with 0.15 m of extra room around
+    where the other car will be over the next 0.8 s.
+
+  Safety checks still read the real scan. With it off, the commands are
+  identical. New `opponent_*` parameters are all commented in
+  `config/gap_follow.yaml`.
+- Simulator, leader 1.8 m/s and the others 3.5 m/s, both directions:
+
+  | | Layer on | Layer off |
+  |---|---|---|
+  | Two cars | 40/40 | 34/40 |
+  | Three cars | 24/24 | 15/24 |
+  | One car | 111/132 | 108/132 |
+
+  There was no contact in any run with it on. It follows rather than
+  overtakes on every track tried.
+
+### racerbot_launch / pure_pursuit
+
+- **`ros2 run racerbot_launch map_course`** (with `bringup_launch.py` already
+  running; it never starts the drivers and refuses without them): `gap_follow` drives 3 laps, then
+  the run saves the map, pose graph, racing line and `start_pose.yaml`, shuts
+  down and prints the race commands. It is `auto_map_race_node` in the new
+  `finish_after_mapping` mode, with `map_course_launch.py`.
+- **`race_launch.py run_dir:=<dir> [steering_law:=...]`**: races a saved run.
+  The new `seed_start_pose` node seeds the particle filter where mapping
+  stopped the car, so no RViz is needed. `pure_pursuit` only starts once the
+  filter has taken that pose.
+- `localize_run_launch.py standalone:=true` publishes the filter's TF and
+  `/map` when no SLAM is running.
+- `tools/racerbot_sim/run_map_course_validation.py` runs the whole flow end to
+  end over the simulator. On `indoor_wide`, mapping passed every run. Pure
+  pursuit, LQR and MPC each raced 128–142 m with no contact. Stanley once
+  swerved around a false "opponent" (a scan/map mismatch) and brushed a wall;
+  that is the existing `pure_pursuit` overtake logic.
+- `localize_run_launch.py standalone:=true` starts the particle filter 4 s
+  after `map_server`. Started together, the filter got an empty map and
+  crashed (1 race start in 8 in simulation).
+
+### docs
+
+- New [docs/launchstart.md](docs/launchstart.md): every mode as one
+  copy-paste command.
+
+## 2026-10-19 — gap_follow corridor rework; Stanley, LQR and MPC made usable
+
+Both changes are **simulator-validated only**. Bring them up wheels-off first,
+then at low speed ([docs/gap-follow.md](docs/gap-follow.md#validation),
+[docs/steering-laws.md](docs/steering-laws.md#safety)).
+
+### gap_follow
+
+- **Swept-path clearance** (`enable_swept_clearance`, on): the braking speed
+  ceiling uses how far the body can drive along its arc, not the nearest
+  return in the ±30° cone (which read hallway side walls as obstacles ahead).
+- **Arc guard** (`enable_arc_guard`, on): if the requested steering would
+  sweep the body into something, use the nearest clear steering angle, at
+  most `arc_guard_max_correction` (0.1745 rad) away.
+- **Corner setup** (`enable_corner_setup`, on): move toward the outside wall
+  before a corridor turn, so the car turns in late.
+- **`max_lateral_accel` 1.0 → 2.0 m/s²** — simulator only, not yet
+  validated on the floor.
+- New parameters (all documented in `config/gap_follow.yaml`); startup
+  refuses arc-guard/corner-setup authority above half of `max_steering_angle`.
+- Simulator, 5 indoor layouts × 2 directions × 6 seeds: 36/60 passed with 24
+  wall-contact runs → 60/60, none; `asb_10000` lap 24.6 → 18.9 s
+  (`docs/gap-follow-sim-results.json`).
+- Tools: `tools/f1tenth_sim/gap_mirror.py` (the simulator's copy of the
+  per-scan pipeline, reads the YAML, held to the node to 1e-6 by
+  `test_gap_mirror_parity.py`), `sweep_gap.py`, and `trace_gap.py` rebuilt on
+  it. `run_validation.py`'s stale `gap_command` was replaced by it.
+
+### pure_pursuit steering laws
+
+- **Stanley formula corrected** (a change to spec 02): the separate
+  `+atan(L·κ)` feedforward is gone (the front-axle heading error already
+  carries it, so it was counted twice and held the car inside every bend),
+  and the front axle is steered to the offset a rear-axle racing line implies.
+  Spec tests 6/7 now check the kinematic answer, `atan(L/R)` on a circle.
+- **New parameters:** `stanley.delay_compensation`, `lqr.delay_compensation`,
+  `mpc.delay_compensation` (predict the pose ~0.1 s ahead before steering),
+  `stanley.steering_time_constant`, `lqr.steering_time_constant` (output
+  low-pass against localisation jitter).
+- **Retuned defaults:** Stanley gain 5.0, softening 1.0; MPC `q_lateral` 4.0;
+  plus the values above. Dataclasses, YAML and node defaults all agree
+  (tested).
+- MPC's returned plan is projected onto the exact angle and rate limits.
+- The node logs `steering law: <name> <params>` at startup.
+- Review fixes: MPC miss latch read a non-existent attribute; live lookahead
+  and steering-rate tunes did not reach the law; `/drive_intent` could run the
+  MPC solver; MPC's condensed dynamics were wrong at varying speed; the bound
+  check was tighter than OSQP's accuracy.
+- `tools/f1tenth_sim/run_validation.py` reads its limits from
+  `pure_pursuit.yaml` (it had a stale 0.26 rad steering limit);
+  `tools/f1tenth_sim/law_sweep.py` runs comparisons in parallel.
+- **osqp 1.1.3 installed** on the car (`pip install --user
+  --break-system-packages osqp==1.1.3`). MPC benchmark G0 passed: p99.9
+  3.5 ms against an 8 ms deadline under load
+  (`docs/mpc-benchmark-2026-10-19.json`).
+- **Judging (seeds 12345–12349): Stanley, LQR and MPC all PROMOTE**, 15/15
+  runs each, no contact, every margin under 5%
+  (`docs/tracking-law-comparison.json`). This supersedes the REJECTs in the
+  entry below. Pure pursuit stays the default.
+
+## 2026-10-19 — Pluggable steering laws for the race controller
+
+`pure_pursuit_node` can now steer with a choice of tracking law —
+`pure_pursuit` (today's, the default), `stanley`, `lqr`, or `mpc` —
+selected at launch with `steering_law`, without changing anything else the
+node does. Every safety mechanism (LB deadman, pose-stale/frozen and
+cross-track watchdogs, off-line recovery, opponent overtaking, the reactive
+LiDAR net, steering slew and curvature speed cap) applies to every law,
+because the law is swapped in *between* them rather than beside them. The
+laws output steering only; speed stays with the profile and the node's caps.
+
+### Behaviour changes
+
+- **New parameter `steering_law`** (default `pure_pursuit`, launch-time only)
+  plus per-law `stanley.*`, `lqr.*`, `mpc.*` gains and
+  `tracking_curvature_smoothing`. All are refused at runtime (the law is built
+  once at startup), and none are live-tunable from the dashboard. The launch
+  file passes `steering_law:=...` through.
+- **New failure states** in the decision log and `race_diagnostics`:
+  `steering_law_failed` (a law that cannot produce a trustworthy command stops
+  the car), `mpc_fallback` (a single-tick pure-pursuit fallback on an MPC miss),
+  and `mpc_miss_latched` (MPC gave up after `max_consecutive_misses`; cleared
+  by releasing LB).
+- **`/drive_intent`** re-runs the *active* law (replays the MPC solver's
+  predicted sequence rather than re-solving).
+
+### Code
+
+- `pure_pursuit/racing_math.py`: `estimate_signed_path_curvature`,
+  `project_onto_path`, `interpolate_along` (all ROS-free, all unit-tested).
+- `pure_pursuit/tracking_laws.py` (new, ROS-free): the `TrackingLaw` seam,
+  `PurePursuitLaw` (today's steering moved unchanged, verified by a
+  change-detector test against the pre-refactor computation), `StanleyLaw`,
+  `LqrLaw` + `LqrGainTable`, `MpcLaw` + `MissPolicy`, and `make_law`.
+- `tools/f1tenth_sim/run_validation.py`: `PathFollower` steers through the
+  pluggable law; `--steering-law`, `--law-param`, and `--compare` run a
+  candidate against pure pursuit over the same tracks × seeds. Refactor proof:
+  identical `pure_solo` metrics before/after. The promotion rule is pure
+  Python in `tools/f1tenth_sim/law_compare.py`, tested in
+  `tools/f1tenth_sim/tests/` (`python3 -m pytest tools/f1tenth_sim/tests/ -v`).
+- `tools/mpc_benchmark/benchmark_mpc.py` (new): the spec 04 G0 solve-time
+  benchmark, ready for the osqp install decision.
+
+### Judging results (spec 01)
+
+Both `stanley` and `lqr` **REJECT** at the shipped starting gains on the
+judging seeds (`docs/tracking-law-comparison.json`, command and analysis in
+`docs/sim-validation.md`). Neither ships; pure pursuit remains the default and
+the baseline. MPC is gated on spec 04 G0 (the osqp install decision and a
+Jetson benchmark) before it can be judged. Specs:
+`docs/superpowers/specs/2026-09-27-tracking-*.md`.
+
+## 2026-10-11 — Car 1: port car 2's workspace, dashboard as `rb1`
 
 Every section below this one was written in **car 2's** workspace
 (sfu-racerbot/Racerbot-Car-2-Workspace) and arrived here in one port: a
