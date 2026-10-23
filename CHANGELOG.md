@@ -6,7 +6,38 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-22 (latest) — Car 1: second port from car 2 (to `38c35a0`)
+## 2026-10-23 (latest) — gap_follow: `max_speed:=` for one run; car 1 + car 2 test plan
+
+### gap_follow
+
+- **New launch argument `max_speed:=<m/s>`** on `gap_follow_launch.py`, e.g.
+  `max_speed:=1.0` for a first floor run. It only lowers the speed: above
+  `gap_follow.yaml`'s `max_speed`, zero, negative, `nan`/`inf` or not a number
+  is refused and nothing starts. `min_speed`, `corner_speed` and
+  `corner_speed_wide` are lowered to it when they are above it, because the
+  node refuses to start otherwise. Empty (the default) changes nothing. Logic
+  in `gap_follow/launch_speed.py` (no ROS), tests in
+  `test/test_launch_speed.py`, including a real node that never commands above
+  the cap and still stops on LB release. Checked with a real launch on a test
+  domain: parameters as expected, out-of-range values refused.
+- `docs/launchstart.md`: a step-by-step first run with car 1 and car 2
+  together (separate ROS graphs, wheels off, then low speed in open space).
+
+### Simulator, car 1's config with opponent awareness (2026-10-23)
+
+`tools/f1tenth_sim/eval_gap_multi.py`, 2 cars, 5 tracks, 4 seeds each way:
+
+- Leader 1.8, follower 3.5 m/s: **40/40, no wall or car-car contact**
+  (closest 2.27 m), the same as car 2's published result.
+- Leader 0.8, follower 1.0 m/s, corner and minimum speeds lowered as
+  `max_speed:=` does: **no contact anywhere except `narrow_1p2`** (1.2 m wide),
+  where 1–3 of 8 runs each way touched a wall. Not opponent awareness: with it
+  off the rate is the same, and one car alone touched once in 8 reverse runs.
+  Car 2's 0.349 rad steering limit does a little better there (1 of 8). The
+  big tracks' "unfinished" runs were the 90 s limit at 0.8 m/s, not the car.
+  **Open question:** gap_follow at walking pace in a 1.2 m corridor.
+
+## 2026-10-22 — Car 1: second port from car 2 (to `38c35a0`)
 
 A per-file three-way merge of car 2's `38c35a0` onto car 1, against car 2's
 `7ec6ae6` (what the 2026-10-11 port took). The last three car 2 commits

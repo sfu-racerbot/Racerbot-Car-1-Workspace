@@ -91,6 +91,36 @@ ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true
 
 It follows a slower car instead of squeezing past it, and passes only on a straight with room. On a track as narrow as ours it will mostly follow. Do not run two cars at once without it.
 
+**Slower for one run:** add `max_speed:=1.0` (any speed in m/s up to `gap_follow.yaml`'s `max_speed`, 3.5 on car 1). It also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. A value above the YAML's, or anything that isn't a positive number, is refused and nothing starts.
+
+### Car 1 and car 2 together: first run
+
+Opponent awareness has only been tested in the simulator. Do these steps in order, and don't skip ahead. Each step is the cheapest place to find a problem the next one would find with a crash.
+
+**Two people, one per car.** Each holds LB on **their own car's** F710 controller. Letting go of LB stops that car.
+
+1. **Check the cars can't hear each other.** Both cars on, `bringup_launch.py` running on both. On car 1, **any terminal**:
+
+   ```bash
+   ros2 topic info /joy
+   ```
+
+   **Working when:** `Publisher count: 1`. **If it says 2:** the cars share one ROS graph (the system of nodes and topics that can talk to each other, see [glossary.md](glossary.md)). Car 2's LB would then drive car 1, and each car would get the other's drive commands. Stop, and give the cars different `ROS_DOMAIN_ID` values ([concepts.md](concepts.md)).
+
+2. **Wheels off the ground, both cars.** Car on a stand, wheels free. **Terminal 2** on car 1:
+
+   ```bash
+   ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true max_speed:=1.0
+   ```
+
+   Car 2 runs its own `gap_follow_launch.py opponent_awareness:=true`. Car 2's copy of that [launch file](glossary.md) (the script that starts the node) has no `max_speed:=` yet, so set `max_speed` to 1.0 from car 2's dashboard (rb2) after it starts.
+
+   **Working when:** each car's wheels turn only while its own LB is held, and stop when it's released.
+
+3. **Floor, low speed, open space.** Same commands, one car about 2 m behind the other, nobody standing on the track. Start somewhere at least 2 m wide, not the 1.2 m track. In the simulator, at these speeds in a 1.2 m corridor, 1–3 of every 8 runs touched a wall, with or without opponent awareness and even with one car alone (2026-10-23, `narrow_1p2`). In wider layouts there was no contact.
+
+   **Working when:** the decision lines (one a second) of the car behind show `opponent mode=follow` and a `follow cap=`. **If either car shows `opponent mode=` with no other car moving,** it's mistaking a wall for a car: stop, relaunch without `opponent_awareness:=true`, and keep that run's log.
+
 ## Map a course: 3 laps, then stop
 
 `gap_follow` drives 3 laps while [SLAM](glossary.md#slam) builds the map. Then it saves the map and a [racing line](glossary.md#racing-line), stops the car, shuts everything down, and prints the commands to race on that map. Like every mode here it needs `bringup_launch.py` running first, and it refuses to start without it. Simulator-validated only; not yet run on the car.
