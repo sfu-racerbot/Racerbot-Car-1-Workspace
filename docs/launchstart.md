@@ -139,7 +139,7 @@ ros2 launch f1tenth_stack bringup_launch.py
 ros2 run racerbot_launch map_course
 ```
 
-**Hold LB for the whole run.** The car stays still for a moment at the start, until SLAM has recorded the start pose (`Start pose recorded: ...`). Releasing LB pauses mapping; holding it again carries on.
+**Keep the car still for the first 3 seconds** while the IMU's gyro bias is measured. Then **hold LB for the whole run.** The car stays still for a moment at the start, until SLAM has recorded the start pose (`Start pose recorded: ...`). Releasing LB pauses mapping; holding it again carries on.
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
@@ -151,10 +151,64 @@ Options, added to the end of the command:
 |---|---|
 | `mapping_max_speed:=1.5` | a course nobody has driven yet |
 | `laps:=4` | a different number of laps (at least 2) |
+| `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
+| `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
+| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
+| `imu:=false` | no IMU side (the BNO085 bridge, `imu_bridge`, `vehicle_state`). Added for you in the simulator |
 
 **If it says `the hardware is not running`:** start Terminal 1 first.
 
 **If it doesn't finish:** `Ctrl+C` stops it, and it tells you no map was saved. If the last lap fails the quality check, it drives up to two more by itself. Lap details: [operations.md](operations.md#reading-the-terminal-while-it-maps).
+
+## Testing the IMU in mapping (A/B)
+
+The question: does SLAM make a better map when its odometry gets its heading from the gyro? The test is two mapping runs of the same course from the same spot, one without and one with `gyro_odom:=true`, both recorded. Everything but the odometry SLAM uses stays the same, so the difference between the two maps is the IMU's.
+
+**Before you start:**
+- The car on **battery**, on the track. Mark the start spot and direction with tape.
+- Terminal 1: `ros2 launch f1tenth_stack bringup_launch.py`, left running for every step below.
+
+**1. Check the BNO085 points forward** (once; 2 minutes). Its roll and pitch were set from gravity on 2026-10-24, but which way is "forward" can only be seen while moving.
+
+**Terminal 2:**
+
+```bash
+ros2 launch imu_bridge vehicle_state_launch.py
+```
+
+**Terminal 3**, then push the car forward by hand, firmly, a few times:
+
+```bash
+ros2 topic echo /imu/bno/data --field linear_acceleration
+```
+
+**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/imu-calibration`. Then `Ctrl+C` terminals 2 and 3.
+
+**2. Run A, today's odometry.** Car on the tape mark. **Terminal 2:**
+
+```bash
+ros2 run racerbot_launch map_course
+```
+
+Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/.ros/racerbot_runs/<time>` near the start. Write that folder down as run A.
+
+**3. Run B, gyro odometry.** Put the car back on the tape mark, facing the same way. **Terminal 2:**
+
+```bash
+ros2 run racerbot_launch map_course gyro_odom:=true
+```
+
+**Working when:** the same as run A, and the start of the output includes `publishing odom_imu -> odom` from `vehicle_state_node`. **If it logs `STOPPED publishing odom_imu -> odom`:** something else is giving `odom` a parent. `Ctrl+C`, and keep the log.
+
+**4. Compare.** For each run's folder:
+
+```bash
+python3 tools/run_analysis/imu_report.py ~/.ros/racerbot_runs/<time>
+```
+
+**Working when:** it prints three sections: turn rate from each source, the steering lag and turning gain the gyro measured, and how much heading correction SLAM had to apply. Run B should need far less heading correction than run A.
+
+Also compare the two saved maps on the dashboard (straight walls, no doubled corridors) and the `SLAM corrections absorbed` count each mapping log ends with. Both bags stay on the car, so the SLAM settings can be tuned afterwards without it.
 
 ## Race on a saved map
 

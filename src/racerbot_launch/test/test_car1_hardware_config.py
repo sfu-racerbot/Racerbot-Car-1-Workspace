@@ -156,3 +156,52 @@ def test_full_stick_and_autonomy_limits_are_car_1s():
     planner = _yaml(os.path.join(_SRC, 'pure_pursuit', 'config', 'auto_map_race.yaml'))[
         'auto_map_race_node']['ros__parameters']['profile_max_steering_angle']
     assert planner == _doc_number(r'`profile_max_steering_angle` is \*\*([0-9.]+) rad')
+
+
+# -------------------------------------------------------------------- IMU
+
+_IMU_BRIDGE = os.path.join(_SRC, 'imu_bridge')
+
+
+def _read(*parts):
+    with open(os.path.join(*parts)) as f:
+        return f.read()
+
+
+def test_bno_is_read_through_the_jetson_i2c_bridge():
+    # Car 1's BNO085 is on the Jetson's I2C bus (bus 7, 0x4A), read through
+    # imu-calibration's tools/bno_i2c_bridge.py onto a pty; car 2's sits
+    # behind a microcontroller on a USB serial port. A ported car 2 launch
+    # would point imu_bridge at /dev/ttyACM1, which car 1 does not have.
+    launch = _read(_IMU_BRIDGE, 'launch', 'vehicle_state_launch.py')
+    assert "BRIDGE_SCRIPT = 'bno_i2c_bridge.py'" in launch
+    # Dynamic calibration off: it shifted offsets mid-run and spoiled car 1's
+    # first BNO calibration (imu-calibration calib/bno_calib_run1_dyncal_on.json).
+    assert "'--no-dyncal'" in launch
+    assert "'bno_pty', default_value='/tmp/bno085'" in launch
+    assert "'bno_port': pty if bno else ''" in launch
+
+
+def test_imu_bridge_restarts_the_bno_driver():
+    # Car 1 only: the bridge's pty appears after imu_bridge starts, and
+    # racer_imu's BnoDriver gives up for good on a missing port. Car 2's
+    # imu_bridge_node (a USB port that exists at boot) has no watchdog.
+    node = _read(_IMU_BRIDGE, 'imu_bridge', 'imu_bridge_node.py')
+    assert 'BNO_RESTART_AFTER_S' in node
+    assert 'self.create_timer(1.0, self._watch_bno)' in node
+
+
+def test_map_course_runs_car_1s_imu_stack():
+    launch = _read(_SRC, 'racerbot_launch', 'launch', 'map_course_launch.py')
+    assert "'launch', 'vehicle_state_launch.py'" in launch
+
+
+def test_vehicle_state_geometry_is_car_1s():
+    # Same oracle as the rest of this file's geometry: vesc.yaml, which
+    # hardware-reference.md quotes. The BNO sits on the front axle.
+    wheelbase = _yaml(os.path.join(_STACK, 'config', 'vesc.yaml'))[
+        'vesc_to_odom_node']['ros__parameters']['wheelbase']
+    params = _yaml(os.path.join(_IMU_BRIDGE, 'config', 'vehicle_state.yaml'))[
+        'vehicle_state_node']['ros__parameters']
+    assert params['wheelbase'] == wheelbase
+    assert params['bno_x_offset'] == wheelbase

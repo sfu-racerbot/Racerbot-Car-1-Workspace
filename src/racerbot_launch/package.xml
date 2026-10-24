@@ -15,6 +15,7 @@
   <exec_depend>gap_follow</exec_depend>
   <exec_depend>pure_pursuit</exec_depend>
   <exec_depend>race_diagnostics</exec_depend>
+  <exec_depend>imu_bridge</exec_depend>
   <!-- usb_cam_stream and web_dashboard come from the src/web_dashboards
        submodule (sfu-racerbot/web-dashboards); this package holds car 1's
        settings for them, config/web_dashboard_rb1.yaml. -->

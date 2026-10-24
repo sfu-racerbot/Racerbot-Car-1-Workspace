@@ -19,6 +19,9 @@ if(BUILD_TESTING)
     test/test_steering_limits_fit_servo.py)
   ament_add_pytest_test(test_map_course
     test/test_map_course.py)
+  # Needs ROS sourced (loads the real launch file with launch's LaunchContext).
+  ament_add_pytest_test(test_map_course_imu
+    test/test_map_course_imu.py)
 endif()
 
 ament_package()

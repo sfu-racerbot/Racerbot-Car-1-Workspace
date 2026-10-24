@@ -6,7 +6,151 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-23 (latest) — gap_follow: `max_speed:=` for one run; car 1 + car 2 test plan
+## 2026-10-24 (latest) — Gyro odometry for SLAM; every mapping run recorded and explained
+
+For the first IMU mapping test (A/B, `docs/launchstart.md#testing-the-imu-in-mapping-ab`).
+Built and checked off the car: **not yet driven on.**
+
+### imu_bridge
+
+- **Gyro odometry: new `/odom/imu`** (`nav_msgs/Odometry`, frame `odom_imu`),
+  always published by `vehicle_state_node`. `vesc_to_odom`'s distance (its
+  own pose change along its previous heading, so identical to `/odom`'s) with
+  the heading from a gyro: BNO085 first, then the VESC's, then -- when neither
+  is usable, a step spans a gyro gap, or the gyros disagree -- `vesc_to_odom`'s
+  own heading change, which makes the fallback exactly `/odom`.
+- **New `publish_odom_tf`** (default **false**): also publish `odom_imu ->
+  odom`, chosen so `odom_imu -> base_link` is the gyro pose. `vesc_to_odom`
+  keeps `odom -> base_link`; bringup is untouched. **Interlock:** the node
+  watches `/tf` and stops that transform for good the moment anything else
+  gives `odom` a parent (logged every 5 s).
+- New knobs in `vehicle_state.yaml`: `heading_sources` (`['bno', 'vesc']`;
+  `['none']` = steering model), `max_gyro_gap`, `max_heading_extrapolation`,
+  `imu_odom_topic`, `imu_odom_frame`, `publish_odom_tf`, `odom_frame`,
+  `base_frame`. `check_frames` refuses an `imu_odom_frame` that would loop or
+  collide with `map`.
+- `vehicle_state_launch.py publish_odom_tf:=`.
+- Review fixes: `steering_topic:=/odom` is now refused; detecting a running
+  BNO bridge no longer mistakes an editor with the file open for one;
+  `bno:=1` means true. `wrap_angle(-pi)` returned `-pi` against its own
+  `(-pi, pi]` contract (caught by a new test).
+- Tests: `test_gyro_odometry.py` (46). 292 in the package; every new test was
+  seen to fail against deliberately broken code.
+- Checked on an isolated domain: a fake car on a circle through the real node
+  (tf2 chain = `/odom/imu` to 1e-15, heading from the gyro not the model, the
+  interlock stopped the transform one message after a fake `map -> odom`); and
+  parked with the real LiDAR, real BNO and real `slam_toolbox` on `odom_imu`
+  (map built, `map -> base_link` resolved, 0.009 deg of gyro drift in 45 s).
+
+### racerbot_launch
+
+- **`map_course gyro_odom:=true`** (default false): SLAM's `odom_frame`
+  becomes `odom_imu` and `vehicle_state` publishes the transform, always
+  together (`gyro_odom_settings`); refuses with `imu:=false`. `gap_follow`
+  and the lap counter are unchanged (lap turning stays in `odom`).
+- **`map_course` records a bag by default** (`record_bag:=true`).
+- `slam_launch.py`: new `slam_odom_frame:=` (default `odom`).
+
+### race_diagnostics
+
+- `record_run.py` bags `/odom/imu`, `/pose`, `/slam_toolbox/graph_visualization`,
+  `/map_metadata`, `/rosout`, `/diagnostics`, `/drive_intent`, `/initialpose`.
+- **New `<run>/metadata/`**: git HEAD, branch, status and full uncommitted
+  diff of `racerbot-ws` and `~/imu-calibration`; copies of `car.yaml` and the
+  calibration JSONs; and **`snapshot_params`** (new executable, read-only:
+  `list_parameters`/`get_parameters` only) writing every node's parameters
+  15 s in, plus any node that appears in the next 2 minutes. A metadata
+  failure is written down, never stops a run.
+
+### tools/run_analysis
+
+- **New `imu_report.py <run>`**: turn rate from `/odom` (steering model), the
+  VESC gyro, `/odom/imu` and LiDAR scan matching against the BNO gyro; steering
+  lag and turning gain fitted against the gyro and against scan matching;
+  heading correction SLAM applied on top of `/odom` and `/odom/imu`. Ran on the
+  car on a real (parked) bag in 13 s including scan matching. Tests:
+  `tests/test_imu_report.py` (the bag round trip runs sourced).
+
+### imu-calibration (`~/imu-calibration`, not committed)
+
+- BNO085 `rpy_deg` `[90, 0, 90]` -> `[92.44, 5.22, 90.11]`: roll and pitch
+  from 10 s parked on a level floor (gravity in car axes was -0.41 / -0.89 /
+  9.71 m/s^2, now 0.00 / 0.00 / 9.76). Yaw not measured: forward-push check is
+  step 1 of the A/B.
+
+## 2026-10-24 — imu_bridge: fused speed and measured steering; IMU in `map_course`
+
+### imu_bridge
+
+- **New node `vehicle_state_node`**, support code (publishes no drive topic):
+  - **`/odom/fused`** (`nav_msgs/Odometry`): `/odom` with the forward speed
+    replaced by a Kalman fusion of the wheel speed and the BNO085's forward
+    accelerometer (lever arm corrected for its front-axle mount). Wheel speeds
+    the filter can't explain are skipped as slip for up to 0.5 s. **Always
+    within `max_divergence` (0.3 m/s) of the wheel speed**, and exactly the
+    wheel speed when the accelerometer is missing, stale or mounted wrong.
+    One message per `/odom`, so it goes silent with `/odom`.
+  - **`/steering/measured`** (`sensor_msgs/JointState`, joint `steering`,
+    rad, + left, 50 Hz): `atan(wheelbase × yaw rate / speed)`, yaw rate the
+    average of both gyros. `NaN` below 0.3 m/s, with no usable gyro, or when
+    the gyros steadily disagree by > 0.15 rad/s.
+  - Math in `imu_bridge/vehicle_state.py` (no rclpy); every knob in
+    `config/vehicle_state.yaml`. `check_output_topics` refuses output names
+    that look like drive topics or equal `/odom`.
+- **New `vehicle_state_launch.py`**: car 1's whole IMU side in one launch.
+  It starts imu-calibration's `tools/bno_i2c_bridge.py --pty /tmp/bno085
+  --no-dyncal` (car 1's BNO085 is on the Jetson's I2C bus 7), or uses one
+  already running, then `imu_bridge_node` and `vehicle_state_node`.
+  `bno:=false` for the VESC IMU only.
+- `imu_bridge_node` **restarts its BNO driver after 2 s without samples**:
+  racer_imu's driver gave up for good when the bridge's port didn't exist yet.
+- Tests: `test_vehicle_state.py` and `test_vehicle_state_config.py` (232 in
+  the package, no ROS needed). Every new test was seen to fail against
+  deliberately broken code: 40 breaks in the estimator, 12 in the wiring, the
+  topic check and the YAML.
+- Checked: a static topic check on an isolated domain (fake car on a circle:
+  speed exact, angle = closed form), and the launch against the real BNO085
+  on the bench (250 Hz, gravity check passed). **Not yet driven on.** The BNO
+  read −0.39 m/s² forward and −0.89 sideways at rest (about 2° pitch, 5° roll,
+  from the bench or the nominal mount angles): redo its mount step on a level
+  floor.
+
+### racerbot_launch
+
+- **`map_course` runs the IMU side by default** (`imu:=true`). New
+  **`fused_speed:=true`** (default **false**) gives `gap_follow`
+  `odom_topic:=/odom/fused` for TTC braking, its acceleration ramp and its
+  stale-odometry stop; it refuses to start with `imu:=false`. SLAM, the
+  transforms and `auto_map_race_node` stay on `/odom`. The `map_course`
+  wrapper adds `imu:=false` in the simulator. Tests: `test_map_course_imu.py`
+  (needs ROS sourced) and two in `test_map_course.py`.
+- `test_car1_hardware_config.py`: four new checks guard car 1's I2C BNO085
+  setup against a port from car 2 (`docs/car1-vs-car2.md` has the new row).
+
+### race_diagnostics
+
+- `record_run.py` bags `/odom/fused` and `/steering/measured` too.
+
+### imu-calibration (`~/imu-calibration`, separate repo, not committed)
+
+- `config/car.yaml`: car 1's `wheelbase` 0.36 and `speed_to_erpm_gain`
+  −4040; the BNO's `position` x 0.18 (front axle). The VESC entry is marked
+  as still car 2's. Two of that repo's tests,
+  `test_rezero_at_stops_beats_fixed_bias` and
+  `test_lidar_heading_calibrates_gyro_without_stopping`, fail with car 1's
+  `car.yaml` and pass with the committed one. The first was bisected to the
+  BNO `rpy_deg: [90, 0, 90]` line from 2026-10-23, not to these edits. Not
+  investigated further.
+
+## 2026-10-23 — Car 1: third port from car 2 (to `b3ad3b9`)
+
+### race_diagnostics
+
+- `record_run.py` bags **`/sensors/imu/raw`** (the VESC's IMU) by default, so
+  recorded runs can show what the gyro would do for odometry and SLAM. Nothing
+  drives on it. Ported from car 2's `b3ad3b9`; no car 1 difference involved.
+
+## 2026-10-23 — gap_follow: `max_speed:=` for one run; car 1 + car 2 test plan
 
 ### gap_follow
 
