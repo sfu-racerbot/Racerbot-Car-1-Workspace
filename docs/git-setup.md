@@ -44,6 +44,8 @@ This workspace vendors exactly one package, for exactly that reason.
 - Default and only branch: `main`
 - Car 2 ([Racerbot-Car-2-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace)) is a related but independent sister repository, not a submodule or configured upstream. Compare against it and manually port selected changes only when explicitly requested; never wholesale-overwrite car 1's hardware configuration (the five fixes below, the camera, `web_dashboard_rb1.yaml`). The last full port was taken in October 2026 as a three-way merge against car 2's `e16bda6` (the last commit the two repos shared in content) — see [CHANGELOG.md](../CHANGELOG.md).
 
+**Before any port, read [car1-vs-car2.md](car1-vs-car2.md)**: the full list of what must stay car 1's, and the test that proves it did.
+
 **Gitignored, never expected in a commit:** `build/`, `install/`, `log/` (colcon artifacts), `__pycache__/` and `*.pyc`, `.sim`, `.venv-f1tenth/`, `.pytest_cache/`.
 
 `.claude/` is ignored **except** `.claude/skills/`, which is tracked deliberately — it holds the [documentation standard](../.claude/skills/novice-docs/SKILL.md) and its checker, which belong to the team rather than to one machine.

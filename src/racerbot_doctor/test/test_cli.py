@@ -62,7 +62,8 @@ def test_any_fail_exits_one_and_prints_the_fix():
 
 def test_camera_only_problem_does_not_fail_the_run():
     snap = healthy_snap()
-    snap.usb = [d for d in snap.usb if (d.vid, d.pid) != car.CAMERA_USB]
+    snap.usb = [d for d in snap.usb if 'uvcvideo' not in d.drivers]
+    snap.camera_device = None
     code, text, _ = _run(['--no-color'], snap, healthy_live())
     assert code == 0
     assert 'WARN' in text
@@ -81,7 +82,7 @@ def test_no_live_flag_never_samples():
 
 def test_bringup_down_does_not_sample_and_is_not_a_failure():
     snap = healthy_snap()
-    for exe in car.BRINGUP_EXES + (car.EXE_REALSENSE,):
+    for exe in car.BRINGUP_EXES + (car.EXE_JOY_TELEOP,):
         without(snap, exe)
     snap.tty_holders = {}
     code, text, calls = _run(['--no-color'], snap)
@@ -115,9 +116,20 @@ def test_gather_crash_exits_two():
     assert 'PermissionError' in out.getvalue()
 
 
-def test_gather_is_asked_to_decide_tcp_probe_itself():
+def test_gather_takes_no_lidar_probe_option():
+    # Car 1's LiDAR is a USB tty: there is no TCP probe to opt into, and
+    # the doctor never opens a tty (system.py).
     _, _, calls = _run([], healthy_snap(), healthy_live())
-    assert calls['gather'] == [{'probe_lidar_tcp': 'auto'}]
+    assert calls['gather'] == [{}]
+
+
+def test_teleop_alone_still_samples_the_graph():
+    # joy_teleop counts as "something is up": its drive path is the point.
+    snap = healthy_snap()
+    for exe in car.BRINGUP_EXES:
+        without(snap, exe)
+    _, _, calls = _run(['--no-color'], snap, healthy_live())
+    assert calls['sample'] == [3.0]
 
 
 def test_render_no_color_has_no_escape_codes_and_color_does():

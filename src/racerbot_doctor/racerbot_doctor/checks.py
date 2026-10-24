@@ -111,44 +111,47 @@ def battery_layer(volts):
     return Layer(name, P, f'{reading} at rest')
 
 
-def check_vesc(snap, live):
-    devs = _usb(snap, *car.VESC_USB)
+def _serial_layers(snap, label, usb_id, driver, rel_link, link_target,
+                   link_rw, rule, owner_exe):
+    """USB -> kernel driver -> /dev symlink -> port free, for a cdc_acm
+    device behind a udev symlink (the VESC, and car 1's USB Hokuyo)."""
+    devs = _usb(snap, *usb_id)
     dev = devs[0] if devs else None
-    vid_pid = ':'.join(car.VESC_USB)
+    vid_pid = ':'.join(usb_id)
+    link = f'/dev/{rel_link}'
 
     def usb():
         if dev is None:
             return Layer('USB device', F, f'not plugged in (no {vid_pid} on USB)',
-                         'plug in the VESC USB cable; `lsusb` should list '
+                         f'plug in the {label} USB cable; `lsusb` should list '
                          f'{vid_pid}')
         return Layer('USB device', P, f'{vid_pid} at {dev.sysname}')
 
     def kernel():
-        if car.VESC_KERNEL_DRIVER not in dev.drivers or not dev.ttys:
+        if driver not in dev.drivers or not dev.ttys:
             bound = ', '.join(dev.drivers) or 'none'
             return Layer('kernel driver', F, 'USB is present but '
-                         f'{car.VESC_KERNEL_DRIVER} has not created a serial '
+                         f'{driver} has not created a serial '
                          f'port (bound: {bound})',
                          're-plug the cable; `sudo dmesg | tail` for USB '
-                         'errors; `sudo modprobe cdc_acm`')
-        return Layer('kernel driver', P,
-                     f'{car.VESC_KERNEL_DRIVER} -> /dev/{dev.ttys[0]}')
+                         f'errors; `sudo modprobe {driver}`')
+        return Layer('kernel driver', P, f'{driver} -> /dev/{dev.ttys[0]}')
 
     def symlink():
-        link = f'/dev/{car.VESC_SYMLINK}'
-        if snap.vesc_symlink is None:
+        if link_target is None:
             return Layer(link, F, f'{link} missing although /dev/{dev.ttys[0]} '
-                         'exists', 'udev rule /etc/udev/rules.d/99-vesc.rules: '
+                         f'exists', f'udev rule /etc/udev/rules.d/{rule}: '
                          '`sudo udevadm control --reload && sudo udevadm '
                          'trigger`, then re-plug')
-        target = os.path.basename(snap.vesc_symlink)
+        target = os.path.basename(link_target)
         if target not in dev.ttys:
-            return Layer(link, F, f'{link} points at {target}, but the VESC is '
-                         f'{", ".join(dev.ttys)}', 're-plug the VESC so udev '
-                         'rewrites the link; check 99-vesc.rules')
-        if not snap.vesc_symlink_rw:
+            return Layer(link, F, f'{link} points at {target}, but the {label} '
+                         f'is {", ".join(dev.ttys)}', f're-plug the {label} so '
+                         f'udev rewrites the link; check {rule}')
+        if not link_rw:
             return Layer(link, F, f'{link} is not readable+writable by you',
-                         '`sudo usermod -aG dialout $USER`, then log out and in')
+                         '`sudo usermod -aG dialout $USER`, then log out and '
+                         f'in (or check MODE in {rule})')
         return Layer(link, P, f'-> {target}, read/write OK')
 
     def holders():
@@ -156,20 +159,25 @@ def check_vesc(snap, live):
         ttys = set(dev.ttys)
         pids = sorted({pid for path, ps in snap.tty_holders.items()
                        if os.path.basename(path) in ttys for pid in ps})
-        driver_pids = set(_pids(snap, car.EXE_VESC_DRIVER))
-        others = [pid for pid in pids if pid not in driver_pids]
+        owner_pids = set(_pids(snap, owner_exe))
+        others = [pid for pid in pids if pid not in owner_pids]
         if others:
             by_pid = {p.pid: p for p in snap.processes}
             who = ', '.join(
                 f'{pid} ({os.path.basename(by_pid[pid].argv[0])})'
                 if pid in by_pid else str(pid) for pid in others)
             return Layer(name, F, f'serial port held by another process: '
-                         f'pid {who}', 'close it (screen/minicom/VESC Tool?) '
-                         'or `kill` that pid')
+                         f'pid {who}', 'close it (screen/minicom/VESC Tool/'
+                         'a second urg_node?) or `kill` that pid')
         if pids:
-            return Layer(name, P, 'held only by vesc_driver_node')
+            return Layer(name, P, f'held only by {owner_exe}')
         return Layer(name, P, 'no other process has it open')
 
+    return [('USB device', usb), ('kernel driver', kernel), (link, symlink),
+            ('serial port free', holders)]
+
+
+def check_vesc(snap, live):
     def telemetry():
         return _rate_layer(
             live, '/sensors/core', car.VESC_CORE_MIN_HZ,
@@ -193,9 +201,10 @@ def check_vesc(snap, live):
             return Layer('battery (3S)', S, NO_LIVE)
         return battery_layer(_last(live, '/sensors/core').state.voltage_input)
 
-    return ladder('VESC', [
-        ('USB device', usb), ('kernel driver', kernel),
-        (f'/dev/{car.VESC_SYMLINK}', symlink), ('serial port free', holders),
+    return ladder('VESC', _serial_layers(
+        snap, 'VESC', car.VESC_USB, car.VESC_KERNEL_DRIVER, car.VESC_SYMLINK,
+        snap.vesc_symlink, snap.vesc_symlink_rw, '99-vesc.rules',
+        car.EXE_VESC_DRIVER) + [
         (f'ROS driver {car.EXE_VESC_DRIVER}',
          lambda: _process_layer(snap, car.EXE_VESC_DRIVER)),
         ('/sensors/core rate', telemetry), ('fault code', fault),
@@ -205,52 +214,6 @@ def check_vesc(snap, live):
 # ------------------------------------------------------------------- LiDAR
 
 def check_lidar(snap, live):
-    iface = snap.ifaces.get(car.LIDAR_IFACE)
-    urg_running = bool(_pids(snap, car.EXE_URG))
-
-    def link():
-        name = 'Ethernet link'
-        if iface is None or iface.carrier is None:
-            return Layer(name, F, f'{car.LIDAR_IFACE} is missing or down',
-                         f'`nmcli device connect {car.LIDAR_IFACE}`')
-        if not iface.carrier:
-            return Layer(name, F, f'no link on {car.LIDAR_IFACE}: Ethernet '
-                         'cable unplugged, or the LiDAR has no power',
-                         'check the cable at both ends and the LiDAR power '
-                         '(battery on?)')
-        return Layer(name, P, f'{car.LIDAR_IFACE} carrier up')
-
-    def host_ip():
-        name = 'host IP'
-        if car.LIDAR_HOST_IP not in iface.ipv4:
-            have = ', '.join(iface.ipv4) or 'no IPv4 address'
-            return Layer(name, F, f'{car.LIDAR_IFACE} has {have}, needs '
-                         f'{car.LIDAR_HOST_IP}', '`nmcli connection up hokuyo`')
-        return Layer(name, P, car.LIDAR_HOST_IP)
-
-    def ping():
-        name = 'ping'
-        if snap.lidar_ping is None:
-            return Layer(name, W, 'could not run `ping`; reachability unknown')
-        if not snap.lidar_ping:
-            return Layer(name, F, f'{car.LIDAR_IP} does not answer: LiDAR '
-                         'still booting (~10 s after power), or its IP was '
-                         'changed', 'wait and retry; see docs/hardware-reference.md')
-        return Layer(name, P, f'{car.LIDAR_IP} answers')
-
-    def tcp():
-        name = f'TCP {car.LIDAR_PORT}'
-        if urg_running:
-            return Layer(name, S, 'not probed: urg_node owns the sensor')
-        if snap.lidar_tcp is None:
-            return Layer(name, S, 'not probed')
-        if not snap.lidar_tcp:
-            return Layer(name, F, f'{car.LIDAR_IP}:{car.LIDAR_PORT} refused '
-                         'the connection -- another client may hold the '
-                         'sensor', 'stop any other urg_node/UrgBenri; '
-                         'power-cycle the LiDAR')
-        return Layer(name, P, 'accepts connections')
-
     def content():
         name = '/scan content'
         if live is None:
@@ -270,11 +233,18 @@ def check_lidar(snap, live):
                          'open room, suspicious near walls')
         return Layer(name, P, detail)
 
-    return ladder('LiDAR', [
-        ('Ethernet link', link), ('host IP', host_ip), ('ping', ping),
-        (f'TCP {car.LIDAR_PORT}', tcp),
+    return ladder('LiDAR', _serial_layers(
+        snap, 'LiDAR', car.LIDAR_USB, car.LIDAR_KERNEL_DRIVER,
+        car.LIDAR_SYMLINK, snap.lidar_symlink, snap.lidar_symlink_rw,
+        '99-hokuyo.rules', car.EXE_URG) + [
         (f'ROS driver {car.EXE_URG}', lambda: _process_layer(snap, car.EXE_URG)),
-        ('/scan rate', lambda: _rate_layer(live, '/scan', car.SCAN_MIN_HZ)),
+        ('/scan rate', lambda: _rate_layer(
+            live, '/scan', car.SCAN_MIN_HZ, silent_detail='urg_node is '
+            'running but publishes no scans: it could not open or talk to '
+            'the LiDAR -- usually the LiDAR has no power (battery off?) or '
+            'was re-plugged after bringup started',
+            silent_fix='read the bringup terminal for urg_node errors; '
+            'check LiDAR power, then restart bringup')),
         ('/scan content', content)])
 
 
@@ -307,56 +277,68 @@ def check_joystick(snap, live):
                      f'/dev/input/{pad.joysticks[0]}')
 
     def readable():
-        js = pad.joysticks[0]
-        name = f'/dev/input/{js}'
-        if not snap.js_readable.get(js):
-            return Layer(name, F, 'not readable by you',
-                         '`sudo usermod -aG input $USER`, then log out and in')
-        return Layer(name, P, 'readable')
+        # joy_node (Jazzy, SDL2) opens the *event* node; js* is only the old
+        # joystick API. On this Jetson js0 is world-readable but event* is
+        # root:input 0660 -- a readable js0 proves nothing (2026-10-20: /joy
+        # silent, user not in `input`).
+        name = 'input permissions'
+        nodes = pad.joysticks + pad.events
+        blocked = [n for n in nodes if not snap.input_readable.get(n)]
+        if blocked:
+            ev = [n for n in blocked if n.startswith('event')]
+            why = (f'joy_node reads /dev/input/{ev[0]} and you cannot -- it '
+                   'will run, find no controller, and publish no /joy, so '
+                   'the car cannot be driven' if ev else
+                   'not readable by you')
+            return Layer(name, F, f'{", ".join(blocked)}: {why}',
+                         f'`sudo usermod -aG input $USER`, log out and in '
+                         '(or reboot), then restart bringup')
+        return Layer(name, P, f'{", ".join(nodes)} readable')
 
     return ladder('Joystick', [
         ('USB receiver', usb), ('kernel driver', kernel),
-        ('/dev/input/js*', readable),
+        ('input permissions', readable),
         (f'ROS driver {car.EXE_JOY}', lambda: _process_layer(snap, car.EXE_JOY)),
-        ('/joy rate', lambda: _rate_layer(live, '/joy', car.JOY_MIN_HZ))])
+        ('/joy rate', lambda: _rate_layer(
+            live, '/joy', car.JOY_MIN_HZ, silent_detail='joy_node is running '
+            'but publishes nothing: the controller is off or asleep, or '
+            'joy_node could not open it',
+            silent_fix='press the Logitech button in the middle of the pad '
+            '(LED on); if still silent, read the bringup terminal for joy '
+            'errors and restart bringup'))])
 
 
 # ------------------------------------------------------------------ camera
 
 def check_camera(snap, live):
-    cams = _usb(snap, *car.CAMERA_USB)
+    cams = [d for d in snap.usb if car.CAMERA_KERNEL_DRIVER in d.drivers]
     cam = cams[0] if cams else None
+    dev = f'/dev/{car.CAMERA_DEVICE}'
 
     def usb():
         if cam is None:
-            return Layer('USB device', F, 'RealSense D435i not plugged in',
-                         'plug it into a USB 3 (blue) port')
-        return Layer('USB device', P, f'{cam.product or "D435i"} at {cam.sysname}')
+            return Layer('USB webcam', F, 'no USB webcam (no device bound to '
+                         f'{car.CAMERA_KERNEL_DRIVER})', 'plug in the webcam')
+        return Layer('USB webcam', P, f'{cam.product or "UVC camera"} at '
+                     f'{cam.sysname}')
 
-    def speed():
-        name = 'USB speed'
-        if cam.speed_mbps < car.CAMERA_MIN_SPEED_MBPS:
-            return Layer(name, W, f'running at USB 2 ({cam.speed_mbps:g} Mb/s): '
-                         'works at the low 424x240@15 profile, no headroom',
-                         'use a USB 3 cable and push the plug fully home; '
-                         'a half-seated USB 3 plug falls back to USB 2')
-        return Layer(name, P, f'{cam.speed_mbps:g} Mb/s')
-
-    def kernel():
-        name = 'kernel driver'
-        if car.CAMERA_KERNEL_DRIVER not in cam.drivers or not cam.videos:
-            return Layer(name, F, f'{car.CAMERA_KERNEL_DRIVER} has not created '
-                         '/dev/video* nodes', 're-plug the camera')
-        return Layer(name, P, f'{car.CAMERA_KERNEL_DRIVER} -> '
-                     f'{len(cam.videos)} /dev/video* nodes')
+    def node():
+        if snap.camera_device is None:
+            have = ', '.join(cam.videos) or 'no /dev/video* at all'
+            return Layer(dev, F, f'{dev} missing (webcam has: {have})',
+                         'set usb_cam_stream_node `device` in racerbot_launch/'
+                         'config/web_dashboard_rb1.yaml; `v4l2-ctl '
+                         '--list-devices` shows the right one')
+        if not snap.camera_device:
+            return Layer(dev, F, f'{dev} is not readable+writable by you',
+                         '`sudo usermod -aG video $USER`, then log out and in')
+        return Layer(dev, P, 'read/write OK')
 
     report = ladder('Camera', [
-        ('USB device', usb), ('USB speed', speed), ('kernel driver', kernel),
-        (f'ROS driver {car.EXE_REALSENSE}', lambda: _process_layer(
-            snap, car.EXE_REALSENSE, optional_fix='ros2 launch racerbot_launch '
-            'realsense_camera_launch.py')),
-        (f'{car.CAMERA_TOPIC} rate', lambda: _rate_layer(
-            live, car.CAMERA_TOPIC, car.CAMERA_MIN_HZ))])
+        ('USB webcam', usb), (dev, node),
+        (f'stream {car.EXE_CAMERA}', lambda: _process_layer(
+            snap, car.EXE_CAMERA, optional_fix='ros2 launch racerbot_launch '
+            'webcam_launch.py'))])
     # The car drives without a camera (team decision 2026-10-01): report
     # every camera failure, never fail the run on one. Capped *after* the
     # ladder so a missing camera still blocks the layers above it.
@@ -377,11 +359,25 @@ def check_bringup(snap, live):
               (car.EXE_MUX, car.EXE_ACK_TO_VESC, car.EXE_VESC_TO_ODOM)]
     if _pids(snap, car.EXE_VESC_TO_ODOM):
         core = _stats(live, '/sensors/core')
+        servo = _stats(live, '/commands/servo/position')
         core_silent = live is not None and (core is None or core.count == 0)
-        layers.append(_rate_layer(
-            live, '/odom', car.ODOM_MIN_HZ, silent_detail=(
-                'no messages -- /odom is computed from /sensors/core, which '
-                'is also silent: fix the VESC first') if core_silent else None))
+        servo_silent = live is not None and (servo is None or servo.count == 0)
+        odom = _stats(live, '/odom')
+        if (not core_silent and servo_silent
+                and (odom is None or odom.count == 0)):
+            # vesc.yaml use_servo_cmd_to_calc_angular_velocity: true, and
+            # vesc_to_odom.cpp:97 returns until the first servo command.
+            layers.append(Layer('/odom rate', I, 'no messages yet: '
+                                'vesc_to_odom_node waits for the first '
+                                '/commands/servo/position, and nothing has '
+                                'sent one -- normal until something drives',
+                                'see the drive path section'))
+        else:
+            layers.append(_rate_layer(
+                live, '/odom', car.ODOM_MIN_HZ, silent_detail=(
+                    'no messages -- /odom is computed from /sensors/core, '
+                    'which is also silent: fix the VESC first')
+                if core_silent else None))
     else:
         layers.append(Layer('/odom rate', S,
                             f'blocked by: ROS driver {car.EXE_VESC_TO_ODOM}'))
@@ -415,6 +411,61 @@ def check_bringup(snap, live):
     else:
         layers.append(Layer(name, P, 'no publisher (autonomy can reach /drive)'))
     return DeviceReport('Bringup', layers)
+
+
+# -------------------------------------------------------------- drive path
+
+def check_drive_path(snap, live):
+    """Manual driving, hop by hop: /joy -> /teleop -> /ackermann_cmd ->
+    /commands/*, then whether LB was held and the VESC was told to move.
+    Answers "I'm holding LB and the car doesn't move" without the reader
+    having to know the topic graph."""
+    if not _pids(snap, car.EXE_JOY_TELEOP):
+        return DeviceReport('Drive path (teleop)', [Layer(
+            'teleop', I, 'teleop_launch.py is not running, so nothing turns '
+            'the sticks into drive commands',
+            'ros2 launch f1tenth_stack teleop_launch.py')])
+
+    def hop(topic, silent):
+        return lambda: _rate_layer(live, topic, car.DRIVE_MIN_HZ,
+                                   silent_detail=silent)
+
+    def lb():
+        name = 'LB held'
+        joy = _stats(live, '/joy')
+        if live.joy_lb_held == 0:
+            return Layer(name, I, 'LB was not held during the sample, so the '
+                         'deadman path was not exercised',
+                         're-run the doctor while holding LB and pushing the '
+                         'left stick')
+        return Layer(name, P, f'in {live.joy_lb_held} of {joy.count} /joy '
+                     'messages')
+
+    def motor():
+        name = 'motor command'
+        if live.motor_nonzero == 0:
+            return Layer(name, W, 'LB held, but every motor speed command was '
+                         'zero -- the left stick was not moved, or joy_teleop '
+                         'reads a different axis (joy_teleop.yaml)',
+                         'hold LB and push the left stick forward')
+        return Layer(name, P, f'{live.motor_nonzero} non-zero speed commands '
+                     'sent: ROS is telling the VESC to move. If the wheels '
+                     'still do not turn, it is below ROS: battery switch, ESC '
+                     'power, motor wiring')
+
+    steps = [('/joy rate', hop('/joy', 'no /joy, so joy_teleop has nothing '
+                               'to act on -- see Joystick above'))]
+    if live is not None:
+        steps += [
+            ('/teleop rate', hop('/teleop', 'joy_teleop is running and /joy '
+                                 'flows, but joy_teleop publishes nothing')),
+            ('/ackermann_cmd rate', hop('/ackermann_cmd', '/teleop flows but '
+                                        'ackermann_mux forwards nothing')),
+            ('/commands/motor/speed rate', hop(
+                '/commands/motor/speed', '/ackermann_cmd flows but '
+                'ackermann_to_vesc_node sends the VESC nothing')),
+            ('LB held', lb), ('motor command', motor)]
+    return ladder('Drive path (teleop)', steps)
 
 
 # ------------------------------------------------------------- environment
@@ -465,4 +516,4 @@ def check_environment(snap, live):
 def run_all(snap, live):
     return [check(snap, live) for check in (
         check_environment, check_vesc, check_lidar, check_joystick,
-        check_camera, check_bringup)]
+        check_camera, check_bringup, check_drive_path)]

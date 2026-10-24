@@ -76,6 +76,7 @@ class UsbDevice:
     ttys: list = field(default_factory=list)        # e.g. ['ttyACM0']
     videos: list = field(default_factory=list)      # e.g. ['video4']
     joysticks: list = field(default_factory=list)   # e.g. ['js0']
+    events: list = field(default_factory=list)      # e.g. ['event5']
 
 
 @dataclass
@@ -92,23 +93,18 @@ class Process:
 
 
 @dataclass
-class NetIface:
-    name: str
-    carrier: object = None      # True / False / None (unknown, iface down)
-    ipv4: list = field(default_factory=list)    # ['192.168.0.15/24']
-
-
-@dataclass
 class Snapshot:
     usb: list = field(default_factory=list)
     processes: list = field(default_factory=list)
-    ifaces: dict = field(default_factory=dict)
     vesc_symlink: object = None         # resolved target path, or None if absent
     vesc_symlink_rw: bool = False
+    lidar_symlink: object = None        # same, for /dev/sensors/hokuyo
+    lidar_symlink_rw: bool = False
     tty_holders: dict = field(default_factory=dict)  # '/dev/ttyACM0' -> [pid]
-    js_readable: dict = field(default_factory=dict)  # 'js0' -> bool
-    lidar_ping: object = None           # True / False / None = not probed
-    lidar_tcp: object = None            # True / False / None = not probed
+    # /dev/input/<name> -> readable by us, for every js* and event* node of
+    # a USB device. joy_node (SDL2) reads the event node, not the js node.
+    input_readable: dict = field(default_factory=dict)  # 'event5' -> bool
+    camera_device: object = None        # True: rw OK, False: no access, None: absent
     env: dict = field(default_factory=dict)
 
 
@@ -130,3 +126,5 @@ class LiveSample:
     topics: dict = field(default_factory=dict)      # topic -> TopicStats
     teleop_publishers: int = 0
     laser_tf: object = None             # (x, y, z) or None if never seen
+    joy_lb_held: int = 0                # /joy messages with LB down
+    motor_nonzero: int = 0              # /commands/motor/speed messages != 0
