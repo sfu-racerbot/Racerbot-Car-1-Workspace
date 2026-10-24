@@ -1,21 +1,32 @@
 # Training the neural racer on FIR
 
 > **Who this is for:** whoever submits neural-racer training jobs to Fir.
-> **Read first:** [the neural racer plan](../../../docs/superpowers/specs/2026-10-23-neural-racer-plan.md#running-it-on-fir-at-over-80-gpu-efficiency) — why the jobs are shaped this way.
+> **Read first:** [the neural racer plan](../../../docs/superpowers/specs/2026-10-23-neural-racer-plan.md#a9-fir-and-gpu-efficiency) — why the jobs are shaped this way.
 > **You'll be able to:** set up once, benchmark, train one stage, run the league, and check each job's GPU efficiency.
 
 These scripts run the plan's training on the Alliance's **Fir** cluster at SFU. Each job uses one H100. The scripts are built to keep that GPU over 80% busy, and to put the CPU cores it leaves idle to work.
 
-> **Status, 2026-10-23:** the scripts are tested locally against a stub trainer: signal forwarding, checkpoint-and-resume, the DONE and FAILED markers, and the utilisation summary. They have **not been run on Fir yet**.
->
-> The trainers they launch (`neural_racer_train/<stage>.py`) don't exist until milestones M1 to M6. Until then, a job exits within seconds with exit code 3 and says so.
+> **Status, 2026-10-23:** every stage exists, and the whole chain has run on the Jetson's CPU, including a full CPU dress rehearsal of the shakedown job. **Nothing has run on Fir or on a GPU yet**, which is why the shakedown job is step 2.
 
-| File | What it does |
-|---|---|
-| `fir_train.sbatch` | one learner on one GPU: any stage (`teacher`, `distill`, `league_learner`, `benchmark`) or league role. Resumable |
-| `fir_league_submit.sh` | submits all four league roles, each as a chain of resumable 12-hour segments |
-| `fir_env.sh` | sourced by each job: loads modules and builds the venv on the node's local disk |
-| `../requirements-fir.txt` | what that venv contains |
+## Quick path
+
+Everything below, condensed. Each step is one command, run on a **Fir login node** from your clone of the workspace.
+
+| Step | Command | What it does | Then |
+|---|---|---|---|
+| 0 | edit `tools/neural_racer/slurm/fir.conf` | set `NR_ACCOUNT` to your `def-...` allocation | — |
+| 1 | `tools/neural_racer/slurm/fir_run.sh setup` | referee gym, wheelhouse check, login venv, held-out maps | once |
+| 2 | `tools/neural_racer/slurm/fir_run.sh shakedown` | 1 h GPU job: the tests, then every stage at tiny scale, then the export golden check | read `nr-shakedown-<job>.out`: every line must say PASS |
+| 3 | `tools/neural_racer/slurm/fir_run.sh benchmark` | 30 min: how many environments fill an H100 | put `chosen.num_envs` into `fir.conf` as `NR_NUM_ENVS` |
+| 4 | `tools/neural_racer/slurm/fir_run.sh teacher` | Stage 1, seeds 0 1 2, each a chain of `NR_SEGMENTS` segments | `fir_run.sh status` until `DONE` |
+| 5 | `tools/neural_racer/slurm/fir_run.sh distill <best seed>` | Stage 2. **Re-run after Phase 0** puts car 1's measured IMU numbers into `gpu_sim/params.py` | wait for `DONE` |
+| 6 | `tools/neural_racer/slurm/fir_run.sh league` | Stage 3: four roles; the referee workers score snapshots as they appear | days on a default allocation |
+| 7 | `tools/neural_racer/slurm/fir_run.sh select` | picks the release from the referee's results | read `selection_report.json` |
+| 8 | `tools/neural_racer/slurm/fir_run.sh export <winner>` | the folder the car loads, with both reports | copy to the car, run `approve_model` there |
+
+- **Status:** `tools/neural_racer/slurm/fir_run.sh status` shows your jobs, each run's latest metrics, `DONE`/`FAILED` markers, GPU utilisation, and the benchmark's choice.
+- **Dry runs:** prefix any step with `NR_DRY_RUN=1` to see the exact `sbatch` commands without submitting.
+- **Continuing a run:** rerun the same step. Every stage resumes from its last checkpoint, so nothing restarts from scratch.
 
 ## One-time setup, on a Fir login node
 

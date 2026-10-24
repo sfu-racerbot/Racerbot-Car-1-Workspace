@@ -328,16 +328,17 @@ class BatchedRaceSim:
         for _ in range(SUBSTEPS):
             self.x = rk4(self.x, u, pc, INTEGRATOR_DT)
             self.substep += 1
+            # Computed every substep and masked, rather than `if take.any():` --
+            # that test is a GPU->host sync, five times a tick.
             take = (self.substep % IMU_EVERY == 0).view(-1, 1)
-            if take.any():
-                f = st_derivative(self.x, u, pc)
-                gz, ax, ay = imu_mod.specific_force(self.x, f, dist)
-                noise = torch.randn(E, C, 3, generator=self.gen, device=self.device)
-                sample = torch.stack([
-                    gz + self.gyro_bias + noise[..., 0] * self.p.imu_gyro_noise.view(-1, 1),
-                    ax + noise[..., 1] * self.p.imu_accel_noise.view(-1, 1),
-                    ay + noise[..., 2] * self.p.imu_accel_noise.view(-1, 1)], dim=-1)
-                self.imu_held = torch.where(take.unsqueeze(-1), sample, self.imu_held)
+            f = st_derivative(self.x, u, pc)
+            gz, ax, ay = imu_mod.specific_force(self.x, f, dist)
+            noise = torch.randn(E, C, 3, generator=self.gen, device=self.device)
+            sample = torch.stack([
+                gz + self.gyro_bias + noise[..., 0] * self.p.imu_gyro_noise.view(-1, 1),
+                ax + noise[..., 1] * self.p.imu_accel_noise.view(-1, 1),
+                ay + noise[..., 2] * self.p.imu_accel_noise.view(-1, 1)], dim=-1)
+            self.imu_held = torch.where(take.unsqueeze(-1), sample, self.imu_held)
         self.x[..., 4] = actuation.wrap_angle(self.x[..., 4])
         bad = ~torch.isfinite(self.x).all(-1)
         self.x = torch.where(bad.unsqueeze(-1), torch.zeros_like(self.x), self.x)

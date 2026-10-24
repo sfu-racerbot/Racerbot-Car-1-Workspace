@@ -101,8 +101,9 @@ def load_policy(checkpoint: Path) -> tuple:
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
     cfg = state.get('policy_config', {})
     width = cfg.get('width', ((32, 64, 64, 64), 256))
-    policy = PolicyNet(width=(tuple(int(c) for c in width[0]), int(width[1])),
-                       recurrent=cfg.get('recurrent', True))
+    # stage checkpoints carry policy_config; league archive entries carry meta
+    recurrent = cfg.get('recurrent', state.get('meta', {}).get('recurrent', True))
+    policy = PolicyNet(width=(tuple(int(c) for c in width[0]), int(width[1])), recurrent=recurrent)
     policy.load_state_dict(state['policy'])
     return policy, state
 

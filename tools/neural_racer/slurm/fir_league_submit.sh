@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROLES=(main0 main1_mlp main_exploiter league_exploiter)
-ACCOUNT="" RUN="" INIT="" SEGMENTS=6 TIME="12:00:00" DRY_RUN=0
+ACCOUNT="" RUN="" INIT="" SEGMENTS=6 TIME="12:00:00" DRY_RUN=0 NUM_ENVS=""
 
 while (( $# )); do
     case "$1" in
@@ -22,6 +22,7 @@ while (( $# )); do
         --segments) SEGMENTS="$2"; shift 2 ;;
         --time)     TIME="$2"; shift 2 ;;
         --dry-run)  DRY_RUN=1; shift ;;
+        --num-envs) NUM_ENVS="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -41,6 +42,7 @@ for role in "${ROLES[@]}"; do
              --export "ALL,NR_ROLE=${role},NR_REPO=${REPO}")
         [[ -n "${prev}" ]] && cmd+=(--dependency "afterany:${prev}")
         cmd+=("${HERE}/fir_train.sbatch" league_learner "${RUN}" --init-from "${INIT}")
+        [[ -n "${NUM_ENVS}" ]] && cmd+=(--num-envs "${NUM_ENVS}")
         if (( DRY_RUN )); then
             echo "${cmd[*]}"
             prev="DRYRUN_${role}_${segment}"
