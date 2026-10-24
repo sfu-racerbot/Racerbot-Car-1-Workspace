@@ -1,0 +1,14 @@
+# Generic defaults for one imu_conditioner_node (a VESC onboard IMU).
+# Car 1's own values, for both of its IMUs, are in imu_rb1.yaml.
+imu_conditioner_node:
+  ros__parameters:
+    imu_name: vesc
+    input_topic: /sensors/imu/raw
+    input_gyro_scale: 0.017453292519943295   # deg/s -> rad/s (vesc_packet.cpp: gyro in deg/s)
+    input_accel_scale: 9.80665               # g -> m/s^2 (vesc_packet.cpp: accel in g)
+    r_base_imu: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    stationary_window_sec: 2.0
+    gravity_tolerance: 0.5
+    stale_timeout_sec: 0.1
+    gyro_saturation: 34.9                    # rad/s; TODO(verify) against the chip's datasheet
+    accel_saturation: 156.9                  # m/s^2; TODO(verify)

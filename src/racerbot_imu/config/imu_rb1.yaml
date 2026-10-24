@@ -1,0 +1,32 @@
+# Car 1: two IMUs (team, 2026-10-23) -- the VESC's onboard IMU and a separate
+# unit at the front bumper. docs/superpowers/specs/2026-10-23-neural-racer-plan.md, Phase 0.
+#
+# EVERYTHING MARKED TODO(P0.x) IS A PLACEHOLDER until Phase 0 measures it on the car.
+imu_conditioner_vesc:
+  ros__parameters:
+    imu_name: vesc
+    input_topic: /sensors/imu/raw
+    input_gyro_scale: 0.017453292519943295   # deg/s -> rad/s
+    input_accel_scale: 9.80665               # g -> m/s^2
+    r_base_imu: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]   # TODO(P0.4): calibrate_axes --imu vesc
+
+imu_conditioner_front:
+  ros__parameters:
+    imu_name: front
+    # TODO(P0.1): if the front IMU is wired to the VESC, there is no separate
+    # topic -- run single-IMU (secondary: '') and test each IMU in turn.
+    input_topic: /sensors/imu_front/raw
+    input_gyro_scale: 1.0                    # TODO(P0.1): set from the front unit's driver units
+    input_accel_scale: 1.0
+    r_base_imu: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]   # TODO(P0.4): calibrate_axes --imu front
+
+imu_select_node:
+  ros__parameters:
+    primary: vesc                            # TODO(P0.5): chosen by delay, then driving noise
+    secondary: front
+    secondary_required: true
+    delay_primary_sec: 0.0                   # TODO(P0.5)
+    delay_secondary_sec: 0.0                 # TODO(P0.5)
+    gyro_base_tolerance: 0.05                # TODO(P0.5): max(0.05, 5 sigma of the measured disagreement)
+    gyro_relative_tolerance: 0.05
+    disagreement_sec: 0.5
