@@ -80,6 +80,7 @@ After that, follow whichever branch below matches what you're doing.
 |---|---|
 | [hardware-reference.md](hardware-reference.md) | VESC, LiDAR, joystick: exact addresses, ports, config values, and gotchas for this specific car. |
 | [troubleshooting.md](troubleshooting.md) | Real problems hit during bring-up and how they were diagnosed. Check here when something doesn't work. |
+| [known-issues.md](known-issues.md) | Discrepancies, stale docs and loose ends found but not yet fixed, each with its evidence and a suggested fix. For anyone with time to fix things. |
 
 ## Cameras and sensors
 
