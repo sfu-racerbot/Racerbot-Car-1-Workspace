@@ -76,7 +76,7 @@ It is not on `cloudflared`'s command line any more. There, any user on the car c
 ps -o args= -C cloudflared          # Terminal 1, on the car
 ```
 
-**Working when:** it prints `/usr/bin/cloudflared --no-autoupdate tunnel run` with no `--token`.
+**Working when:** it prints `/usr/bin/cloudflared --no-autoupdate tunnel run`, followed by nothing or by `--token-file /etc/cloudflared/token`. A long `eyJ…` string after `--token` means the token is exposed again.
 
 ## Changing car 1's settings
 
