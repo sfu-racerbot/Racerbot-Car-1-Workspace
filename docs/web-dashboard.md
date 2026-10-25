@@ -68,9 +68,9 @@ Car 1's tunnel is the `rb1` tunnel in the team's Cloudflare account. A **tunnel*
 
 The same five as car 2's, with `rb2` changed to `rb1`. The routes and Access applications live in the Cloudflare dashboard, not on the car: [web-dashboards docs/car-1-setup.md](https://github.com/sfu-racerbot/web-dashboards/blob/main/docs/car-1-setup.md). Setting one up from scratch: [web-dashboards/car/README.md](../src/web_dashboards/car/README.md).
 
-**The tunnel's token** (its password to Cloudflare) is in `/etc/cloudflared/tunnel.env`, readable only by root. The unit loads it with `EnvironmentFile=`.
+**The tunnel's token** (its password to Cloudflare) is in `/etc/cloudflared/token`, readable only by root. The unit passes it with `--token-file`. That is what Cloudflare's own `cloudflared service install` writes, from cloudflared 2026.9 on; the token was refreshed and installed that way on 2026-10-24. The web-dashboards installer (`car/cloudflared/install.sh`) writes `/etc/cloudflared/tunnel.env` instead; either is fine.
 
-It is not on `cloudflared`'s command line any more. There, any user on the car could read it with `ps` or `systemctl cat cloudflared`. Cloudflare's own `cloudflared service install <token>` puts it back there, so re-check after any reinstall:
+It is not on `cloudflared`'s command line any more. There, any user on the car could read it with `ps` or `systemctl cat cloudflared`. Older cloudflared versions' `cloudflared service install <token>` put it there, so re-check after any reinstall:
 
 ```bash
 ps -o args= -C cloudflared          # Terminal 1, on the car
