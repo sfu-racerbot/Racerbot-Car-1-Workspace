@@ -27,12 +27,6 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 **Fix:** delete the remap, or remap the real name on purpose. `f1tenth_system` is vendored with local fixes, so read `docs/git-setup.md` first. Car 2 has the same line.
 
-### `gap_follow`'s log says the mux stops the car
-
-`gap_follow_node.py`'s `_sensor_status_callback` logs `/drive has gone quiet and the mux will stop the car`, and `_log_decision` prints `command: none (the mux stops when /drive times out)`. `ackermann_mux` only republishes the messages it receives (`topic_handle.hpp` callback → `publishAckermann`); on a timeout it publishes nothing, so no zero reaches the VESC. The motor stops only through the VESC firmware's own command timeout, set in VESC Tool and not visible from ROS. The node's own `scan_callback` docstring says the same: "Nothing in the ROS chain downstream ... publishes a zero on its own".
-
-**Fix:** reword both log strings. Check the VESC command timeout on each car in VESC Tool and record its value in `docs/hardware-reference.md`.
-
 ### `optimize_raceline` checks against a stale steering limit
 
 `src/pure_pursuit/pure_pursuit/optimize_raceline.py` defaults `--max-steering-angle` to 0.26 rad, the limit from before October 2026. Car 1's planner limit is `profile_max_steering_angle: 0.30` in `auto_map_race.yaml` and its controller's is 0.33. A hand-run optimization therefore checks feasibility against the wrong limit unless the flag is passed. Car 2 has the same default. `test_steering_limits_fit_servo.py` does not cover it.
@@ -78,6 +72,12 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 `python3 -c "import osqp"` fails on car 1 (2026-10-24). `docs/steering-laws.md`, "Installing osqp for MPC", says "On the car it was installed with", a line ported from car 2. `race_launch.py steering_law:=mpc` refuses to start until it is installed. The README's quick start doesn't mention it.
 
 **Fix:** `pip install --user --break-system-packages osqp==1.1.3`, check `numpy` stays at 1.26.4, and add the step to the README's setup.
+
+### The VESC command timeout is not recorded
+
+`ackermann_mux` publishes nothing when `/drive` times out, so when a driving node goes quiet the motor stops only through the VESC firmware's own command timeout, set in VESC Tool and not visible from ROS. Its value isn't written down for either car.
+
+**Fix:** on each car, read **VESC Tool → App Settings → General → Timeout** and record it in `docs/hardware-reference.md`.
 
 ### The VESC IMU: two docs disagree about which car reads zeros
 
