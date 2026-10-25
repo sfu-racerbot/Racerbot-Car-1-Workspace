@@ -87,12 +87,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ## Documentation
 
-### `docs/hardware-reference.md`: the VESC udev rule doesn't match the car
-
-The VESC row says the rule sets `GROUP=dialout, MODE=0660`. The real `/etc/udev/rules.d/99-vesc.rules` on car 1 sets `MODE="0666"` with no group ("usable without dialout/re-login"). `docs/car1-vs-car2.md` already says 0666.
-
-**Fix:** correct the hardware reference's VESC row.
-
 ### `docs/writing-your-own-node.md` quotes an old servo range
 
 "The message fields that matter" says steering is clamped by `servo_min/max: 0.15-0.85`, roughly ±0.34 rad, ±19°. Car 1's `vesc.yaml` is 0.05–0.75 with full stick at 0.38 rad; car 2's is 0.15–0.95 with 0.436.
