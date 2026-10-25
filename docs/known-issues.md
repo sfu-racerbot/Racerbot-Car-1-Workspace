@@ -27,6 +27,12 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 **Fix:** match the declared defaults to the YAMLs, or read them from `docs/hardware-reference.md`'s numbers, and correct the racing-autonomy sentence. Check which node tests rely on the declared default first.
 
+### `racerbot_a`'s `reactive` README shows `enable_deadman:=false`
+
+`src/racerbot_a/src/reactive/README.md` (team submodule, checked in the main checkout on 2026-10-24) gives `ros2 launch reactive reactive_launch.py enable_deadman:=false` as a launch command, twice. The workspace policy (`docs/architecture.md`) says never to set `enable_deadman` to `false`. `racerbot_a` also builds its own `gap_follow_node`, `ftg_node`, `disparity_extender_node` and `pure_pursuit_node`, which publish `AckermannDriveStamped`. None of them are covered by this repo's deadman tests.
+
+**Fix:** in the `racerbot_a` repo, remove those commands, check each of its driving nodes has the LB deadman gate and the four deny-path tests, then bump the submodule.
+
 ### The particle filter broadcasts a transform tf2 rejects (upstream, verify)
 
 `src/particle_filter/particle_filter/particle_filter.py` broadcasts a transform with `header.frame_id = '/map'` and `child_frame_id = '/laser'`, with leading slashes. tf2 in ROS 2 does not accept frame IDs that start with `/`, and `laser` already has `base_link` as its parent from the static transform. Nothing in the workspace reads this transform (`pure_pursuit` uses `/pf/viz/inferred_pose`), so the race path is unaffected, but it may be spamming errors or giving `laser` two parents.
@@ -80,15 +86,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 **Fix:** on car 1, with bringup running, `ros2 topic echo /sensors/imu/raw --field angular_velocity` and rotate the car by hand. Correct whichever doc is wrong. If it is zero, check **VESC Tool → App Settings → IMU** (a sample rate of 0 means off).
 
 ## Documentation
-
-### `docs/architecture.md` is stale in four places
-
-- The node-graph diagram labels the static transform `base_link → laser (estimated offset: 0.33m fwd, 0.11m up)`, and the text above it says the LiDAR "sits 33 cm in front of the car's centre". `bringup_launch.py` uses the measured 0.26 m, and `base_link` is the rear axle, not the centre.
-- "Package reference" lists `f1tenth_stack`, `vesc` and `ackermann_mux` as git submodules. `f1tenth_system`, which contains them, is vendored as plain files (`docs/git-setup.md`).
-- "Frame conventions" says `odom` has "no encoders and no IMU fusion" and lists four frames. `imu_bridge`'s `vehicle_state_node` now publishes `/odom/imu` and, with `gyro_odom:=true`, the `odom_imu → odom` transform, so the table is missing `odom_imu`.
-- The workspace policy says the deadman is enforced in "all three" nodes: `gap_follow_node`, `pure_pursuit_node` and `auto_map_race_node`. `neural_racer_node` also publishes `AckermannDriveStamped` and has `enable_deadman`; it is missing from that list and from `CLAUDE.md`'s safety section.
-
-**Fix:** update each, and point the numbers at `docs/hardware-reference.md` instead of repeating them.
 
 ### `docs/hardware-reference.md`: the VESC udev rule doesn't match the car
 
