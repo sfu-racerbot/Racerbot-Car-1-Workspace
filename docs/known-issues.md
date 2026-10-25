@@ -81,12 +81,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ## Documentation
 
-### `README.md` says the doctor still checks car 2's hardware
-
-The **Notes** section of `README.md` ends with "`racerbot_doctor`'s LiDAR and camera checks still describe **car 2's** hardware ... and will report those layers as failing on car 1". Commit `9fe90a4` ("racerbot_doctor: car 1's hardware") changed the doctor to the USB Hokuyo and the UVC webcam, and `CLAUDE.md` describes it as car 1's version.
-
-**Fix:** delete that bullet.
-
 ### `docs/architecture.md` is stale in four places
 
 - The node-graph diagram labels the static transform `base_link → laser (estimated offset: 0.33m fwd, 0.11m up)`, and the text above it says the LiDAR "sits 33 cm in front of the car's centre". `bringup_launch.py` uses the measured 0.26 m, and `base_link` is the rear axle, not the centre.
