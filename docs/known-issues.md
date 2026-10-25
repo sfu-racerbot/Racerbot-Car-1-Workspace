@@ -87,12 +87,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ## Documentation
 
-### `docs/racing-autonomy.md`: the speed profile does share grip
-
-Phase 4, step 2 says the velocity profile uses a lateral-only friction circle and "ignores all of that" (combined lateral and longitudinal grip). `racing_math.compute_velocity_profile` defaults to `friction_ellipse=True`, and `generate_velocity_profile`, `optimize_raceline` and `auto_map_race_node` all use the default, so the braking and acceleration passes do share grip with cornering.
-
-**Fix:** describe the friction ellipse in Phase 4, and check `src/pure_pursuit/README.md` for the same sentence.
-
 ### `docs/ros-simulator.md` and `tools/f1tenth_sim/README.md` predate the 0.26 m LiDAR offset
 
 - `docs/ros-simulator.md`, "What it does and does not model", says the simulator models "the 0.33m LiDAR offset", explains why gym's collision flag never fires, and says the 1081 beams match "the Hokuyo UST-10LX". `sim_bringup_launch.py` uses 0.26 m; `CLAUDE.md` records gym's flag firing since 2026-10-20; car 1's LiDAR is a UST-30LX.
