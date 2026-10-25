@@ -311,6 +311,8 @@ colcon build --symlink-install --packages-select <package>
 
 > **Do step 3 even when you're confident.** All five fixes are silently reverted by a naive overwrite, and the last two fail silently *and* unsafely.
 
+One more difference from upstream is **not** a fix and is safe to lose. Upstream's three bringups remap the [mux](glossary.md#mux--multiplexer)'s `ackermann_cmd_out` → `ackermann_drive`. The mux never uses the name `ackermann_cmd_out`, so the remap did nothing, and it was deleted here in October 2026. If a sync brings it back, `python3 -m pytest src/racerbot_launch/test/` fails in `test_drive_path_wiring.py`; delete the line again.
+
 ---
 
 ## Related docs

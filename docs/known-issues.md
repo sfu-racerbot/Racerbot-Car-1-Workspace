@@ -21,12 +21,6 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 **Fix:** give `/imu/data` one owner, or namespace one of the two packages. Add a static test that fails if both declare the same output topic.
 
-### `bringup_launch.py` remaps a topic the mux never publishes
-
-`src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py` starts `ackermann_mux` with `remappings=[('ackermann_cmd_out', 'ackermann_drive')]`. The mux publishes on `ackermann_cmd` (`src/f1tenth_system/ackermann_mux/src/ackermann_mux.cpp`, `create_publisher(... "ackermann_cmd" ...)`), and `ackermann_to_vesc` subscribes to `ackermann_cmd`. The remap matches nothing, so it does nothing; the drive path works only because both ends use the default name.
-
-**Fix:** delete the remap, or remap the real name on purpose. `f1tenth_system` is vendored with local fixes, so read `docs/git-setup.md` first. Car 2 has the same line.
-
 ### Two nodes still declare the pre-October 0.26 rad steering default
 
 `pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.33 and 0.30, so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
