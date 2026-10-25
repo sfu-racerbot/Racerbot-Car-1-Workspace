@@ -27,11 +27,11 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 **Fix:** delete the remap, or remap the real name on purpose. `f1tenth_system` is vendored with local fixes, so read `docs/git-setup.md` first. Car 2 has the same line.
 
-### `optimize_raceline` checks against a stale steering limit
+### Two nodes still declare the pre-October 0.26 rad steering default
 
-`src/pure_pursuit/pure_pursuit/optimize_raceline.py` defaults `--max-steering-angle` to 0.26 rad, the limit from before October 2026. Car 1's planner limit is `profile_max_steering_angle: 0.30` in `auto_map_race.yaml` and its controller's is 0.33. A hand-run optimization therefore checks feasibility against the wrong limit unless the flag is passed. Car 2 has the same default. `test_steering_limits_fit_servo.py` does not cover it.
+`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.33 and 0.30, so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
 
-**Fix:** read the default from `auto_map_race.yaml`, or update it and add it to `test_steering_limits_fit_servo.py`.
+**Fix:** match the declared defaults to the YAMLs, or read them from `docs/hardware-reference.md`'s numbers, and correct the racing-autonomy sentence. Check which node tests rely on the declared default first.
 
 ### The particle filter broadcasts a transform tf2 rejects (upstream, verify)
 
