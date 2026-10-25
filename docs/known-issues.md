@@ -39,6 +39,12 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 **Fix:** run the filter and check `ros2 run tf2_ros tf2_monitor`. If the broadcast is rejected or harmful, disable it in the filter's config or patch it upstream; `particle_filter` is a submodule.
 
+### `racerbot_sim` still lets gym zero a car's yaw on contact
+
+Since the measured 0.26 m LiDAR offset, gym's own collision flag fires when a *padded* envelope touches a wall or another car, and its response is `state[3:] = 0`: speed, steering and yaw zeroed, which turned two cars round in the older harness. `FidelityPlant` switches that off (`tools/f1tenth_sim/sim_fidelity/plant.py`, `ttc_threshold = -inf`). `racerbot_sim/sim_bridge.py` does not, and its comment above `body_contact` still says the flag never fires. `CLAUDE.md` already records `racerbot_sim` as unchecked.
+
+**Fix:** reproduce it in `racerbot_sim` (two cars, or one brushing a wall with its padded box), then set the same threshold in `SimBridge`, with a test that fails while gym can still zero the yaw. Update the comment.
+
 ### Wiimote steering is not the F710's full stick
 
 `src/racerbot_wiimote/racerbot_wiimote_driver/config/wiimote_teleop.yaml` sets the steering scale to `0.34` with the comment "the same as the F710's full stick", and `docs/wiimote.md` repeats it. The F710's full stick is 0.38 rad on car 1 and 0.436 rad on car 2 (`joy_teleop.yaml`). Same on both cars.
@@ -86,13 +92,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 **Fix:** on car 1, with bringup running, `ros2 topic echo /sensors/imu/raw --field angular_velocity` and rotate the car by hand. Correct whichever doc is wrong. If it is zero, check **VESC Tool → App Settings → IMU** (a sample rate of 0 means off).
 
 ## Documentation
-
-### `docs/ros-simulator.md` and `tools/f1tenth_sim/README.md` predate the 0.26 m LiDAR offset
-
-- `docs/ros-simulator.md`, "What it does and does not model", says the simulator models "the 0.33m LiDAR offset", explains why gym's collision flag never fires, and says the 1081 beams match "the Hokuyo UST-10LX". `sim_bringup_launch.py` uses 0.26 m; `CLAUDE.md` records gym's flag firing since 2026-10-20; car 1's LiDAR is a UST-30LX.
-- `tools/f1tenth_sim/README.md`, "The headline", says "Nobody has re-run the probe to find out whether gym's flag fires now". `CLAUDE.md` records it measured firing on 2026-10-20, along with the yaw-zeroing response `FidelityPlant` now disables.
-
-**Fix:** update both notes to the measured state.
 
 ## Cross-car drift
 
