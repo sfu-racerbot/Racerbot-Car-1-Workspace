@@ -87,12 +87,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ## Documentation
 
-### `docs/writing-your-own-node.md` quotes an old servo range
-
-"The message fields that matter" says steering is clamped by `servo_min/max: 0.15-0.85`, roughly ±0.34 rad, ±19°. Car 1's `vesc.yaml` is 0.05–0.75 with full stick at 0.38 rad; car 2's is 0.15–0.95 with 0.436.
-
-**Fix:** link to `docs/hardware-reference.md` rather than quoting numbers.
-
 ### `docs/racing-autonomy.md`: the speed profile does share grip
 
 Phase 4, step 2 says the velocity profile uses a lateral-only friction circle and "ignores all of that" (combined lateral and longitudinal grip). `racing_math.compute_velocity_profile` defaults to `friction_ellipse=True`, and `generate_velocity_profile`, `optimize_raceline` and `auto_map_race_node` all use the default, so the braking and acceleration passes do share grip with cornering.
