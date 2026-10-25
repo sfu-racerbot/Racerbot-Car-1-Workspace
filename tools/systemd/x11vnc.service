@@ -1,0 +1,23 @@
+# x11vnc for the remote desktop: the car's live X display on 127.0.0.1:5900.
+#
+# A template: tools/systemd/install.sh installs it as
+# /etc/systemd/system/x11vnc.service. It runs a root-owned COPY of
+# x11vnc-follow.sh (/usr/local/sbin/racerbot-x11vnc-follow), never the one
+# in the workspace, which the car's user can edit.
+#
+# Loopback only. novnc.service serves it to browsers on 127.0.0.1:6080, and
+# the tunnel route rd-rb1.sfuracerbot.ca behind Cloudflare Access is the only
+# way in from off the car (docs/web-dashboard.md, "Remote desktop and SSH").
+[Unit]
+Description=x11vnc remote desktop server (follows the live display: login screen or GNOME session)
+After=display-manager.service
+Wants=display-manager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/racerbot-x11vnc-follow
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

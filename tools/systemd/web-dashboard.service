@@ -1,0 +1,40 @@
+# The web dashboard's car-side server (dashboard_node, :8080), at boot.
+#
+# A template: tools/systemd/install.sh fills in the user and the workspace
+# and installs it as /etc/systemd/system/web-dashboard.service.
+#
+# Car 1's choice, not the web-dashboards repo's: that repo starts the
+# dashboard by hand. Car 1 runs it at boot so the site can always reach the
+# car (decided 2026-10-24). The camera (webcam_launch.py) stays by hand.
+#
+# Support/tooling: dashboard_node publishes to no topic and cannot move the
+# car. Its write paths (live tuning, stopping a driving process, resetting
+# SLAM, deleting a saved run) are in docs/web-dashboard.md.
+[Unit]
+Description=web dashboard server (dashboard_node, :8080)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The same user every other ROS node on the car runs as, so discovery and
+# the stop panel's signals work exactly as between terminals.
+User=@USER@
+Group=@USER@
+Environment=HOME=/home/@USER@
+Environment=RACERBOT_WS=@WORKSPACE@
+# Optional overrides, e.g. ROS_DOMAIN_ID=..., the same as foxglove-bridge's.
+EnvironmentFile=-/etc/default/web-dashboard
+# A login shell's ROS environment, rebuilt from scratch: systemd starts
+# services with an almost empty one. ROS's setup.bash reads unset variables
+# on purpose, so no `set -u`. ROS_DOMAIN_ID and RMW_IMPLEMENTATION are left
+# unset, as car 1's stack leaves them.
+ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash && source "$RACERBOT_WS/install/setup.bash" && exec ros2 launch racerbot_launch dashboard_launch.py'
+# SIGINT is what Ctrl+C sends; ros2 launch shuts its node down cleanly on it.
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
