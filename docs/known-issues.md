@@ -79,12 +79,6 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 **Fix:** on each car, read **VESC Tool → App Settings → General → Timeout** and record it in `docs/hardware-reference.md`.
 
-### The VESC IMU: two docs disagree about which car reads zeros
-
-`docs/hardware-reference.md` (car 1) says `/sensors/imu/raw` on "this car" publishes at 50 Hz with every field `0.0` (measured 2026-08-19, probably text ported from car 2). The removed `racerbot_imu` README said all-zero fields happen "as on car 2" and treated car 1's VESC IMU as working. `imu_bridge`'s `/imu/status` now reports `fault: all zero` for a disabled IMU, which answers it for whichever IMU is primary.
-
-**Fix:** on car 1, with bringup running, `ros2 topic echo /sensors/imu/raw --field angular_velocity` and rotate the car by hand. Correct whichever doc is wrong. If it is zero, check **VESC Tool → App Settings → IMU** (a sample rate of 0 means off).
-
 ## Documentation
 
 ## Cross-car drift
