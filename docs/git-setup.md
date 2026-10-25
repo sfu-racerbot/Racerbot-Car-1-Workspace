@@ -70,7 +70,7 @@ The workspace-specific integration code and documentation outside those two repo
 
 ---
 
-## The one vendored package, and the three fixes it carries
+## The one vendored package, and the five fixes it carries
 
 `f1tenth_system` used to be a submodule. It was **deliberately disconnected from upstream** and converted to a normal tracked directory.
 
@@ -110,14 +110,14 @@ The two alternate bringups, `no_lidar_bringup_launch.py` and `sick_bringup_launc
 
 `src/f1tenth_system/f1tenth_stack/config/vesc.yaml`
 
-`vesc_to_odom_node` overrides `speed_to_erpm_gain` to a **negative** value (**`-3650.0`** on car 1), against the `+3650.0` in the shared `/**` block. The sign is the fix; the magnitude is calibration. (Car 2 carries the same fix with its own magnitude. Until October 2026 car 1 carried it as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML when car 2's workspace was ported. **`vesc_to_odom.cpp` must stay upstream** — both fixes at once cancel each other.) (The [VESC](glossary.md#vesc) is the motor controller.)
+`vesc_to_odom_node` overrides `speed_to_erpm_gain` to a **negative** value (**`-4040.0`** on car 1, tape-calibrated 2026-10-21; see [hardware-reference.md](hardware-reference.md)), against the `+3650.0` in the shared `/**` block. The sign is the fix; the magnitude is calibration. (Car 2 carries the same fix with its own magnitude. Until October 2026 car 1 carried it as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML when car 2's workspace was ported. **`vesc_to_odom.cpp` must stay upstream** — both fixes at once cancel each other.) (The [VESC](glossary.md#vesc) is the motor controller.)
 
 > **This is the dangerous one.** Nothing errors if it's lost. Odometry just reports the wrong sign, and every speed-aware safety layer degrades along with it.
 
 **Verify both nodes after any upstream sync:**
 
 ```bash
-ros2 param get /vesc_to_odom_node speed_to_erpm_gain      # must be NEGATIVE (currently -3650.0)
+ros2 param get /vesc_to_odom_node speed_to_erpm_gain      # must be NEGATIVE (currently -4040.0)
 ros2 param get /ackermann_to_vesc_node speed_to_erpm_gain # must be +3650.0
 ```
 
@@ -303,7 +303,7 @@ colcon build --symlink-install --packages-select <package>
    |---|---|
    | `f1tenth_stack/config/joy_teleop.yaml` → `drive-steering_angle` under `human_control` | `axis: 3`, **not** upstream's `axis: 2` |
    | `f1tenth_stack/launch/bringup_launch.py`, `no_lidar_bringup_launch.py`, `sick_bringup_launch.py` | still do **not** start a `joy_teleop` node, with `teleop_launch.py` still present separately (upstream will have bundled them back together) |
-   | `f1tenth_stack/config/vesc.yaml` → `vesc_to_odom_node` | still carries a **negative** `speed_to_erpm_gain` (currently `-3650.0`), and `vesc_ackermann/src/vesc_to_odom.cpp` is still upstream's |
+   | `f1tenth_stack/config/vesc.yaml` → `vesc_to_odom_node` | still carries a **negative** `speed_to_erpm_gain` (currently `-4040.0`), and `vesc_ackermann/src/vesc_to_odom.cpp` is still upstream's |
    | `f1tenth_stack/config/sensors.yaml` → `urg_node` | `serial_port: "/dev/sensors/hokuyo"`, **not** upstream's `ip_address`/`ip_port` |
    | `f1tenth_stack/config/vesc.yaml` → `wheelbase`, and the `base_link`→`laser` transform in all three `*_bringup_launch.py` files | `0.36`, and `0.26 0.0 0.11` — this car's geometry (car 2's measurement, assumed for car 1), **not** the `0.324` / `0.33` upstream ships |
 
