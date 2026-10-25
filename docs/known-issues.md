@@ -15,12 +15,6 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 ## Code and config
 
-### Two IMU stacks publish `/imu/data`
-
-`imu_bridge`'s `imu_bridge_node`, started by `vehicle_state_launch.py` and by `map_course`, publishes `/imu/data`. `racerbot_imu`'s `imu_select_node`, started by `racerbot_imu imu_launch.py`, which `neural_racer` requires, also publishes `/imu/data` and `/imu/status` (`src/racerbot_imu/racerbot_imu/imu_select_node.py`, `create_publisher(Imu, '/imu/data', ...)`). Running both chains gives two publishers with different calibrations on one topic, and every consumer gets a blend.
-
-**Fix:** give `/imu/data` one owner, or namespace one of the two packages. Add a static test that fails if both declare the same output topic.
-
 ### Two nodes still declare the pre-October 0.26 rad steering default
 
 `pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.33 and 0.30, so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
@@ -87,7 +81,7 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ### The VESC IMU: two docs disagree about which car reads zeros
 
-`docs/hardware-reference.md` (car 1) says `/sensors/imu/raw` on "this car" publishes at 50 Hz with every field `0.0` (measured 2026-08-19, probably text ported from car 2). `src/racerbot_imu/README.md` says all-zero fields happen "as on car 2" and treats car 1's VESC IMU as working.
+`docs/hardware-reference.md` (car 1) says `/sensors/imu/raw` on "this car" publishes at 50 Hz with every field `0.0` (measured 2026-08-19, probably text ported from car 2). The removed `racerbot_imu` README said all-zero fields happen "as on car 2" and treated car 1's VESC IMU as working. `imu_bridge`'s `/imu/status` now reports `fault: all zero` for a disabled IMU, which answers it for whichever IMU is primary.
 
 **Fix:** on car 1, with bringup running, `ros2 topic echo /sensors/imu/raw --field angular_velocity` and rotate the car by hand. Correct whichever doc is wrong. If it is zero, check **VESC Tool → App Settings → IMU** (a sample rate of 0 means off).
 

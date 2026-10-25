@@ -51,13 +51,13 @@ ros2 run neural_racer approve_model ~/.ros/neural_racer/incoming/<hash> --shadow
 ros2 launch f1tenth_stack bringup_launch.py
 ```
 
-**Terminal 2** — the IMU chain ([racerbot_imu](../racerbot_imu/README.md)):
+**Terminal 2** — the IMU, from [imu_bridge](../imu_bridge/README.md), the same `/imu/data` every other node reads:
 
 ```bash
-ros2 launch racerbot_imu imu_launch.py
+ros2 launch imu_bridge vehicle_state_launch.py
 ```
 
-**Working when:** `ros2 topic echo /imu/status --once` shows `"state": "ok"`. Keep the car still for 2 s after starting, for the gyro bias.
+**Working when:** `ros2 topic echo /imu/status --once` shows `"state": "ok"`. Keep the car still for about 3 s after starting, for the gyro bias and the gravity check. If it shows `fault`, its `reason` names the problem ([The `/imu/status` verdict](../imu_bridge/README.md#the-imustatus-verdict)).
 
 **Terminal 3** — `gap_follow`, which is the one driving:
 
