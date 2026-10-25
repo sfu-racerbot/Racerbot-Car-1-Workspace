@@ -13,6 +13,8 @@ Oracle: an identity mount and no calibration file (convert.load_calibration),
 so a raw VESC reading of 1 g on z is gravity on +z in car axes.
 """
 import json
+import os
+import sys
 import time
 
 import pytest
@@ -24,7 +26,8 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 
-from imu_bridge.imu_bridge_node import ImuBridgeNode
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from imu_bridge.imu_bridge_node import ImuBridgeNode  # noqa: E402
 
 # neural_racer_node.py's subscription, verbatim.
 NEURAL_RACER_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,

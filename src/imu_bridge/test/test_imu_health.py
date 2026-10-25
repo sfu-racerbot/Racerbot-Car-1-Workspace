@@ -11,11 +11,14 @@ No ROS needed:
 """
 import json
 import math
+import os
+import sys
 
 import pytest
 
-from imu_bridge.convert import G
-from imu_bridge.imu_health import ImuHealth
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from imu_bridge.convert import G  # noqa: E402
+from imu_bridge.imu_health import ImuHealth  # noqa: E402
 
 DT = 0.01                     # 100 Hz
 REST = (0.0, 0.0, G)
