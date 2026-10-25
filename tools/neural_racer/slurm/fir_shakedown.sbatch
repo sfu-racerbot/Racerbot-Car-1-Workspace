@@ -41,7 +41,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 run "tests: training" python -m pytest tools/neural_racer/tests/ -q -p no:cacheprovider
 run "tests: neural_racer (ROS-free)" python -m pytest src/neural_racer/test/ -q -p no:cacheprovider \
     --ignore=src/neural_racer/test/test_neural_racer_node.py
-run "tests: racerbot_imu (ROS-free)" python -m pytest src/racerbot_imu/test/test_imu_math.py -q -p no:cacheprovider
+run "tests: imu_bridge status (ROS-free)" python -m pytest src/imu_bridge/test/test_imu_health.py -q -p no:cacheprovider
 run "gpu: teacher" python -m ${M}.teacher --run-dir "${R}/teacher" --device "${NR_DEVICE}" --num-envs 512 --rollout 16 \
     --steps 32768 --pool-slots 16 --cpu-workers 2 --log-every 1 --checkpoint-every 2
 run "gpu: distill" python -m ${M}.distill --run-dir "${R}/distill" --teacher "${R}/teacher/checkpoints/latest.pt" \

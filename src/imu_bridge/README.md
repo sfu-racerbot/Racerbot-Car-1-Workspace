@@ -193,6 +193,7 @@ Each [topic](../../docs/glossary.md#topic) below is a named channel you can `ros
 | `/imu/bno/raw` | `sensor_msgs/Imu` | `bno_sensor` | The BNO085 as received, in SI units and in the sensor's own axes, with its orientation quaternion. Only when `bno_port` is set. No transform exists for this frame. |
 | `/imu/bno/data` | `sensor_msgs/Imu` | `base_link` | The BNO085, calibrated, in car axes. Only when `bno_port` is set. |
 | `/imu_bridge/wheel_odom` | `nav_msgs/Odometry` | `odom` → `base_link` | `/odom`, unchanged except for the twist covariance: 0.08² on forward speed, 1000 on everything else |
+| `/imu/status` | `std_msgs/String` (JSON, latched) | — | Whether `/imu/data` can be trusted right now: `{"state": "ok" \| "waiting" \| "fault", "reason": ..., "imu": "bno" \| "vesc"}`. See [The `/imu/status` verdict](#the-imustatus-verdict). |
 | `/odometry/filtered` | `nav_msgs/Odometry` | `odom` | Published by the shadow EKF, not this node |
 
 Every `base_link` message reports **no orientation**: `orientation_covariance[0] = -1`, the `sensor_msgs/Imu` convention for "not provided". Each one does carry an angular velocity and acceleration covariance from `gyro_sigma` and `accel_sigma`.
@@ -211,6 +212,28 @@ Every setting is in [`config/imu_bridge.yaml`](config/imu_bridge.yaml), with a c
 | `/tf`: `odom_imu` → `odom` | transform | Only with `publish_odom_tf:=true`: the correction that makes `odom_imu → base_link` equal `/odom/imu`. |
 
 It reads `/odom`, `/imu/bno/data` and `/imu/vesc/data`. Its settings are in [`config/vehicle_state.yaml`](config/vehicle_state.yaml), with a comment for each.
+
+## The `/imu/status` verdict
+
+`/imu/data` is published from the first sample, for every consumer. `/imu/status` says whether those samples can be trusted *right now*. `neural_racer` requires `"state": "ok"` (`require_imu: true`) and commands zero otherwise. Other consumers can ignore it.
+
+It describes the primary IMU only, the one on `/imu/data`:
+
+| State | When |
+|---|---|
+| `waiting` | Startup: the gyro bias isn't removed yet, or the gravity check hasn't run. Keep the car still for about 3 s after launch. |
+| `ok` | Bias removed, gravity check passed, and the latest sample is fresh and valid. |
+| `fault` | One of: no sample for `status_stale_timeout_s` (0.1 s); all six raw fields exactly zero (the IMU is off in VESC Tool, or not fitted); a non-finite field; or the gravity check failed. |
+
+**The gravity check:** over `gravity_window_s` (1 s) of stillness, the mean acceleration must be 9.80665 ± 0.5 m/s² and within 10° of straight up. Wrong units or a wrong mount rotation in `car.yaml` fail it. A gravity failure **latches until the node restarts**, because a wrong mount doesn't fix itself. The other faults clear as soon as good samples return.
+
+```bash
+ros2 topic echo /imu/status --once     # any terminal, with imu_bridge running
+```
+
+**Working when:** after the car has been still for about 3 s, it shows `"state": "ok"`. The `reason` field names the problem otherwise.
+
+The logic is in `imu_bridge/imu_health.py` (no `rclpy`). It replaces the separate `racerbot_imu` package, which re-converted the same raw data with placeholder calibration and published a second `/imu/data`; that package was removed on 2026-10-24.
 
 ## Fused speed and measured steering
 
@@ -381,11 +404,13 @@ RACER_IMU_ROOT=~/imu-calibration python3 -m pytest src/imu_bridge/test/ -v
 python3 -m pytest src/imu_bridge/test/ -v
 ```
 
-No ROS sourcing needed (no `source /opt/ros/jazzy/setup.bash` first). Without the imu-calibration repo present, the two `racer_imu` cross-check cases skip and say why. Every other test runs: 292 as of 2026-10-24.
+Source ROS first and give the tests their own domain (`export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`): `test_imu_status_node.py` starts a real node, and unsourced it fails to collect, which stops the whole run. Every other file needs no ROS and can be run on its own. Without the imu-calibration repo present, the two `racer_imu` cross-check cases skip and say why.
 
 - `test_vehicle_state.py`: the filter against the Kalman equations written out by hand, steering against the circle geometry, the lever arm against numerically differentiated geometry, and every fallback in the table above, at and just past each limit.
 - `test_gyro_odometry.py`: heading against a constant-rate arc and the true circle (forwards and reversing), distance identical to `vesc_to_odom`'s, the transform chain composing to the gyro pose, the exact fallback, gaps, extrapolation not accumulating, source preference, and the two-parents check.
 - `test_vehicle_state_config.py`: `vehicle_state.yaml` against the code's defaults and `vesc.yaml`'s wheelbase, and a static check that the node publishes only `Odometry`, `JointState` and its one transform.
+- `test_imu_health.py`: every `/imu/status` state against standard gravity and closed-form tilts, at and just past each limit, the latch, and `neural_racer`'s own parser.
+- `test_imu_status_node.py` (**needs ROS sourced**): the real `imu_bridge_node` fed raw VESC samples, read by a subscriber with `neural_racer`'s QoS.
 
 `map_course`'s wiring is tested in `src/racerbot_launch/test/test_map_course_imu.py`, which needs ROS sourced.
 

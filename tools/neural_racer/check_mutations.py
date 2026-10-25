@@ -18,10 +18,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NR = 'src/neural_racer/neural_racer'
-IMU = 'src/racerbot_imu/racerbot_imu'
+IMU = 'src/imu_bridge/imu_bridge'
 TR = 'tools/neural_racer/neural_racer_train'
 T_NR = 'src/neural_racer/test'
-T_IMU = 'src/racerbot_imu/test'
+T_IMU = 'src/imu_bridge/test'
 T_TR = 'tools/neural_racer/tests'
 
 # (name, file, old, new, test node ids, needs ROS)
@@ -73,18 +73,23 @@ MUTATIONS = [
      "        self._publish(res.steering, res.speed)                # the command, first",
      "        self._publish_intent(out, res, map_mode)\n        self._publish(res.steering, res.speed)",
      [f'{T_NR}/test_neural_racer_node.py::test_intent_published_after_command'], True),
-    ('IMU scales swapped', f'{IMU}/imu_math.py', 'return (np.asarray(gyro_raw, dtype=np.float64) * gyro_scale,\n            np.asarray(accel_raw, dtype=np.float64) * accel_scale)',
-     'return (np.asarray(gyro_raw, dtype=np.float64) * accel_scale,\n            np.asarray(accel_raw, dtype=np.float64) * gyro_scale)', [f'{T_IMU}/test_imu_math.py::test_to_si_vesc_units'], False),
-    ('all-zero accepted', f'{IMU}/imu_math.py', '    if not (np.any(g != 0.0) or np.any(a != 0.0)):', '    if False:',
-     [f'{T_IMU}/test_imu_math.py::test_all_zero_rejected'], False),
-    ('gravity bound exclusive', f'{IMU}/imu_math.py', 'if not abs(norm - G0) <= tol + 1e-9:', 'if not abs(norm - G0) < tol - 1e-9:',
-     [f'{T_IMU}/test_imu_math.py::test_gravity_check_bounds'], False),
-    ('bias window not reset', f'{IMU}/imu_math.py', "            self._t, self._g, self._a = [], [], []\n            return False\n        self._t.append(t)",
-     "            pass\n        self._t.append(t)", [f'{T_IMU}/test_imu_math.py::test_one_moving_tick_resets_the_window'], False),
-    ('fault immediately', f'{IMU}/imu_crosscheck.py', 'return (t - self._since) < self.hold_sec - 1e-9, self.disagreement',
-     'return False, self.disagreement', [f'{T_IMU}/test_imu_math.py::test_disagreement_needs_hold_time'], False),
-    ('delay sign flipped', f'{IMU}/imu_crosscheck.py', 'lo, hi = t_truth_end - window + delay, t_truth_end + delay',
-     'lo, hi = t_truth_end - window - delay, t_truth_end - delay', [f'{T_IMU}/test_imu_math.py::test_delay_alignment'], False),
+    ('IMU scales swapped', f'{IMU}/convert.py', '    acc = np.asarray(acc_g, dtype=float) * G\n    gyro = np.radians(np.asarray(gyro_dps, dtype=float))',
+     '    acc = np.radians(np.asarray(acc_g, dtype=float))\n    gyro = np.asarray(gyro_dps, dtype=float) * G',
+     [f'{T_IMU}/test_convert.py::test_one_g_is_standard_gravity_and_180_dps_is_pi'], False),
+    ('all-zero accepted', f'{IMU}/imu_health.py', '        if not np.any(raw != 0.0):', '        if False:',
+     [f'{T_IMU}/test_imu_health.py::test_all_zero_from_power_up_never_reaches_ok'], False),
+    ('gravity bound exclusive', f'{IMU}/imu_health.py', 'if not abs(norm - G) <= self.gravity_tol + 1e-9:',
+     'if not abs(norm - G) < self.gravity_tol - 1e-9:', [f'{T_IMU}/test_imu_health.py::test_gravity_magnitude_boundary'], False),
+    ('gravity fault not latched', f'{IMU}/imu_health.py', '        if self.gravity_ok or self.gravity_fault:\n            return\n',
+     '        if self.gravity_ok:\n            return\n        self.gravity_fault = None\n',
+     [f'{T_IMU}/test_imu_health.py::test_upside_down_mount_faults_and_stays_faulted'], False),
+    ('gravity window not reset', f'{IMU}/imu_health.py', '            self._restart_window()\n            return\n', '            return\n',
+     [f'{T_IMU}/test_imu_health.py::test_moving_restarts_the_gravity_window'], False),
+    ('IMU never stale', f'{IMU}/imu_health.py', '        if not age <= self.stale_timeout_s + 1e-9:', '        if False:',
+     [f'{T_IMU}/test_imu_health.py::test_stale_input_faults_past_the_timeout_and_not_before'], False),
+    ('status not latched', f'{IMU}/imu_bridge_node.py', "self.create_publisher(String, '/imu/status', STATUS_QOS)",
+     "self.create_publisher(String, '/imu/status', 10)",
+     [f'{T_IMU}/test_imu_status_node.py::test_still_upright_vesc_imu_reaches_ok_for_neural_racer'], True),
     ('pid gain +10%', f'{TR}/gpu_sim/dynamics.py', 'fwd = torch.where(diff > 0, 10.0 * a_max / v_max,',
      'fwd = torch.where(diff > 0, 11.0 * a_max / v_max,', [f'{T_TR}/test_dynamics_parity.py::test_constraints_match_gym'], False),
     ('kinematic threshold', f'{TR}/gpu_sim/dynamics.py', "return torch.where((v < 0.5).unsqueeze(-1), kin, dyn)",
@@ -139,7 +144,7 @@ MUTATIONS = [
      [f'{T_TR}/test_training_units.py::test_sigusr1_checkpoints_and_exits_85'], False),
 ]
 
-COPY = ('src/neural_racer', 'src/racerbot_imu', 'tools/neural_racer')
+COPY = ('src/neural_racer', 'src/imu_bridge', 'tools/neural_racer')
 LINK = ('src/gap_follow', 'src/drive_intent', 'tools/f1tenth_sim', '.sim')
 
 

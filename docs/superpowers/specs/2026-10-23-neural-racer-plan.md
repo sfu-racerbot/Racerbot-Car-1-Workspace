@@ -20,7 +20,7 @@
 
 | Plan part | Where | Evidence |
 |---|---|---|
-| Phase 0 code: conditioner, two-IMU selector, axis calibration, P0.5 fits | `src/racerbot_imu/` | 49 tests (36 run unsourced). Static launch check: with no IMU attached, `/imu/status` reports `fault`, as it must |
+| Phase 0 code: the `/imu/status` verdict on `/imu/data` | `src/imu_bridge/` (`imu_health.py`) | **Changed 2026-10-24:** `racerbot_imu` (conditioner, two-IMU selector, axis calibration, P0.5 fits) was removed, because it published a second `/imu/data` and `/imu/vesc/data` beside `imu_bridge`'s. `imu_bridge` now owns every `/imu/*` topic and publishes `/imu/status` for the primary IMU: startup bias, stationary gravity check, all-zero, non-finite and stale checks. Not ported: the two-IMU cross-check and the `calibrate_axes`/`imu_fit` tools (in git history). See the Phase 0 note below |
 | Phase 2: observation spec, NumPy policy, safety wrapper, model store, `approve_model`, the node | `src/neural_racer/` | 141 tests, including the four deadman deny paths on the published command. Whole tick 3.90 ms median / 4.03 ms p99 on one Jetson core. Static launch check: an unapproved model is refused, and there is no `/drive` publisher |
 | Phase 3: GPU simulator, parity | `tools/neural_racer/neural_racer_train/gpu_sim/` | dynamics match gym's functions to 1e-9; a 10 s trajectory matches `FidelityPlant` within 2 cm / 0.5°; observation and wrapper match the car's code to 1e-6 |
 | Phase 4: two generators, checks, mutation, PLR, held-out set | `tracks.py`, `plr.py`, `heldout.py`, `heldout.yaml` | every generated track independently re-checked; held-out digests and seeds refused by the training pool |
@@ -855,6 +855,8 @@ The weights are float32. Training uses bf16 only inside autocast, and keeps floa
 ---
 
 ## Phase 0: IMU ready
+
+> **Changed 2026-10-24.** This phase was written around `racerbot_imu`, which has since been removed. `imu_bridge` now owns `/imu/data` and publishes `/imu/status` (see `src/imu_bridge/README.md`, "The `/imu/status` verdict"). Its mounts and calibration come from the imu-calibration repo, not `imu_rb1.yaml`. Read the `racerbot_imu` names below as history. Two parts are not ported yet: the two-IMU yaw-rate cross-check, and the P0.4/P0.5 fitting tools. Measure the noise and delay (P0.5) on `imu_bridge`'s `/imu/data`, since that is what the policy sees.
 
 **Goal:** both IMUs working and conditioned, one chosen as primary by measurement and published on `/imu/data` (SI units, `base_link` axes, gyro bias removed), the other cross-checking it, their noise and delay measured, and both simulators producing the same signals.
 

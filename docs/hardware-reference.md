@@ -17,9 +17,9 @@ Physical connections, addresses, and config values for this specific car. Everyt
 | | |
 |---|---|
 | Connection | USB, exposed as `/dev/sensors/vesc` (symlink to whatever `/dev/ttyACM*` it enumerates as) |
-| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `GROUP=dialout`, `MODE=0660` |
+| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `MODE=0666` with no group, `SYMLINK+="sensors/vesc"`, so any user can open it without `dialout` or a re-login |
 | Firmware | 7.0 (confirmed via `vesc_driver_node`'s connection log) |
-| Group access | `racerbotcar-1` and `racermember1` are both in the `dialout` group |
+| Group access | Not needed for the VESC (`MODE=0666`). `racerbotcar-1` is in `dialout` anyway (checked 2026-10-24) |
 
 **Config** (`src/f1tenth_system/f1tenth_stack/config/vesc.yaml`):
 ```yaml

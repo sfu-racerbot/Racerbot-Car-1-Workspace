@@ -521,8 +521,8 @@ That is what eventually surfaced the real cause. Jumping to "must be a bad servo
 
 Axis numbering is one example. Here's a sharper one:
 
-> `bringup_launch.py` remaps `ackermann_cmd_out` → `ackermann_drive`, which looks like it should change the output topic name.
+> Until October 2026, `bringup_launch.py` remapped `ackermann_cmd_out` → `ackermann_drive`, which looks like it should change the output topic name.
 >
-> Empirically, the [mux](glossary.md#mux--multiplexer) still publishes to `/ackermann_cmd`. The remap doesn't match the [package](glossary.md#package)'s actual internal topic name, so it's a **silent no-op**.
+> Empirically, the [mux](glossary.md#mux--multiplexer) still published to `/ackermann_cmd`. The remap didn't match the [package](glossary.md#package)'s actual internal topic name, so it was a **silent no-op**. It has been deleted, and `src/racerbot_launch/test/test_drive_path_wiring.py` now fails on any remap that renames a name the mux never uses.
 
 Read the launch file, then check `ros2 node info` and `ros2 topic list` against it before trusting what the source implies.
