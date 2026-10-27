@@ -515,6 +515,7 @@ class GapController:
                    gap_width=(gap_end - gap_start + 1) * self.lidar.angle_increment,
                    fallback=used_fallback, creeping=creeping,
                    centering_bias=centering_bias, desired_steering=desired_steering,
+                   requested_steering=steering,  # after the slew limit: what this tick returns
                    curve_cap=normal_speed, clearance_cap=clearance_speed,
                    corner_cap=effective_corner, binding=binding)
 
@@ -543,5 +544,6 @@ class GapController:
         self.stopped = True
         self.stop_reason = reason
         self.binding_cap = 'stop'
-        self.telemetry.update(binding='stop', stop_reason=reason)
+        self.telemetry.update(binding='stop', stop_reason=reason,
+                              requested_steering=self.steering_basis)
         return self.steering_basis, 0.0
