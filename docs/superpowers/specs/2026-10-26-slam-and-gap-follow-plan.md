@@ -255,6 +255,21 @@ Compare `enable_corner_setup` true against false:
 
 Report lap time, wall contacts, stops and which cap bound. Corner setup was designed on 2026-10-19 to stop the car hugging the inside wall in simulation ([gap-follow.md](../../gap-follow.md#corner-setup)), so turning it off could bring that back. The default stays until the team decides.
 
+#### Results (2026-10-27)
+
+This was run in `eval_gap.py` over the indoor tracks and car 1's course, both directions, 2 seeds, 24 runs per setting, with the shipped YAML (`max_lateral_accel` 2.5).
+
+| Corner setup | Mean lap | Car 1 course lap | Reversals/s | Contacts | Stops |
+|---|---|---|---|---|---|
+| on (shipped) | 15.06 s | 13.99 s | 0.86 | 0 | 48 |
+| off | 14.84 s (−1.5%) | 13.62 s (−2.7%) | 1.02 (+18%) | 0 | 48 |
+
+**Off is slightly faster but weaves more.** Corner setup pulls against the turn, as the floor data showed, and that slows the car. It also damps the steering a little.
+
+**The decision is better made after Task 9.** Gyro damping should cover the extra weave either way, so the off-vs-on choice is clearer once it lands.
+
+**Replays of the real recordings add nothing here.** `analyze_run.py --set enable_corner_setup=false` on run `20261026-194514` reports 0 zero-speed ticks with and without it. That's all an open-loop replay of the same scans can show, so the simulator table above is the evidence.
+
 ### A7. Race pace: measure every lever
 
 From today's bags and the existing minimum-time model, cost each lever in seconds per lap:
