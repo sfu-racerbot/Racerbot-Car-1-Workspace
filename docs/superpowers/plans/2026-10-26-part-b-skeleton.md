@@ -34,7 +34,8 @@ Everything in Part A's Global Constraints applies unchanged, plus these decision
 | B2 `map_course` IMU flags | B1's `slam_report` exists | Its effect is measured with B1 |
 | B3 Simulated IMU | Any time after Part A | B4's closed-loop tests need it |
 | B4 `gap_follow` IMU features | B3 merged | Each feature is proven in the simulator first |
-| B6 Overtaking | The team answers the spec's open question 1 | It is a margin trade-off, not a tuning task |
+| **B6 Overtaking: priority 1** | Part A done. The team confirmed on 2026-10-27 that the course has room to pass | Races are lost behind the other car today |
+| **B8 VESC speed-loop tuning: priority 2** | Part A done. Needs car 1's current VESC Tool settings from the team | Likely the biggest measured speed lever |
 | B7 Car 1's course in the simulator | Part A Task 4 produces a clean `map.pgm` of the course | It needs a map |
 
 B5 (recording every run) is done: the **bringup datalogger** (`auto_record`) merged to `main` on 2026-10-26. The SLAM-specific additions it still lacks are listed under B1.
@@ -179,18 +180,67 @@ Each feature gets its own flag, falls back as decided, keeps the four deadman de
 
 Owned by the bringup-datalogger session. Nothing to build here beyond the B1 contract. Part A Task 7 and B1 read whatever folder it writes, as long as it keeps the layout in the contract.
 
-## B6. Overtaking
+## B6. Overtaking (priority 1 after Part A)
 
-**Blocked on the team's answer:** how much side margin may the car give up to pass, on a 1.5-1.8 m track where a pass needs about 2.4 m?
+**Decided 2026-10-27:** the team says passing is fine, because the course has enough room. The cleaned map of car 1's course measures **1.52 m median width** (1.30 m at the 10th percentile, 1.06 m at the narrowest; `car1_course_2026_10_26`). Two 0.31 m cars leave about 0.9 m at the median.
 
-**Then:**
-- Recognise the other car sooner: today it needs 8 consecutive detections (`opponent_tracking.py`).
-- Follow at the other car's speed instead of braking to 0.
-- Pass only where the chosen margin fits.
+**The "about 2.4 m" figure came from today's conservative settings in `gap_follow.yaml`:**
+- `opponent_radius: 0.30`, a 0.60 m footprint for a 0.30 m-wide car;
+- `opponent_passing_margin: 0.15` m on each side;
+- `opponent_follow_lateral` and `opponent_relevant_lateral`;
+- `opponent_pass_max_steering: 0.10`, which allows no pass while turning.
+
+So B6 is now a tuning-and-behaviour task, not a policy question.
+
+**Build, in this order:**
+1. **Stop stalling behind another car.** In the 2026-10-27 head-to-head (`eval_gap_multi.py`, car 1's course, seed 12346), the trailing car stopped 2.7 cm from the other car. It never restarted: creep speed is 0 and `gap_follow` never reverses. The 2026-10-26 races showed the same pattern: the follow cap was usually 0.00 m/s. Following must hold the leader's speed minus a gap, never a dead stop while the leader moves.
+2. **See the other car sooner.** `opponent_min_hits: 8` scans (0.2 s) delays recognition. On the real races the car was recognised on only about 5% of logged seconds.
+3. **Size passes to the real car.**
+   - Re-derive `opponent_radius` from the car's measured 0.30 × 0.58 m outline instead of a circle.
+   - Choose `opponent_passing_margin` so a pass fits the 1.30 m (p10) sections.
+   - Revisit `opponent_pass_max_steering` for this course's bends.
+4. **Prove it in the head-to-head simulator.** On `car1_course_2026_10_26` and `indoor_wide`, with the **faster car starting behind** (`eval_gap_multi.py --cars 2 --speeds ...` or `--car-set 1:max_speed=...`, `--swap-starts`):
+   - count overtakes, contacts and stalls;
+   - accept only with 0 contacts and 0 stalls;
+   - add the finish-gap-change metric to `head_to_head` first, since start order decides "wins" today (Task 14 minor).
+5. **Then the car:** wheels off, then a slow two-car floor test, recorded by bringup's `auto_record`.
+
+**Evidence base:**
+- The 19:51, 19:59 and 20:07 races' decision logs. Future races get bags through bringup's `auto_record`.
+- `gap_follow_launch.py opponent_awareness:=true` in the multi-car simulator (`docs/gap-follow.md#several-cars-at-once`).
 
 **Evidence base:**
 - The 19:51, 19:59 and 20:07 races' decision logs. They have no bags; future races get bags through B5.
 - `gap_follow_launch.py opponent_awareness:=true` in the multi-car simulator (`docs/gap-follow.md#several-cars-at-once`).
+
+## B8. VESC speed-loop tuning guidance (priority 2 after Part A)
+
+**Why:** while speeding up on 2026-10-26, the car achieved a median of only 0.3-0.7 m/s² of the roughly 2.8 m/s² it was commanded. The 90th percentile was 1.5-2.5 m/s², yet it reached 4-5 m/s² at times, so the motor can deliver it (runs `20261026-194514`, `-194913`).
+
+The VESC's speed controller lags the command. It is likely the single biggest speed lever measured, and it is tuned in VESC Tool, a hardware calibration, not `gap_follow` code.
+
+**Build:**
+1. **A measurement tool**, `tools/run_analysis/speed_loop_report.py`, built from the 2026-10-27 inline `accel_check.py`. For a recorded run, it reports:
+   - commanded against achieved acceleration, while speeding up and while braking;
+   - the step-response lag and overshoot;
+   - with an optional `--compare` against another run, so a VESC change is judged before vs. after.
+
+   Tests use synthetic first-order-lag speed traces with closed-form answers.
+2. **A guide**, `docs/vesc-speed-tuning.md`, novice-docs style:
+   - which VESC Tool fields matter (the speed PID, the current and ERPM limits, and any ramp limits);
+   - how to record a before/after pair safely (wheels off first, LB held, bringup recording);
+   - how to read the tool's output;
+   - the stop rule: change one field at a time, and roll back if braking gets worse.
+   Car 1's current VESC settings are an input to collect from the team first; nothing on this machine records them.
+3. **Afterwards,** re-run Task 11's simulator lever table. The simulator's speed-loop model (`sim_fidelity`) should then be re-fitted with `fit_sim.py`.
+
+## Lower priority
+
+The B4 IMU features beyond Part A's steering damping and adaptive grip come after B6 and B8:
+- fused speed for standalone `gap_follow`;
+- the understeer check;
+- traction control;
+- the impact stop.
 
 ## B7. Car 1's course in the simulator
 
