@@ -37,7 +37,7 @@ Everything in Part A's Global Constraints applies unchanged, plus these decision
 | B6 Overtaking | The team answers the spec's open question 1 | It is a margin trade-off, not a tuning task |
 | B7 Car 1's course in the simulator | Part A Task 4 produces a clean `map.pgm` of the course | It needs a map |
 
-B5 (recording every run) is being built by another session as a **bringup datalogger**. This plan only states what SLAM needs from it (the contract under B1).
+B5 (recording every run) is done: the **bringup datalogger** (`auto_record`) merged to `main` on 2026-10-26. The SLAM-specific additions it still lacks are listed under B1.
 
 ---
 
@@ -53,9 +53,26 @@ B5 (recording every run) is being built by another session as a **bringup datalo
 
 A replay can **recreate exactly** what SLAM did.
 
-### The recording contract (for the bringup datalogger session)
+### The recording contract (for the bringup datalogger)
 
-The datalogger owns recording. SLAM's needs are:
+The datalogger owns recording. It merged to `main` as `race_diagnostics`' `auto_record` (PR #4, `ed2c34e`). It runs `record_run.py` for every algorithm run and stands down beside another recorder, so `map_course`'s own `record_run.py` and `auto_record` never record the same run twice.
+
+**Status against `main` at `ed2c34e`** (checked 2026-10-26):
+
+| Item | Status |
+|---|---|
+| 1. Topic list | ✅ Already met: `record_run.py`'s list has every topic below, plus `/parameter_events` for live setting changes |
+| 2. Snapshot when `slam_toolbox` appears | ❌ **To build.** `snapshot_params` runs once, `--delay` seconds after the recorder starts, so a node started later (SLAM in a gap_follow-then-map workflow) is never snapshotted |
+| 3. CPU and thermal logs | ❌ **To build** |
+| 4. Folder layout | ✅ Unchanged |
+| 5. One recorder per run | ✅ Met by `auto_record` standing down; no `map_course` change needed |
+
+**Build for B1, in `race_diagnostics`:**
+- `snapshot_params` keeps watching the node list for the whole run and snapshots each node the first time it appears. Today it snapshots once.
+- `record_run.py` also starts the two system loggers in item 3.
+- `metadata/` gains the version of each apt-installed ROS package the run used (`slam_toolbox` first), because git state can't cover them.
+
+SLAM's needs are:
 
 1. **Always in the topic list.** A topic nobody publishes records nothing, so these cost nothing on runs without SLAM:
    - `/scan`, at full rate and never throttled;
@@ -73,7 +90,7 @@ The datalogger owns recording. SLAM's needs are:
    - `tegrastats --interval 1000` to `<run>/system/tegrastats.log`. It works without sudo on car 1, checked 2026-10-26.
    - 1 Hz CPU %, RSS and thread count per ROS node process from `/proc`, to `<run>/system/proc.jsonl`.
 4. **Folder layout** stays `record_run.py`'s: `<run>/bag/` (mcap), `<run>/metadata/{params,git,files}/`, `<run>/events.jsonl`, plus the new `<run>/system/`. The replay and report tools read that layout.
-5. **`map_course` stops starting its own recorder** once the datalogger records SLAM runs. The `diagnostics:=` default flips. This is one place to record, as decided 2026-10-26.
+5. **One recorder per run.** `auto_record` already stands down beside `map_course`'s recorder, and both use the same `record_run.py`, so everything lives in one place without changing `map_course`.
 
 **Why no end-of-run save is needed:** `/pose` stamps mark exactly which scans SLAM processed. Checked on 2026-10-26's runs: 315 `/pose` against 314 SLAM updates (`-194913`), 229/228 and 257/255. That survives Ctrl+C.
 
