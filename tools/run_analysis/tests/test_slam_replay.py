@@ -24,7 +24,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))  # insert tools/
 from run_analysis import slam_replay  # noqa: E402
-from run_analysis.slam_replay import ReplayRefused  # noqa: E402
+from run_analysis.slam_replay import ReplayFailed, ReplayRefused, ServiceError  # noqa: E402
 
 RUN_NAME = '20261026-194514'
 ALL_TOPICS = ['/scan', '/tf', '/tf_static', '/odom', '/odom/imu', '/map']
@@ -397,3 +397,152 @@ def test_main_rejects_a_rate_that_is_not_a_positive_number(rate):
     with pytest.raises(SystemExit) as exc:
         slam_replay.main(['unused-run-dir', '--rate', rate])
     assert exc.value.code == 2
+
+
+# --- save_with_retries (fix round 1) -------------------------------------------------------------
+# The fault: in one replay in four of a tuning batch, slam_toolbox's map saver answered
+# /slam_toolbox/save_map with success and wrote no map.yaml. The replay now tries up to three
+# times, two seconds apart, and asks the disk after every try. Oracles: the spec of that round
+# (three tries, two seconds apart, map.yaml decides) and the counts the spec implies.
+
+def _fake_saver(map_yaml: Path, outcomes):
+    """A save() whose n-th call does outcomes[n - 1]. The outcomes are 'write', 'nothing' (answers
+    success, writes no file), 'fail' (raises ServiceError), 'write-then-fail' and 'child-dies'."""
+    calls = []
+
+    def save():
+        calls.append(len(calls) + 1)
+        outcome = outcomes[len(calls) - 1]
+        if outcome in ('write', 'write-then-fail'):
+            map_yaml.write_text('image: map.pgm\n', encoding='utf-8')
+        if outcome in ('fail', 'write-then-fail'):
+            raise ServiceError('/slam_toolbox/save_map did not answer')
+        if outcome == 'child-dies':
+            raise ReplayFailed('slam_toolbox exited with -6; see slam_toolbox.log')
+
+    return save, calls
+
+
+def test_save_stops_at_the_first_attempt_that_writes_the_map(tmp_path):
+    map_yaml = tmp_path / 'map.yaml'
+    save, calls = _fake_saver(map_yaml, ['write'])
+    sleeps, notes = [], []
+    attempt = slam_replay.save_with_retries(save, lambda: map_yaml.is_file(),
+                                            sleep=sleeps.append, note=notes.append)
+    assert attempt == 1
+    assert calls == [1]
+    assert sleeps == []  # no pause before the first try, and none once it worked
+    assert notes == []
+
+
+def test_save_retries_after_a_failed_call_two_seconds_later(tmp_path):
+    # oracle: spec - up to three tries, two seconds apart; the second try writes the map.
+    map_yaml = tmp_path / 'map.yaml'
+    save, calls = _fake_saver(map_yaml, ['fail', 'write'])
+    sleeps, notes = [], []
+    attempt = slam_replay.save_with_retries(save, lambda: map_yaml.is_file(),
+                                            sleep=sleeps.append, note=notes.append)
+    assert attempt == 2
+    assert calls == [1, 2]
+    assert sleeps == [2.0]  # oracle: spec, two seconds
+    assert notes == ['save attempt 1 of 3 failed: /slam_toolbox/save_map did not answer']
+
+
+def test_a_save_that_answers_but_writes_nothing_fails_every_try(tmp_path):
+    # oracle: spec - the observed fault. Three tries in all, two pauses between them, none after the last.
+    map_yaml = tmp_path / 'map.yaml'
+    save, calls = _fake_saver(map_yaml, ['nothing', 'nothing', 'nothing'])
+    sleeps, notes = [], []
+    attempt = slam_replay.save_with_retries(save, lambda: map_yaml.is_file(),
+                                            sleep=sleeps.append, note=notes.append)
+    assert attempt is None
+    assert calls == [1, 2, 3]
+    assert sleeps == [2.0, 2.0]
+    assert notes == [f'save attempt {n} of 3 failed: it answered, but map.yaml is missing'
+                     for n in (1, 2, 3)]
+
+
+def test_the_file_decides_not_the_call(tmp_path):
+    # invariant - a save that writes map.yaml and then reports an error has still saved the map.
+    map_yaml = tmp_path / 'map.yaml'
+    save, calls = _fake_saver(map_yaml, ['write-then-fail'])
+    sleeps, notes = [], []
+    attempt = slam_replay.save_with_retries(save, lambda: map_yaml.is_file(),
+                                            sleep=sleeps.append, note=notes.append)
+    assert attempt == 1
+    assert calls == [1]
+    assert sleeps == []
+    assert notes == []
+
+
+def test_a_dead_child_is_not_retried(tmp_path):
+    # A ReplayFailed means a child has died: a real failure, and retrying it would only wait out timeouts.
+    map_yaml = tmp_path / 'map.yaml'
+    save, calls = _fake_saver(map_yaml, ['child-dies'])
+    sleeps = []
+    with pytest.raises(ReplayFailed, match='exited with -6'):
+        slam_replay.save_with_retries(save, lambda: map_yaml.is_file(), sleep=sleeps.append)
+    assert calls == [1]
+    assert sleeps == []
+
+
+def test_save_needs_at_least_one_attempt():
+    with pytest.raises(ValueError, match='at least 1'):
+        slam_replay.save_with_retries(lambda: None, lambda: False, attempts=0)
+
+
+def test_service_result_reads_the_code_the_answer_carries():
+    # oracle: spec - slam_toolbox's srv/SaveMap.srv: RESULT_SUCCESS 0, RESULT_NO_MAP_RECEIEVD 1,
+    # RESULT_UNDEFINED_FAILURE 255. The answer is the shape `ros2 service call` printed in the fixcheck replay.
+    answer = ('waiting for service to become available...\n'
+              "requester: making request: slam_toolbox.srv.SaveMap_Request(name=std_msgs.msg.String(data='/x/map'))\n"
+              '\n'
+              'response:\n'
+              'slam_toolbox.srv.SaveMap_Response(result=255)\n')
+    assert slam_replay.service_result(answer) == 255
+    assert slam_replay.service_result(answer.replace('result=255', 'result=0')) == 0
+    assert slam_replay.service_result(answer.replace('result=255', 'result=1')) == 1
+
+
+def test_service_result_is_none_when_the_answer_has_no_response_line():
+    # invariant - an answer with no response line carries no code; the caller then reads the exit code alone.
+    assert slam_replay.service_result('waiting for service to become available...\n') is None
+    assert slam_replay.service_result('') is None
+
+
+# --- _service_call's reading of an answer. subprocess.run is the process boundary: the ros2 CLI.
+
+def _ros2_answers(monkeypatch, stdout: str, returncode: int = 0):
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr='')
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+
+
+SAVE_REQUEST = {'name': {'data': '/x/map'}}
+
+
+def test_a_save_answer_with_result_255_is_a_service_error(monkeypatch):
+    _ros2_answers(monkeypatch, 'response:\nslam_toolbox.srv.SaveMap_Response(result=255)\n')
+    with pytest.raises(ServiceError, match='answered with result 255'):
+        slam_replay._service_call(slam_replay.SAVE_MAP, SAVE_REQUEST, {}, lambda message: None)
+
+
+def test_a_save_answer_with_result_0_is_logged_and_accepted(monkeypatch):
+    _ros2_answers(monkeypatch, 'response:\nslam_toolbox.srv.SaveMap_Response(result=0)\n')
+    lines = []
+    slam_replay._service_call(slam_replay.SAVE_MAP, SAVE_REQUEST, {}, lines.append)
+    assert lines == ['/slam_toolbox/save_map: exit 0; result 0']
+
+
+def test_a_call_that_exits_nonzero_is_a_service_error(monkeypatch):
+    _ros2_answers(monkeypatch, 'waiting for service to become available...\n', returncode=1)
+    with pytest.raises(ServiceError, match='failed with exit 1'):
+        slam_replay._service_call(slam_replay.SAVE_MAP, SAVE_REQUEST, {}, lambda message: None)
+
+
+def test_a_call_that_never_answers_is_a_service_error(monkeypatch):
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 60.0)
+    monkeypatch.setattr(subprocess, 'run', hang)
+    with pytest.raises(ServiceError, match='did not answer'):
+        slam_replay._service_call(slam_replay.SAVE_MAP, SAVE_REQUEST, {}, lambda message: None)

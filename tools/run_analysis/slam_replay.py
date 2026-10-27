@@ -28,7 +28,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -48,6 +48,8 @@ RECORD_TOPICS = ('/tf', '/pose', '/map', '/map_metadata', '/slam_toolbox/graph_v
 DROPPED_PARAMS = ('qos_overrides', 'start_type_description_service')  # describe the live graph
 LABEL_PATTERN = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')
 MAP_WAIT_S = 30.0  # how long slam_toolbox has to list /map; the replay is refused after that
+MAP_SAVE_ATTEMPTS = 3  # slam_toolbox's map saver can answer success and write nothing, so save is retried
+MAP_SAVE_GAP_S = 2.0  # the pause between save attempts
 SETTLE_S = 5.0  # time for slam_toolbox to finish the scans it has queued once the bag ends
 STOP_GRACE_S = 10.0  # time a child gets after each stop signal
 SERVICE_TIMEOUT_S = 60.0
@@ -61,6 +63,13 @@ class ReplayRefused(RuntimeError):
 
 class ReplayFailed(RuntimeError):
     """A replay that had started could not finish. The output folder keeps its logs."""
+
+
+class ServiceError(RuntimeError):
+    """One call to a slam_toolbox service did not answer, or answered with an error.
+
+    By itself this does not stop a replay: save_with_retries decides what it means.
+    """
 
 
 # --- the interlock ------------------------------------------------------------------------------
@@ -212,6 +221,46 @@ def plan_replay(run_dir, odom_frame: str, profile_path, out_root, label: str = '
     )
 
 
+_RESULT_CODE = re.compile(r'Response\(result=(\d+)\)')
+
+
+def service_result(output: str) -> int | None:
+    """The result code in a `ros2 service call` answer, or None if the answer has no response line.
+
+    For SaveMap, 0 is success, 1 is no map received and 255 an undefined failure. SerializePoseGraph
+    uses 0 for success and 255 for a file it could not write (both in slam_toolbox's srv directory).
+    """
+    found = _RESULT_CODE.findall(output)
+    return int(found[-1]) if found else None
+
+
+def save_with_retries(save: Callable[[], None], saved: Callable[[], bool],
+                      attempts: int = MAP_SAVE_ATTEMPTS, pause_s: float = MAP_SAVE_GAP_S,
+                      sleep: Callable[[float], None] = time.sleep,
+                      note: Callable[[str], None] = lambda message: None) -> int | None:
+    """Call save() until saved() is true: at most `attempts` times, `pause_s` apart.
+
+    saved() decides after every attempt, including one whose call raised, because a service can
+    answer success and write nothing, or report an error after it has written. A ServiceError is
+    a failed attempt. Any other exception, such as ReplayFailed for a child that has died, is not
+    retried and propagates. Returns the attempt that worked, or None if none did.
+    """
+    if attempts < 1:
+        raise ValueError('attempts must be at least 1')
+    for attempt in range(1, attempts + 1):
+        try:
+            save()
+            problem = 'it answered, but map.yaml is missing'
+        except ServiceError as exc:
+            problem = str(exc)
+        if saved():
+            return attempt
+        note(f'save attempt {attempt} of {attempts} failed: {problem}')
+        if attempt < attempts:
+            sleep(pause_s)
+    return None
+
+
 # --- the command line --------------------------------------------------------------------------
 
 def _positive_float(text: str) -> float:
@@ -331,16 +380,48 @@ def _wait_for_topic(topic: str, env: dict[str, str], child: _Child, timeout_s: f
     return False
 
 
+def _nodes_listed(env: dict[str, str]) -> set[str] | None:
+    """The names of the nodes on the replay's graph, or None if the ros2 CLI could not list them."""
+    try:
+        done = subprocess.run(['ros2', 'node', 'list'], env=env, capture_output=True, text=True,
+                              timeout=SERVICE_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if done.returncode != 0:
+        return None
+    return set(done.stdout.split())
+
+
+def _require_slam(slam: _Child, env: dict[str, str]) -> None:
+    """Stop the replay unless slam_toolbox is still running.
+
+    The launch process can outlive a node that has died, so the node itself is looked for too.
+    """
+    _check_alive(slam)
+    nodes = _nodes_listed(env)
+    if nodes is None:
+        raise ReplayFailed('could not list the nodes on the replay graph; see replay.log')
+    if '/slam_toolbox' not in nodes:
+        raise ReplayFailed('/slam_toolbox is no longer on the replay graph; slam_toolbox has stopped, '
+                           'see slam_toolbox.log')
+
+
 def _service_call(service: tuple[str, str], request: dict, env: dict[str, str], log: _Log) -> None:
     name, srv_type = service
     try:
         done = subprocess.run(['ros2', 'service', 'call', name, srv_type, json.dumps(request)],
                               env=env, capture_output=True, text=True, timeout=SERVICE_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ReplayFailed(f'{name} did not answer: {exc}') from exc
-    log(f'{name}: exit {done.returncode}; {(done.stdout or done.stderr).strip()[:200]}')
+        raise ServiceError(f'{name} did not answer: {exc}') from exc
+    code = service_result(done.stdout)
+    if code is not None:
+        log(f'{name}: exit {done.returncode}; result {code}')
+    else:
+        log(f'{name}: exit {done.returncode}; {done.stdout.strip()[-200:]}')
     if done.returncode != 0:
-        raise ReplayFailed(f'{name} failed with exit {done.returncode}')
+        raise ServiceError(f'{name} failed with exit {done.returncode}')
+    if code not in (None, 0):
+        raise ServiceError(f'{name} answered with result {code}')
 
 
 def _git_commit() -> str | None:
@@ -386,6 +467,7 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
 
     children: list[_Child] = []
     status, error = 'ok', None
+    map_saved = posegraph_saved = False
     try:
         relay = _start(children, 'odom_tf_relay',
                        [sys.executable, str(RELAY), '--topic', plan.odom_topic,
@@ -414,12 +496,26 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
             raise ReplayFailed(f'ros2 bag play exited with {code}; see bag_play.log')
         log(f'bag played; giving slam_toolbox {SETTLE_S:g} s to finish its queue')
         time.sleep(SETTLE_S)
-        _check_alive(slam)
-        _service_call(SAVE_MAP, {'name': {'data': str(out / 'map')}}, env, log)
-        _service_call(SERIALIZE_MAP, {'filename': str(out / 'posegraph')}, env, log)
-        for name in ('map.yaml', 'map.pgm', 'posegraph.posegraph'):
-            if not (out / name).is_file():
-                raise ReplayFailed(f'slam_toolbox did not write {name}')
+
+        def save_once() -> None:
+            _require_slam(slam, env)
+            _service_call(SAVE_MAP, {'name': {'data': str(out / 'map')}}, env, log)
+
+        attempt = save_with_retries(save_once, saved=lambda: (out / 'map.yaml').is_file(), note=log)
+        map_saved = attempt is not None
+        if map_saved:
+            log(f'map saved on attempt {attempt}')
+        else:
+            log(f'WARNING: map.yaml was not written in {MAP_SAVE_ATTEMPTS} attempts; the replay goes on '
+                'without it, and the map is still on /map in the bag')
+        _require_slam(slam, env)
+        try:
+            _service_call(SERIALIZE_MAP, {'filename': str(out / 'posegraph')}, env, log)
+        except ServiceError as exc:
+            log(f'WARNING: the pose graph call did not succeed: {exc}')
+        posegraph_saved = (out / 'posegraph.posegraph').is_file()
+        if not posegraph_saved:
+            log('WARNING: posegraph.posegraph was not written; the replay goes on without it')
     except ReplayFailed as exc:
         status, error = 'failed', str(exc)
         log(f'failed: {error}')
@@ -441,6 +537,7 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
             'profile_path': str(profile_path) if profile_path is not None else None,
             'profile': plan.profile,
             'git_commit': git_commit, 'slam_toolbox_version': slam_version,
+            'map_saved': map_saved, 'posegraph_saved': posegraph_saved,
             'started': started, 'ended': _now(),
         }
         (out / 'replay.json').write_text(json.dumps(summary, indent=2, default=str) + '\n', encoding='utf-8')
