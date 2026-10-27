@@ -216,6 +216,37 @@ If it does, add an option to base it on the steering the rack actually commands 
 - replaying today's bags shows fewer big swings;
 - the four deadman deny-path tests still pass.
 
+#### Results (2026-10-27)
+
+**The cause is the steering loop.** `tools/run_analysis/weave.py` was run on both gyro runs. The weave band was fixed at 0.45-1.5 Hz before the verdict, from the earlier analysis's 0.6 Hz peak, to keep out the slower rhythm of the corners.
+
+| | Run `20261026-194514` | Run `20261026-194913` |
+|---|---|---|
+| Weave frequency | 0.625 Hz | 0.625 Hz |
+| Steering-to-gyro coherence there | 0.97 | 0.95 |
+| Measured steering lag τ | 0.150 s | 0.125 s |
+| Loop model: damping ζ, frequency | 0.60, 0.71 Hz | 0.65, 0.74 Hz |
+| Swings that start at an aim-point jump | 4% | 4% |
+
+Searched over 0.2-5 Hz, the strongest steering rhythm is 0.31 Hz: the corners passing on a 31 m lap at about 2 m/s. On that band the verdict comes out "unclear". It's reported here so the band choice stays visible.
+
+**The simulator reproduces the weave.** `eval_gap.py` counts 0.43-0.95 steering reversals a second on the indoor tracks and 1.34 on car 1's course (`car1_course_2026_10_26`). The car does about one a second.
+
+**Gain schedule (Task 8): no change shipped.** Over 6 tracks, both directions and 2 seeds, no schedule met all four acceptance tests:
+
+| `steering_gain`, `steering_gain_speed_ref` | Mean lap | Reversals/s | Car 1 course: lap, reversals/s |
+|---|---|---|---|
+| 1.0, 1.8 (today) | 15.06 s | 0.859 | 13.99 s, 1.14 |
+| 1.0, 1.2 | +1.7% | −22% | 14.09 s, 0.92 |
+| 0.8, 1.5 | +1.8% | −20% | 14.30 s, 1.02 |
+| 1.0, 1.0 | +5.0% | −27% | 14.01 s, 0.75 |
+| 0.8, 1.2 | +5.5% | −27% | **13.91 s, 0.76** |
+| 0.6, 1.8 | +4.5% | −21% | 14.24 s, 1.02 |
+
+Every run had 0 contacts and the same stops. Lowering the gain buys at most 27% less weave and costs lap time, as the loop model predicts, so the fix is gyro damping (Task 9).
+
+**Worth trying on the floor:** 0.8 / 1.2 is the one exception. On car 1's own course it weaves 34% less and laps slightly faster. Both parameters are live-tunable.
+
 ### A6. Corner setup on vs. off
 
 Compare `enable_corner_setup` true against false:
