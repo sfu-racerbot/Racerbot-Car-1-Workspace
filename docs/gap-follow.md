@@ -39,7 +39,9 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 - **Safe with other cars on track, when you turn it on (2026-10-22).** With `opponent_awareness:=true`, two simulated cars pass 40 of 40 runs and three cars 24 of 24, with no contact at all. Without it: 34 of 40 and 15 of 24. It follows a slower car rather than overtaking it on every track tried. See [Several cars at once](#several-cars-at-once).
 - **More of every track completes (2026-10-20).** Across 11 simulated tracks, 6 seeds each, both directions, 108 of 132 runs pass, against 96 for the 2026-10-19 config. The hall loop `levine_blocked` laps in 23.6 s instead of 34.7 s.
 
-**Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, and that value is simulator-only until it has been run on the floor.
+**Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, then to 2.5 m/s² on 2026-10-26.
+
+The 2.5 step rests on a map run's grip reading (`20261026-194514`). That run was driven at a 2.0 ceiling, so no run has yet used 2.5 on the floor. The 2026-10-19 floor run and that map run disagree on grip above 2.0 m/s². [The 2026-10-19 run](#the-2026-10-19-run) has both readings.
 
 ## What changed, in plain words
 
@@ -65,7 +67,7 @@ The rule exists because a driving node with a bug does not know it has a bug. LB
 
 **The 2026-10-20 changes have only run in the simulator. Bring them up wheels-off first, then at low speed** — the exact order is in [Validation](#validation).
 
-The simulator's car is close to this one, but not identical. In particular, its grip and the 2.0 m/s² cornering limit have not been checked on this floor.
+The simulator's car is close to this one, but not identical. Its grip has been read on the car in two runs, but no run has yet used the 2.5 m/s² cornering limit on the floor. Bring that limit up in the order in [Validation](#validation).
 
 ## Validation
 
@@ -77,7 +79,7 @@ The simulator's car is close to this one, but not identical. In particular, its 
    - The node's decision log (one line a second in the `gap_follow_launch.py` terminal) mentions `swept clearance`, `corner setup` or `arc guard` when they act.
 3. **Floor, low speed, open space, with the recorder on.** Lower the speed first: set `max_speed` to about 1.0 m/s and `max_lateral_accel` back to 1.0. Both can be changed live from the dashboard's tuning panel. Record every floor run (commands below), so the next change can be checked against what the car really did.
    - Drive a straight corridor, then a single corner, with someone ready to let go of LB.
-4. **Raise speed in steps.** Raise `max_lateral_accel` toward 2.0 only after the low-speed runs look right.
+4. **Raise speed in steps.** Raise `max_lateral_accel` toward 2.5 only after the low-speed runs look right. No run has used 2.5 on the floor yet, so its first run follows the same order as any speed increase: wheels off, then low speed.
    - **If the car slides or runs wide in corners:** the floor has less grip than the simulator. Keep `max_lateral_accel` at the highest value that stayed planted.
 
 If anything looks wrong, turn the suspect feature off (next section) and compare. That is what the separate switches are for.
@@ -138,7 +140,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
-`max_lateral_accel` (default 2.0, was 1.0) is live-tunable from the dashboard.
+`max_lateral_accel` (shipped 2.5; 1.0 before 2026-10-19, 2.0 until 2026-10-26) is live-tunable from the dashboard.
 
 ## The 2026-10-19 run
 
@@ -164,7 +166,7 @@ On this track that is the inside wall of every left bend. Each of the seven stop
 | `arc_guard_blocked_fallback` | (new; `freest`) | `request` | When no arc within the arc guard's reach is clear, keep the gap's own choice. The old behaviour picked the straighter arc and, on a tight right-hander of `room_2026_07_27`, unwound a needed turn into the outer wall. |
 | `speed_hold_sec` | (new) | 0 (off) | Holding the lowest speed of a 0.15 s window cut hard brakes by a quarter to two thirds in the simulator, but cost 4–9% of lap time. Left off, available. |
 | `max_speed` | 3.5 m/s | 3.5 m/s (unchanged) | 4.5 m/s was tried. Laps were no faster, because corners and clearance limit the speed on these tracks, and more runs failed. |
-| `max_lateral_accel` | 2.0 m/s² | 2.0 m/s² (unchanged) | Measured grip on that floor: the car achieved 99% of the commanded turn up to 2.0 m/s², 91% at 2.0–2.5, 74% above 3.0. Above 2.0 it starts to slide. |
+| `max_lateral_accel` | 2.0 m/s² | 2.0 m/s² on 2026-10-20 (2.5 from 2026-10-26) | 2026-10-19 floor run: the car achieved 99% of the commanded turn up to 2.0 m/s², 91% at 2.0–2.5, 74% above 3.0, and started to slide above 2.0. Map run `20261026-194514` (2026-10-26, driven at a 2.0 ceiling): 99–108% from 0.3 to 2.5 m/s², 101% at 2.0–2.5, 93% at 2.5–3.0, 92% at 3.0–5.0. Its analysis report does not mention sliding. The runs disagree at 2.0–2.5 (91% against 101%) and above 3.0 (74% against 92%). The 2.5 setting rests on the newer run, so the first floor run at 2.5 tests the slide report. |
 
 <details>
 <summary><b>How these were chosen</b> — click to expand. Skip it unless you're changing them.</summary>
@@ -423,7 +425,7 @@ How to read it:
 - **Swept clearance is the speed.** Without it the hallway laps lose about 3.5 s.
 - **Corner setup is the room.** Without it the closest approach on `indoor_tight` drops from 0.11 m to 0.08 m, and the safety stops fire four times as often.
 - **The arc guard matters at square corners.** It halves the stops on `indoor_tight` and doubles the room on `asb_sharp`.
-- **`max_lateral_accel` 2.0** is worth about 20% of lap time, and is the one value whose real-floor grip is unchecked.
+- **`max_lateral_accel` 2.0** (this table's value) is worth about 20% of lap time over 1.0. Its grip on the car has now been read in two runs, and they disagree above 2.0 m/s² (see [the 2026-10-19 run](#the-2026-10-19-run)). The shipped value is 2.5 since 2026-10-26.
 
 A "stop tick" is one control tick (25 ms) commanded to zero by a safety layer. Most layouts show 12: that is the standing start.
 

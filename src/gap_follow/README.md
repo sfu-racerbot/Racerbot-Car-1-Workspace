@@ -452,7 +452,7 @@ apex, only change the car's pace approaching one.
 | `enable_cornering_anticipation` / `anticipation_near_depth` | `false` / `2.5` m | Extra speed cap from near/far gap-bearing disagreement (see below) — ships off, measured to over-brake in open rooms |
 | `max_steering_angle` | `0.33` rad (19°) on car 1 | Hard command clamp. Car 1's check circles reached ~0.39–0.40 rad at full stick (2026-10-21); 0.33 leaves margin for gain error. Must fit `vesc.yaml`'s servo clip |
 | `steering_gain` | `1.0` | Steering per radian of gap bearing, before the `max_steering_angle` clip. `1.0` points the wheels at the gap. Raise only if the car is slow to leave a wall; too high weaves |
-| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.0` (simulator-validated only) |
+| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.5` (raised 2026-10-26 from a map run's grip, `20261026-194514`; `2.0` from 2026-10-19; not yet run on the floor at 2.5, see [validation](../../docs/gap-follow.md#validation)) |
 | `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
 | `max_acceleration` | `3.0` m/s² | Cap on how fast a speed *command* may rise; braking is never limited |
 | `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew. Shipped YAML: `2.0` (simulator-validated only) |
