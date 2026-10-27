@@ -205,3 +205,18 @@ def test_vehicle_state_geometry_is_car_1s():
         'vehicle_state_node']['ros__parameters']
     assert params['wheelbase'] == wheelbase
     assert params['bno_x_offset'] == wheelbase
+
+
+# ------------------------------------------------- automatic run recording
+
+def test_every_bringup_starts_car_1s_automatic_recorder():
+    # Car 1's bringups include race_diagnostics' auto_record (car 2's do
+    # not): docs/car1-vs-car2.md "Software and setup". A port that copies
+    # car 2's bringup over car 1's drops it silently -- runs just stop being
+    # recorded. The full check is race_diagnostics/test/test_bringup_auto_record.py.
+    for name in ('bringup_launch.py', 'no_lidar_bringup_launch.py',
+                 'sick_bringup_launch.py'):
+        with open(os.path.join(_STACK, 'launch', name)) as f:
+            source = f.read()
+        assert "'launch', 'auto_record_launch.py')" in source, name
+        assert "condition=IfCondition(LaunchConfiguration('record'))" in source, name
