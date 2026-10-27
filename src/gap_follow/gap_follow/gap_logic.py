@@ -31,10 +31,12 @@ The processing pipeline, in the order the node applies it:
   corridor_centering  -> bounded cross-track bias, faded in on straights
   steering_damping    -> gyro yaw rate, opposed; added before the clip
   grip_ratio, AdaptiveGrip, adaptive_grip_step -> the gyro's lateral-limit judge
+  SteeringLag         -> the rack steering from a lag ago, while it is steady
   corridor_width_fac. -> how open the sensed corridor is, as a 0..1 fade
   scale_between       -> blend a margin/speed between its narrow/wide values
 """
 
+from collections import deque
 from dataclasses import dataclass
 import math
 
@@ -1350,16 +1352,92 @@ class AdaptiveGrip:
         self.limit = self.base
 
 
+# Reading the lag back off the control clock. The clock is a running sum of
+# float intervals, so a sample exactly lag_sec old can land a few 1e-17 s the
+# wrong side of the window's edge. This slack counts such a sample as covering
+# the edge.
+LAG_SLACK_SEC = 1e-9
+
+
+class SteeringLag:
+    """The rack steering on each control tick, time-stamped on the control
+    clock, so the steering commanded ``lag_sec`` ago can be read back.
+
+    The measured yaw trails the rack, so the grip compares the yaw with the
+    steering that produced it (docs/gap-follow.md#adaptive-grip-imu). The clock
+    is the sum of the command intervals, which the node and the simulator both
+    have, not the wall clock, so the two judge identically tick for tick. A stop
+    neither advances the clock nor is recorded: the rack is held during a stop
+    (gap_follow_node._stop), so nothing is lost.
+    """
+
+    def __init__(self, lag_sec: float):
+        if not (math.isfinite(lag_sec) and lag_sec >= 0.0):
+            raise ValueError('lag_sec must be finite and non-negative')
+        self.lag_sec = float(lag_sec)
+        self._clock = 0.0
+        self._samples = deque()   # (control time, steering), oldest first
+
+    def step(self, dt: float, steering: float, max_change: float) -> float:
+        """Record this tick's steering, and return the steering to judge against.
+
+        That is the steering commanded ``lag_sec`` ago, interpolated between the
+        two samples either side of that moment. It is returned only when the
+        history reaches back that far and the steering moved no more than
+        ``max_change`` across the window (quasi-steady). Otherwise NaN: this
+        tick is not judged.
+        """
+        if not (math.isfinite(dt) and dt >= 0.0):
+            raise ValueError('dt must be finite and non-negative')
+        if not math.isfinite(steering):
+            raise ValueError('steering must be finite')
+        if not (math.isfinite(max_change) and max_change >= 0.0):
+            raise ValueError('max_change must be finite and non-negative')
+        self._clock += dt
+        self._samples.append((self._clock, float(steering)))
+        edge = self._clock - self.lag_sec
+        lagged = self._value_at(edge)
+        self._trim(edge)
+        # NaN compares false, so a window the history does not cover is never judged.
+        # NaN compares false, so a window the history does not cover is never judged.
+        if abs(steering - lagged) <= max_change:
+            return lagged
+        return math.nan
+
+    def _value_at(self, t: float) -> float:
+        left = right = None
+        for time, value in self._samples:
+            if time <= t + LAG_SLACK_SEC:
+                left = (time, value)
+            else:
+                right = (time, value)
+                break
+        if left is None:
+            return math.nan                  # the history does not reach back to t
+        if right is None:
+            return left[1]
+        return left[1] + (right[1] - left[1]) * (t - left[0]) / (right[0] - left[0])
+
+    def _trim(self, t: float) -> None:
+        # The clock only moves forward, so only the last sample at or before t
+        # is ever read again. Older samples go.
+        while len(self._samples) >= 2 and self._samples[1][0] <= t + LAG_SLACK_SEC:
+            self._samples.popleft()
+
+
 def adaptive_grip_step(grip: AdaptiveGrip, ratio_filter: LowPass, yaw_rate: float,
                        speed: float, steering: float, wheelbase: float,
                        dt: float) -> float:
     """One tick of the adaptive grip with a healthy gyro: the grip ratio,
-    low-passed, judged against the demand the rack asks for. Returns the
+    low-passed, judged against the demand the steering asks for. Returns the
     lateral limit to use on this tick.
 
-    The demand is speed squared times |tan(steering)| over the wheelbase: the
-    lateral acceleration the steering geometry asks the tyres for. Call this
-    only while the gyro can be trusted (gap_follow_node._imu_gate).
+    ``steering`` is the steering to judge against: the value SteeringLag.step
+    returns, which is the rack's steering from a lag ago when it is steady and
+    NaN when this tick is not judged. The demand is speed squared times
+    |tan(steering)| over the wheelbase: the lateral acceleration that steering
+    asks the tyres for. Call this only while the gyro can be trusted
+    (gap_follow_node._imu_gate).
     """
     ratio = ratio_filter.update(grip_ratio(yaw_rate, speed, steering, wheelbase), dt)
     if math.isfinite(speed) and math.isfinite(steering):

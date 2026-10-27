@@ -72,14 +72,19 @@ def _params(**overrides):
     return params
 
 
-def _run(params, ticks, yaw_of_tick):
-    """Tick one GapController `ticks` times on SCAN at SPEED. yaw_of_tick(k)
-    returns the yaw rate for tick k, or None for no healthy gyro. Returns the
-    steerings, the commanded speeds and the lateral limits, one per tick."""
+SCAN_RIGHT = _corridor(left_wall=0.6, right_wall=1.4)   # the mirror image: steers right
+
+
+def _run(params, ticks, yaw_of_tick, scan_of_tick=None):
+    """Tick one GapController `ticks` times at SPEED on SCAN, or on
+    scan_of_tick(k) for tick k. yaw_of_tick(k) returns the yaw rate for tick k,
+    or None for no healthy gyro. Returns the steerings, the commanded speeds and
+    the lateral limits, one per tick."""
     ctrl = gap_mirror.GapController(params, _Lidar())
     steerings, speeds, limits = [], [], []
     for step in range(ticks):
-        steering, speed = ctrl.command(SCAN, SPEED, step, yaw_rate=yaw_of_tick(step))
+        scan = SCAN if scan_of_tick is None else scan_of_tick(step)
+        steering, speed = ctrl.command(scan, SPEED, step, yaw_rate=yaw_of_tick(step))
         assert not ctrl.stopped, f'tick {step}: the test scene must drive'
         steerings.append(steering)
         speeds.append(speed)
@@ -87,12 +92,23 @@ def _run(params, ticks, yaw_of_tick):
     return steerings, speeds, limits
 
 
-def _rack_steering():
+def _rack_steering(scan=SCAN):
     """The steering this scene asks for, with the grip off: it does not depend on
     the lateral limit, and it is the same on every tick."""
     steerings, _speeds, _limits = _run(_params(enable_adaptive_grip=False), 1,
-                                       lambda k: None)
+                                       lambda k: None, lambda k: scan)
     return steerings[0]
+
+
+def _judged_start(intervals, lag):
+    """The first tick the mirror can judge: the first whose window's edge, a lag
+    before it on the control clock, reaches back to the first sample. The clock is
+    the running sum of the command intervals, as gap_logic.SteeringLag keeps it."""
+    clock, times = 0.0, []
+    for dt in intervals:
+        clock += dt
+        times.append(clock)
+    return next(k for k, t in enumerate(times) if t - lag >= times[0] - 1e-9)
 
 
 def _turn_yaw(steering):
@@ -119,19 +135,50 @@ def test_with_the_grip_on_and_no_healthy_gyro_the_command_is_the_flag_off_comman
 
 
 def test_a_turn_the_steering_asks_for_raises_the_limit_by_the_closed_form():
-    # oracle: closed form. On the turn the rack asks for, every tick has grip
-    # ratio 1.0 and a demand above 0.8 of the limit, so the limit is
-    # min(ceiling, base + rise_per_s * t). t is the sum of the command
-    # intervals the mirror uses: command_slew_max_dt on the first tick (no
+    # oracle: closed form. On the turn the rack asks for, every judged tick has
+    # grip ratio 1.0 and a demand above 0.8 of the limit, so the limit is
+    # min(ceiling, base + rise_per_s * t), t the sum of the command intervals
+    # from the first judged tick on. Nothing is judged until a lag of steering is
+    # recorded. The mirror's intervals: command_slew_max_dt on the first tick (no
     # command before it), then CONTROL_DT each tick.
     params = _params()
     yaw = _turn_yaw(_rack_steering())
-    _steer, _speed, limits = _run(params, 40, lambda k: yaw)
-    intervals = [params['command_slew_max_dt']] + [gap_mirror.CONTROL_DT] * 39
-    t = np.cumsum(intervals)
-    expected = np.minimum(params['adaptive_grip_ceiling'],
-                          params['max_lateral_accel'] + params['adaptive_grip_rise_per_s'] * t)
-    assert limits == pytest.approx(list(expected), abs=1e-9)  # m/s^2
+    ticks = 40
+    _steer, _speed, limits = _run(params, ticks, lambda k: yaw)
+    intervals = [params['command_slew_max_dt']] + [gap_mirror.CONTROL_DT] * (ticks - 1)
+    base, rise = params['max_lateral_accel'], params['adaptive_grip_rise_per_s']
+    first = _judged_start(intervals, params['adaptive_grip_steering_lag_sec'])
+    expected, t = [base] * first, 0.0
+    for k in range(first, ticks):
+        t += intervals[k]
+        expected.append(min(params['adaptive_grip_ceiling'], base + rise * t))
+    assert limits == pytest.approx(expected, abs=1e-9)  # m/s^2
+
+
+def test_a_steering_jump_holds_the_limit_for_a_lag_and_then_judging_resumes():
+    # oracle: closed form on the control clock. The scene switches to the mirror
+    # image on tick 20, so the rack's steering changes sign. The yaw is the
+    # kinematic yaw of the new steering. Until the window's edge is a lag past the
+    # switch, the steering a lag ago is the old one, far more than 0.05 rad away:
+    # no judgement, so the limit holds exactly. Judging resumes on the first tick
+    # whose edge is at the switch.
+    params = _params()
+    left, right = _rack_steering(SCAN), _rack_steering(SCAN_RIGHT)
+    assert abs(right - left) > 0.05, (left, right)      # rad: well over the threshold
+    switch, ticks = 20, 32
+    _s, _sp, limits = _run(
+        params, ticks,
+        lambda k: _turn_yaw(left if k < switch else right),
+        lambda k: SCAN if k < switch else SCAN_RIGHT)
+    intervals = [params['command_slew_max_dt']] + [gap_mirror.CONTROL_DT] * (ticks - 1)
+    clock = np.cumsum(intervals)
+    lag = params['adaptive_grip_steering_lag_sec']
+    reopen = next(k for k in range(switch + 1, ticks)
+                  if clock[k] - clock[switch] >= lag - 1e-9)
+    assert limits[switch - 1] > params['max_lateral_accel'] + 0.05   # m/s^2: risen
+    for k in range(switch, reopen):
+        assert limits[k] == pytest.approx(limits[switch - 1], abs=1e-12)  # m/s^2: held
+    assert limits[reopen] > limits[reopen - 1]          # m/s^2: judging resumed
 
 
 def test_a_gyro_that_drops_out_restarts_the_limit_at_the_base():

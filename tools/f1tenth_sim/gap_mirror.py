@@ -53,8 +53,10 @@ REQUIRED_PARAMS = frozenset((
     "adaptive_grip_cut_factor",
     "adaptive_grip_hold_ratio",
     "adaptive_grip_judge_fraction",
+    "adaptive_grip_max_steering_change",
     "adaptive_grip_rise_per_s",
     "adaptive_grip_slip_ratio",
+    "adaptive_grip_steering_lag_sec",
     "adaptive_width_narrow",
     "adaptive_width_reference",
     "arc_guard_blocked_fallback",
@@ -193,6 +195,8 @@ LEGACY_VALUES = {
     "adaptive_grip_hold_ratio": 0.95,
     "adaptive_grip_slip_ratio": 0.90,
     "adaptive_grip_judge_fraction": 0.8,
+    "adaptive_grip_steering_lag_sec": 0.15,
+    "adaptive_grip_max_steering_change": 0.05,
     # Opponent awareness (2026-10-22) did not exist: off. Its opponent_*
     # values are then never read, but the mirror requires them present.
     "enable_opponent_awareness": False,
@@ -278,6 +282,7 @@ class GapController:
             slip_ratio=self.p["adaptive_grip_slip_ratio"],
             judge_fraction=self.p["adaptive_grip_judge_fraction"])
         self.grip_ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+        self.steering_lag = gap_logic.SteeringLag(self.p["adaptive_grip_steering_lag_sec"])
 
     def command(self, scan, current_speed, step, yaw_rate=None):
         p = self.p
@@ -591,13 +596,15 @@ class GapController:
         if not p["enable_adaptive_grip"]:
             return p["max_lateral_accel"]
         self.grip.follow_base(p["max_lateral_accel"], p["adaptive_grip_ceiling"])
+        judged = self.steering_lag.step(
+            dt, steering, p["adaptive_grip_max_steering_change"])
         if yaw_rate is None:
             self.grip.limit = self.grip.base
             self.grip_ratio_filter.reset()
             return self.grip.limit
         return gap_logic.adaptive_grip_step(
             self.grip, self.grip_ratio_filter, yaw_rate, float(current_speed),
-            steering, p["wheelbase"], dt)
+            judged, p["wheelbase"], dt)
 
     def _stop(self, step, reason):
         self.speed_hold.reset()

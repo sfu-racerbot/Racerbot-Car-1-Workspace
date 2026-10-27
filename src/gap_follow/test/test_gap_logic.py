@@ -1408,3 +1408,171 @@ def test_a_tick_with_no_judgement_makes_none_and_restarts_the_filter():
         grip, ratio_filter, 0.4, 0.5, steering, GRIP_WHEELBASE, 0.1)
     assert limit == 2.2  # m/s^2
     assert ratio_filter.value is None
+
+
+# ============================================================================
+# SteeringLag: the yaw is judged against the steering from a lag ago, while the
+# steering is steady (docs/gap-follow.md#adaptive-grip-imu)
+# ============================================================================
+
+LAG = 0.15      # s: the steering lag the yaw trails by (gap_follow.yaml)
+TICK = 0.025    # s: one control tick
+
+
+def _first_order_yaw(kinematic_yaws, dt, tau):
+    """A first-order lag on the kinematic yaw, from rest:
+    y_k = y_(k-1) + (1 - exp(-dt / tau)) * (kin_k - y_(k-1)).
+    That is the lag's own recurrence, written out here."""
+    a = 1.0 - math.exp(-dt / tau)
+    y, out = 0.0, []
+    for kin in kinematic_yaws:
+        y += a * (kin - y)
+        out.append(y)
+    return out
+
+
+def test_steering_lag_refuses_bad_inputs():
+    with pytest.raises(ValueError, match='lag_sec'):
+        gap_logic.SteeringLag(-0.1)
+    lag = gap_logic.SteeringLag(LAG)
+    with pytest.raises(ValueError, match='dt'):
+        lag.step(-0.01, 0.2, 0.05)
+    with pytest.raises(ValueError, match='steering'):
+        lag.step(TICK, math.nan, 0.05)
+    with pytest.raises(ValueError, match='max_change'):
+        lag.step(TICK, 0.2, -0.05)
+
+
+def test_the_lagged_steering_is_not_judged_until_the_history_reaches_back_a_lag():
+    # oracle: spec -- until the history covers the lag there is nothing to judge
+    # against. The first sample is one tick in, and the window's edge is a lag
+    # before each tick, so with 0.025 s ticks the seventh call (index 6) is the
+    # first whose edge is at that first sample.
+    lag = gap_logic.SteeringLag(LAG)
+    judged = [lag.step(TICK, 0.2, 0.05) for _ in range(12)]
+    assert all(math.isnan(v) for v in judged[:6])
+    assert judged[6:] == pytest.approx([0.2] * 6, abs=1e-12)  # rad
+
+
+def test_the_lagged_steering_is_interpolated_between_the_samples_either_side():
+    # oracle: closed form. A steering linear in time is reproduced exactly by
+    # linear interpolation, so the judged value is 2 * (time - lag). With 0.04 s
+    # ticks the window's edge falls between two samples, so this exercises the
+    # interpolation itself.
+    dt = 0.04
+    lag = gap_logic.SteeringLag(LAG)
+    clock, judged = 0.0, []
+    for _ in range(25):
+        clock += dt
+        judged.append((clock, lag.step(dt, 2.0 * clock, 1.0)))
+    finite = [(t, j) for t, j in judged if math.isfinite(j)]
+    assert len(finite) >= 15, judged                           # not vacuous
+    for t, j in finite:
+        assert j == pytest.approx(2.0 * (t - LAG), abs=1e-12)  # rad
+
+
+def test_a_lag_of_zero_judges_the_steering_now_as_the_code_did_before():
+    # oracle: spec -- lag 0 is the behaviour before this change: the steering
+    # now, on every tick. The steadiness window is empty, so even a zero
+    # threshold passes.
+    lag = gap_logic.SteeringLag(0.0)
+    judged = [lag.step(TICK, 0.1 * k, 0.0) for k in range(6)]
+    assert judged == pytest.approx([0.1 * k for k in range(6)], abs=1e-12)  # rad
+
+
+def _lag_response(kin_of_t, t_end, tau, sample_dt, h=1e-4):
+    """The response of the continuous first-order lag dy/dt = (kin(t) - y) / tau
+    from rest, integrated with RK4 on a fine grid and sampled every sample_dt.
+    out[j] is the yaw at time (j + 1) * sample_dt."""
+    def f(t, y):
+        return (kin_of_t(t) - y) / tau
+    steps, every = round(t_end / h), round(sample_dt / h)
+    y, t, out = 0.0, 0.0, []
+    for i in range(steps):
+        k1 = f(t, y)
+        k2 = f(t + h / 2, y + h / 2 * k1)
+        k3 = f(t + h / 2, y + h / 2 * k2)
+        k4 = f(t + h, y + h * k3)
+        y += h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        t += h
+        if (i + 1) % every == 0:
+            out.append(y)
+    return out
+
+
+def test_no_judgement_while_the_steering_changes_by_more_than_the_threshold():
+    # oracle: closed form. The rack steps from 0 to 0.3 rad on the tenth call
+    # (index 9, at 0.25 s). For the next six calls the window's edge is still
+    # before the step, so the steering a lag ago is 0 and the change is 0.3 rad,
+    # over the 0.05 rad threshold: no judgement. On the sixth call after the step
+    # the edge is at the step and the window is steady, so judging resumes.
+    lag = gap_logic.SteeringLag(LAG)
+    judged = [lag.step(TICK, 0.3 if k >= 9 else 0.0, 0.05) for k in range(20)]
+    assert all(math.isnan(v) for v in judged[9:15])
+    assert judged[15] == pytest.approx(0.3, abs=1e-12)  # rad
+
+
+def test_a_steering_ramp_reads_one_when_the_lag_is_compensated_and_one_minus_tau_over_t_without():
+    # oracle: the continuous first-order lag (tau = 0.15 s) on the kinematic yaw,
+    # integrated on a fine grid (_lag_response), at 2.5 m/s. The rack ramps at
+    # 0.3 rad/s: over the 0.15 s window that is 0.045 rad, inside the 0.05 rad
+    # threshold, so it is quasi-steady. A first-order lag follows a steady ramp
+    # one time constant behind. With the lag compensated the ratio is 1; without
+    # it, 1 - tau / t, which stays below 0.9 until t = 1.5 s. The early ticks
+    # carry the lag's own transient, a few hundredths, so the check starts at 0.5 s.
+    speed, dt, tau = 2.5, TICK, LAG
+    ticks = 45                                          # 1.125 s
+    rack = [0.3 * (k + 1) * dt for k in range(ticks)]   # rad
+    yaw = _lag_response(lambda t: speed * math.tan(0.3 * t) / GRIP_WHEELBASE,
+                        ticks * dt, tau, dt)
+    comp, plain = gap_logic.SteeringLag(LAG), gap_logic.SteeringLag(0.0)
+    grip_c, grip_p = _grip(base=2.5), _grip(base=2.5)
+    filt_c = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+    filt_p = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+    for k in range(ticks):
+        t = (k + 1) * dt
+        judged_c = comp.step(dt, rack[k], 0.05)
+        judged_p = plain.step(dt, rack[k], 0.05)
+        gap_logic.adaptive_grip_step(
+            grip_c, filt_c, yaw[k], speed, judged_c, GRIP_WHEELBASE, dt)
+        gap_logic.adaptive_grip_step(
+            grip_p, filt_p, yaw[k], speed, judged_p, GRIP_WHEELBASE, dt)
+        if t >= 0.5 and math.isfinite(judged_c) and math.isfinite(judged_p):
+            r_c = gap_logic.grip_ratio(yaw[k], speed, judged_c, GRIP_WHEELBASE)
+            r_p = gap_logic.grip_ratio(yaw[k], speed, judged_p, GRIP_WHEELBASE)
+            assert r_c == pytest.approx(1.0, abs=0.03)              # dimensionless
+            assert r_p == pytest.approx(1.0 - tau / t, abs=0.03)    # dimensionless
+    assert grip_c.limit > 2.5 + 0.02                        # m/s^2: the compensated limit rose
+    assert grip_p.limit == pytest.approx(2.5, abs=1e-12)    # m/s^2: never rose
+
+
+def test_a_step_in_the_steering_is_only_partly_rescued_by_the_lag():
+    # oracle: closed form. The rack steps to 0.2 rad at time 0 and holds, so the
+    # yaw is the first-order lag's step response: after k+1 ticks of 0.025 s it is
+    # 1 - exp(-(k+1)/6) of the steady value, since tau is six ticks. Judged against
+    # the steering now, that is the ratio on every tick. Judged against the
+    # steering a lag ago it is the same curve from the seventh tick on: the lag
+    # withholds the first lag's judgements and leaves the settling as it was.
+    speed, steer, ticks = 2.0, 0.2, 30
+    yaw = _first_order_yaw(
+        [speed * math.tan(steer) / GRIP_WHEELBASE] * ticks, TICK, LAG)
+    plain, comp = gap_logic.SteeringLag(0.0), gap_logic.SteeringLag(LAG)
+    r_p, r_c = [], []
+    for k in range(ticks):
+        r_p.append(gap_logic.grip_ratio(
+            yaw[k], speed, plain.step(TICK, steer, 0.05), GRIP_WHEELBASE))
+        r_c.append(gap_logic.grip_ratio(
+            yaw[k], speed, comp.step(TICK, steer, 0.05), GRIP_WHEELBASE))
+    for k in range(ticks):
+        expected = 1.0 - math.exp(-(k + 1) / 6.0)                # dimensionless
+        assert r_p[k] == pytest.approx(expected, abs=1e-9)       # dimensionless
+        if k < 6:
+            assert math.isnan(r_c[k]), k
+        else:
+            assert r_c[k] == pytest.approx(expected, abs=1e-9)   # dimensionless
+    # The transient: below 0.9 for the first thirteen ticks, with or without the lag.
+    assert all(r < 0.9 for r in r_p[:13]) and r_p[13] >= 0.9
+    # Settled: 0.95 is first reached at the eighteenth tick (0.45 s, three time
+    # constants), not at the lag.
+    assert r_p[16] < 0.95 <= r_p[17]
+    assert r_c[16] < 0.95 <= r_c[17]

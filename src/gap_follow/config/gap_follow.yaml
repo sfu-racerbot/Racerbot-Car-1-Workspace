@@ -185,7 +185,11 @@ gap_follow_node:
     # up to adaptive_grip_ceiling; below adaptive_grip_slip_ratio (sliding) it is
     # cut to adaptive_grip_cut_factor of itself, never below max_lateral_accel.
     # A tick where the car asks for less than adaptive_grip_judge_fraction of the
-    # limit is not judged. Turn it on with gap_follow_launch.py adaptive_grip:=true.
+    # limit is not judged. The yaw trails the rack (about 0.15 s, the weave
+    # diagnosis in docs/gap-follow.md#steering-damping-gyro), so the yaw is judged
+    # against the steering from adaptive_grip_steering_lag_sec ago, and only while
+    # that steering has moved no more than adaptive_grip_max_steering_change (rad)
+    # over the window. Turn it on with gap_follow_launch.py adaptive_grip:=true.
     # Not yet run in the simulator or on the car (docs/gap-follow.md#adaptive-grip-imu).
     enable_adaptive_grip: false
     adaptive_grip_ceiling: 3.0
@@ -194,6 +198,8 @@ gap_follow_node:
     adaptive_grip_hold_ratio: 0.95
     adaptive_grip_slip_ratio: 0.90
     adaptive_grip_judge_fraction: 0.8
+    adaptive_grip_steering_lag_sec: 0.15
+    adaptive_grip_max_steering_change: 0.05
     # --- Rectangular vehicle footprint ---
     # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
     # published figures the earlier values came from:

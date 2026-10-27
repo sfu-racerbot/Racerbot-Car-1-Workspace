@@ -565,6 +565,14 @@ Three details stop it from reacting to noise:
 - The ratio is smoothed over about 0.3 seconds, so one odd reading cannot cut the limit.
 - The node judges the tires only when the steering asks for at least 80% of the current limit. On a gentle bend the car is not pushing the tires, so a slide would tell it nothing.
 - On a straight, or below 1 m/s, nothing is judged. The limit holds where it is.
+- The yaw trails the steering by about 0.15 seconds, so the node compares the yaw with the steering from 0.15 seconds earlier. The lag is the one in the weave diagnosis, noted above `enable_steering_damping` in `config/gap_follow.yaml`.
+- It judges only while that steering has moved no more than 0.05 rad over those 0.15 seconds. During a quick change of steering, such as a corner entry, nothing is judged.
+
+The lag compensation fixes one thing and leaves another. A steady turn is judged correctly once 0.15 seconds of steering has been recorded.
+
+After a sudden change of steering, though, the yaw keeps catching up for a few tenths of a second. It reads `1 - exp(-t / 0.15 s)` of the way to its final value.
+
+So it reaches 0.95 only about 0.45 seconds after the change. Until then the ratio reads low, and the limit can be cut. The steering check holds judging during the change itself, not during that catch-up.
 
 ### What it never does
 

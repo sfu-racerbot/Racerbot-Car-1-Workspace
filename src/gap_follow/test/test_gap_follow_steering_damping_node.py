@@ -375,21 +375,21 @@ def _grip_tick(node, scan, k, *, imu=None):
     return min(node.command_slew_max_dt, since)
 
 
-def _run_grip(extra, *, imu=None, ticks=1):
+def _run_grip(extra, *, imu=None, ticks=1, ranges_of=None):
     """A fresh node with GRIP_BASE and `extra`, ticked `ticks` times on the
-    blocked-right scan. `imu` is _feed_imu's keyword arguments for every tick,
-    or a function of the tick index that returns them. Returns the commands
-    published, the intent payloads, the command interval of each tick, and the
-    adaptive limit after each tick."""
+    blocked-right scan, or on ranges_of(k) for tick k. `imu` is _feed_imu's
+    keyword arguments for every tick, or a function of the tick index that
+    returns them. Returns the commands published, the intent payloads, the
+    command interval of each tick, and the adaptive limit after each tick."""
     rclpy.init(args=['--ros-args', *GRIP_BASE, *extra, *TEST_ONLY_DRIVE])
     node = GapFollowNode()
     try:
         assert node.drive_pub.topic_name == '/test_only/drive'
         published = _capture(node)
         intents = _capture_intent(node)
-        scan = _scan(_blocked_right())
         intervals, limits = [], []
         for k in range(ticks):
+            scan = _scan(_blocked_right() if ranges_of is None else ranges_of(k))
             intervals.append(_grip_tick(node, scan, k, imu=imu(k) if callable(imu) else imu))
             limits.append(node.adaptive_grip.limit)
         return dict(published=published, intents=intents, intervals=intervals,
@@ -413,11 +413,12 @@ def test_a_healthy_gyro_raises_the_curve_capped_speed_over_time():
     imu = dict(yaw_rate=_turn_yaw(RACK))
     on = _run_grip(GRIP, imu=imu, ticks=ticks)
     off = _run_grip([], imu=imu, ticks=ticks)
-    # oracle: closed form. On the turn the rack asks for, every tick has grip
-    # ratio 1.0 and a demand (2.36 m/s^2) above 0.8 of the limit, so the limit
-    # is min(3.0, 2.0 + 0.2 * t), t the sum of the command intervals the node
-    # used (0.1 s on the first tick, then about GRIP_DT each).
-    t = sum(on['intervals'])
+    # oracle: closed form. On the turn the rack asks for, every judged tick has
+    # grip ratio 1.0 and a demand (2.36 m/s^2) above 0.8 of the limit, so the
+    # limit is min(3.0, 2.0 + 0.2 * t). t is the sum of the command intervals
+    # from the first judged tick on: the yaw is judged against the steering a
+    # lag ago, so nothing is judged until that lag is recorded (_judged_start).
+    t = sum(on['intervals'][_judged_start(on['intervals']):])
     limit = min(3.0, 2.0 + 0.2 * t)
     assert on['limits'][-1] == pytest.approx(limit, abs=1e-3)  # m/s^2 (1 mm/s^2)
     # oracle: closed form. The speed is the curve cap at that limit,
@@ -432,19 +433,19 @@ def test_a_healthy_gyro_raises_the_curve_capped_speed_over_time():
 
 
 def test_a_sustained_slip_cuts_the_raised_limit_and_stops_at_the_base():
-    # Eighty judged ticks at full grip raise the limit above 2.4. Then the car
-    # reads half the turn (ratio 0.5). The ratio is low-passed over 0.3 s, so the
-    # first slip tick alone is not enough to cut: the cuts start a few ticks
-    # later. oracle: spec -- each cut is cut_factor (0.85) of the limit and never
-    # goes below the base.
+    # A hundred ticks at full grip (about ninety-four of them judged) raise the
+    # limit above 2.4. Then the car reads half the turn (ratio 0.5). The ratio is
+    # low-passed over 0.3 s, so the first slip tick alone is not enough to cut:
+    # the cuts start a few ticks later. oracle: spec -- each cut is cut_factor
+    # (0.85) of the limit and never goes below the base.
     yaw = _turn_yaw(RACK)
     run = _run_grip(GRIP, imu=lambda k: dict(
-        yaw_rate=yaw if k < 80 else 0.5 * yaw, state='ok'), ticks=100)
+        yaw_rate=yaw if k < 100 else 0.5 * yaw, state='ok'), ticks=120)
     limits = run['limits']
-    assert limits[79] > 2.4  # m/s^2: risen, so a cut is not the floor
+    assert limits[99] > 2.4  # m/s^2: risen, so a cut is not the floor
     cuts = [k for k in range(1, len(limits)) if limits[k] < limits[k - 1]]
     assert cuts, 'a sustained slip must cut the limit'
-    assert cuts[0] > 80, 'the filter must see the slip before the first cut'
+    assert cuts[0] > 100, 'the filter must see the slip before the first cut'
     first = cuts[0]
     assert limits[first] == pytest.approx(max(2.0, limits[first - 1] * 0.85), abs=1e-9)  # m/s^2
     assert min(limits) == pytest.approx(2.0, abs=1e-12)  # m/s^2: the base, reached and held
@@ -524,7 +525,7 @@ def test_a_bad_gyro_after_a_rise_restarts_the_limit_at_the_base():
     yaw = _turn_yaw(RACK)
     run = _run_grip(GRIP, imu=lambda k: dict(
         yaw_rate=yaw, state='fault' if k == 20 else 'ok'), ticks=22)
-    risen = 2.0 + 0.2 * sum(run['intervals'][:20])
+    risen = 2.0 + 0.2 * sum(run['intervals'][_judged_start(run['intervals']):20])
     assert run['limits'][19] == pytest.approx(risen, abs=1e-9)  # m/s^2
     assert run['limits'][20] == pytest.approx(2.0, abs=1e-12)  # m/s^2: reset
     curvature = math.tan(RACK) / WHEELBASE
@@ -627,6 +628,8 @@ def test_with_both_gyro_features_off_the_node_has_no_imu_subscriptions():
     # Equal to the default hold ratio of 0.95: the two bands would overlap.
     (['-p', 'adaptive_grip_slip_ratio:=0.95'], 'adaptive_grip_slip_ratio'),
     (['-p', 'adaptive_grip_judge_fraction:=-0.1'], 'adaptive_grip_judge_fraction'),
+    (['-p', 'adaptive_grip_steering_lag_sec:=-0.1'], 'adaptive_grip_steering_lag_sec'),
+    (['-p', 'adaptive_grip_max_steering_change:=-0.05'], 'adaptive_grip_max_steering_change'),
 ])
 def test_a_bad_grip_parameter_refuses_to_start(extra, match):
     # oracle: spec -- a band that cannot hold is refused at startup, not
@@ -647,7 +650,8 @@ def test_a_live_change_of_max_lateral_accel_restarts_the_limit_at_the_new_base(g
     imu = dict(yaw_rate=_turn_yaw(RACK))
     for k in range(20):
         _grip_tick(grip_node, scan, k, imu=imu)
-    assert grip_node.adaptive_grip.limit > 2.1  # m/s^2: risen
+    # Fourteen judged ticks (the lag is recorded first) add about 0.07 m/s^2.
+    assert grip_node.adaptive_grip.limit > 2.05  # m/s^2: risen
     results = grip_node.set_parameters(
         [Parameter('max_lateral_accel', Parameter.Type.DOUBLE, 2.4)])
     assert results[0].successful, results[0].reason
@@ -655,3 +659,85 @@ def test_a_live_change_of_max_lateral_accel_restarts_the_limit_at_the_new_base(g
     assert grip_node.adaptive_grip.base == pytest.approx(2.4, abs=1e-12)  # m/s^2
     assert grip_node.adaptive_grip.limit == pytest.approx(
         2.4 + 0.2 * dt, abs=1e-9)  # m/s^2
+
+
+# --- The lag, and the steady-steering gate (docs/gap-follow.md#adaptive-grip-imu)
+
+STEERING_LAG = 0.15            # s: adaptive_grip_steering_lag_sec's shipped value
+
+
+def _judged_start(intervals):
+    """The first tick the node can judge: the first whose window's edge, a lag
+    before it on the control clock, reaches back to the first sample. The clock is
+    the running sum of the intervals the node used, as gap_logic.SteeringLag keeps it."""
+    clock, times = 0.0, []
+    for dt in intervals:
+        clock += dt
+        times.append(clock)
+    return next(k for k, t in enumerate(times) if t - STEERING_LAG >= times[0] - 1e-9)
+
+
+def _blocked_left(n=541):
+    """An obstacle filling the left half: a correct node steers right (negative)."""
+    ranges = [8.0] * n
+    for i in range(n - 250, n):
+        ranges[i] = 1.0
+    return ranges
+
+
+def _rack_on(ranges):
+    """The steering a feature-off node asks for on a scene, at SPEED."""
+    return _steering(_drive_once([], ranges=ranges, speed=SPEED)[0])
+
+
+def test_no_judgement_until_the_history_reaches_back_a_lag():
+    # oracle: spec -- the yaw is judged against the steering a lag ago, which does
+    # not exist until the history has been recorded for that long. The first
+    # judged tick is the first whose window is covered.
+    run = _run_grip(GRIP, imu=dict(yaw_rate=_turn_yaw(RACK)), ticks=12)
+    first = _judged_start(run['intervals'])
+    span = sum(run['intervals'][1:first + 1])
+    assert sum(run['intervals'][1:first]) < STEERING_LAG <= span + 1e-9  # covered only now
+    assert run['limits'][:first] == [pytest.approx(2.0, abs=1e-12)] * first  # m/s^2: held
+    assert run['limits'][first] > 2.0 + 1e-6   # m/s^2: the first judged tick rises
+
+
+def test_a_steering_jump_holds_the_limit_for_a_lag_and_then_judging_resumes():
+    # The rack's steering changes sign on tick 20. Until the window's edge is a
+    # lag past the change, the steering a lag ago is the old one, far more than
+    # 0.05 rad away: no judgement, so the limit holds exactly. Judging resumes on
+    # the first tick whose edge is at the change. oracle: closed form on the
+    # control clock, the running sum of the intervals.
+    right, left = _rack_on(_blocked_right()), _rack_on(_blocked_left())
+    assert abs(left - right) > 0.05, (left, right)     # rad: well over the threshold
+    jump, ticks = 20, 32
+
+    def imu(k):
+        return dict(yaw_rate=_turn_yaw(right if k < jump else left), state='ok')
+
+    run = _run_grip(GRIP, imu=imu, ticks=ticks,
+                    ranges_of=lambda k: _blocked_right() if k < jump else _blocked_left())
+    clock, total = [], 0.0
+    for dt in run['intervals']:
+        total += dt
+        clock.append(total)
+    reopen = next(k for k in range(jump + 1, ticks)
+                  if clock[k] - clock[jump] >= STEERING_LAG - 1e-9)
+    assert run['limits'][jump - 1] > 2.05          # m/s^2: risen before the change
+    for k in range(jump, reopen):
+        assert run['limits'][k] == pytest.approx(
+            run['limits'][jump - 1], abs=1e-12)    # m/s^2: held while the window is mixed
+    assert run['limits'][reopen] > run['limits'][reopen - 1]   # m/s^2: judging resumed
+
+
+def test_an_untrusted_gyro_does_not_restart_the_steering_history():
+    # oracle: spec -- the history is the rack's, so it keeps recording through an
+    # untrusted gyro. The gyro faults on ticks 20 and 21, so the limit is back at
+    # the base; on tick 22 it is healthy and the window was already covered, so the
+    # limit rises at once, by 0.2 times that tick's interval.
+    yaw = _turn_yaw(RACK)
+    run = _run_grip(GRIP, imu=lambda k: dict(
+        yaw_rate=yaw, state='fault' if k in (20, 21) else 'ok'), ticks=23)
+    assert run['limits'][21] == pytest.approx(2.0, abs=1e-12)  # m/s^2: held at the base
+    assert run['limits'][22] == pytest.approx(
+        2.0 + 0.2 * run['intervals'][22], abs=1e-9)           # m/s^2: judged at once

@@ -95,6 +95,12 @@ class GapFollowNode(Node):
         self.declare_parameter('adaptive_grip_hold_ratio', 0.95)
         self.declare_parameter('adaptive_grip_slip_ratio', 0.90)
         self.declare_parameter('adaptive_grip_judge_fraction', 0.8)
+        # The measured yaw trails the rack, so the yaw is judged against the
+        # steering from adaptive_grip_steering_lag_sec ago, and only while the
+        # steering has moved no more than adaptive_grip_max_steering_change over
+        # that window (quasi-steady). Otherwise the tick is not judged.
+        self.declare_parameter('adaptive_grip_steering_lag_sec', 0.15)
+        self.declare_parameter('adaptive_grip_max_steering_change', 0.05)
         # Padded collision envelope around this car's rear-axle base_link.
         # wheelbase, laser_offset_x and the 0.30 m the car measures over the
         # tires were tape-measured 2026-08-24; car_width is that 0.30 m plus
@@ -374,6 +380,10 @@ class GapFollowNode(Node):
             self.get_parameter('adaptive_grip_slip_ratio').value)
         self.adaptive_grip_judge_fraction = float(
             self.get_parameter('adaptive_grip_judge_fraction').value)
+        self.adaptive_grip_steering_lag_sec = float(
+            self.get_parameter('adaptive_grip_steering_lag_sec').value)
+        self.adaptive_grip_max_steering_change = float(
+            self.get_parameter('adaptive_grip_max_steering_change').value)
         self.car_width = float(self.get_parameter('car_width').value)
         self.car_length = float(self.get_parameter('car_length').value)
         self.wheelbase = float(self.get_parameter('wheelbase').value)
@@ -587,6 +597,14 @@ class GapFollowNode(Node):
                 and self.adaptive_grip_judge_fraction >= 0.0):
             raise ValueError(
                 'adaptive_grip_judge_fraction must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_steering_lag_sec)
+                and self.adaptive_grip_steering_lag_sec >= 0.0):
+            raise ValueError(
+                'adaptive_grip_steering_lag_sec must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_max_steering_change)
+                and self.adaptive_grip_max_steering_change >= 0.0):
+            raise ValueError(
+                'adaptive_grip_max_steering_change must be finite and non-negative')
         if not (math.isfinite(self.gap_switch_margin) and self.gap_switch_margin >= 1.0):
             raise ValueError(
                 'gap_switch_margin must be finite and at least 1.0 -- below that, a '
@@ -678,6 +696,9 @@ class GapFollowNode(Node):
             slip_ratio=self.adaptive_grip_slip_ratio,
             judge_fraction=self.adaptive_grip_judge_fraction)
         self.grip_ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+        # The rack steering over the last lag, for the judgement (gap_logic.SteeringLag).
+        self.adaptive_steering_lag = gap_logic.SteeringLag(
+            self.adaptive_grip_steering_lag_sec)
         self.current_speed = 0.0
         self.last_odom_time = None
         self.last_commanded_speed = 0.0
@@ -878,6 +899,11 @@ class GapFollowNode(Node):
         grip = self.adaptive_grip
         # max_lateral_accel is live-tunable and is the floor, so follow it.
         grip.follow_base(self.max_lateral_accel, self.adaptive_grip_ceiling)
+        # The steering the yaw answers to: the rack's from a lag ago, and only
+        # while steady (gap_logic.SteeringLag). The history is recorded through an
+        # untrusted gyro too, so judging resumes at once when the gyro does.
+        judged = self.adaptive_steering_lag.step(
+            dt, steering, self.adaptive_grip_max_steering_change)
         yaw_rate, why = self._imu_gate()
         if why is not None:
             grip.limit = grip.base
@@ -888,7 +914,7 @@ class GapFollowNode(Node):
         # limit holds; only an untrusted gyro restarts it at the base.
         speed = self.current_speed if self._odom_fresh() else math.nan
         limit = gap_logic.adaptive_grip_step(
-            grip, self.grip_ratio_filter, yaw_rate, speed, steering,
+            grip, self.grip_ratio_filter, yaw_rate, speed, judged,
             self.wheelbase, dt)
         return limit, None
 
