@@ -220,8 +220,8 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         state = np.asarray(ego["std_state"], dtype=float)
         speed_meas = float(state[3])
         # The gym's true yaw rate (std_state is x, y, delta, v, yaw, yaw_rate,
-        # beta). The mirror reads it only with enable_steering_damping on, so
-        # with the feature off this changes nothing.
+        # beta). The mirror reads it only with enable_steering_damping or
+        # enable_adaptive_grip on, so with both off this changes nothing.
         steering, cmd_speed = ctrl.command(ego["scan"], speed_meas, step,
                                            yaw_rate=float(state[5]))
         steerings.append(steering)

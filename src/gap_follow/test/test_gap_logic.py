@@ -1075,3 +1075,336 @@ def test_a_zero_negative_or_non_finite_gain_adds_exactly_zero(gain):
     # A negative gain would steer *with* the rotation (positive feedback), so
     # it must switch the term off, never flip it.
     assert gap_logic.steering_damping(0.5, gain) == 0.0
+
+
+# ============================================================================
+# Adaptive grip from the gyro (docs/gap-follow.md#adaptive-grip-imu)
+# ============================================================================
+
+GRIP_WHEELBASE = 0.36
+# Demand that is judged against any limit up to the 3.0 ceiling: at least
+# judge_fraction (0.8) of 3.0 is 2.4 m/s^2, below this.
+FULL_DEMAND = 3.0
+
+
+def _grip(limit=None, **overrides):
+    """The shipped grip values (gap_follow.yaml), base 2.0, ceiling 3.0."""
+    params = dict(base=2.0, ceiling=3.0, rise_per_s=0.2, cut_factor=0.85,
+                  hold_ratio=0.95, slip_ratio=0.90, judge_fraction=0.8)
+    params.update(overrides)
+    return gap_logic.AdaptiveGrip(limit=limit, **params)
+
+
+def _kinematic_yaw(speed, steering, wheelbase=GRIP_WHEELBASE):
+    # oracle: the yaw rate of a car that does not slip, speed * tan(steer) / L.
+    return speed * math.tan(steering) / wheelbase
+
+
+# --- grip_ratio -------------------------------------------------------------
+
+def test_grip_ratio_is_one_on_the_circle_the_steering_asks_for():
+    # oracle: closed form. A 2 m radius circle at 2 m/s is 1.0 rad/s of yaw,
+    # and the steering that draws it is atan(0.36 / 2).
+    steering = math.atan(GRIP_WHEELBASE / 2.0)
+    assert gap_logic.grip_ratio(1.0, 2.0, steering, GRIP_WHEELBASE) == pytest.approx(
+        1.0, abs=1e-12)  # dimensionless
+
+
+def test_grip_ratio_halves_when_the_car_yaws_half_as_fast():
+    # oracle: closed form -- the ratio is linear in the measured yaw rate.
+    steering = math.atan(GRIP_WHEELBASE / 2.0)
+    assert gap_logic.grip_ratio(0.5, 2.0, steering, GRIP_WHEELBASE) == pytest.approx(
+        0.5, abs=1e-12)  # dimensionless
+
+
+def test_grip_ratio_reads_a_mirror_image_turn_the_same_way():
+    # oracle: invariant -- a right turn (negative yaw and steering) has the same ratio.
+    steering = math.atan(GRIP_WHEELBASE / 2.0)
+    assert gap_logic.grip_ratio(-1.0, 2.0, -steering, GRIP_WHEELBASE) == pytest.approx(
+        1.0, abs=1e-12)  # dimensionless
+
+
+@pytest.mark.parametrize('speed', [0.0, 0.5, 0.999, -2.0])
+def test_grip_ratio_makes_no_judgement_below_one_metre_per_second(speed):
+    # oracle: spec -- speed < 1.0 returns nan. Reversing (-2.0) is below it too.
+    assert math.isnan(gap_logic.grip_ratio(1.0, speed, 0.2, GRIP_WHEELBASE))
+
+
+def test_grip_ratio_judges_at_exactly_one_metre_per_second():
+    # One step past the guard: 1.0 m/s is judged, because the guard is 'below 1.0'.
+    assert math.isfinite(gap_logic.grip_ratio(0.5, 1.0, 0.2, GRIP_WHEELBASE))
+
+
+@pytest.mark.parametrize('steering', [0.0, 0.0499, -0.0499])
+def test_grip_ratio_makes_no_judgement_with_the_rack_near_centre(steering):
+    assert math.isnan(gap_logic.grip_ratio(0.1, 2.0, steering, GRIP_WHEELBASE))
+
+
+def test_grip_ratio_judges_at_exactly_five_hundredths_of_a_radian():
+    assert math.isfinite(gap_logic.grip_ratio(0.1, 2.0, 0.05, GRIP_WHEELBASE))
+
+
+@pytest.mark.parametrize('yaw, speed, steering', [
+    (math.nan, 2.0, 0.2), (math.inf, 2.0, 0.2), (1.0, math.nan, 0.2),
+    (1.0, math.inf, 0.2), (1.0, 2.0, math.nan), (1.0, 2.0, -math.inf),
+])
+def test_grip_ratio_makes_no_judgement_on_non_finite_input(yaw, speed, steering):
+    assert math.isnan(gap_logic.grip_ratio(yaw, speed, steering, GRIP_WHEELBASE))
+
+
+def test_grip_ratio_makes_no_judgement_on_a_non_finite_wheelbase():
+    assert math.isnan(gap_logic.grip_ratio(1.0, 2.0, 0.2, math.nan))
+
+
+def test_grip_ratio_refuses_a_wheelbase_that_is_not_positive():
+    with pytest.raises(ValueError, match='wheelbase'):
+        gap_logic.grip_ratio(1.0, 2.0, 0.2, 0.0)
+
+
+# --- LowPass ----------------------------------------------------------------
+
+def test_low_pass_starts_at_its_first_sample():
+    f = gap_logic.LowPass(0.3)
+    assert f.update(1.5, 0.025) == 1.5
+
+
+def test_low_pass_steps_toward_a_new_value_by_the_closed_form():
+    # oracle: closed form. A first-order filter's step response is
+    # x + (y0 - x) * exp(-t / tau). After 12 ticks of 0.025 s (t = 0.3 s, one
+    # time constant) the remaining gap is exp(-1) of the starting gap.
+    f = gap_logic.LowPass(0.3)
+    f.update(0.0, 0.025)
+    for _ in range(12):
+        last = f.update(1.0, 0.025)
+    assert last == pytest.approx(1.0 - math.exp(-1.0), abs=1e-9)  # dimensionless
+
+
+def test_the_grip_ratio_is_low_passed_over_three_tenths_of_a_second():
+    # oracle: spec -- the Task 15 plan and docs/gap-follow.md#adaptive-grip-imu:
+    # the ratio is low-passed with a 0.3 s time constant. Twelve ticks of 0.025 s
+    # is one time constant, so the step response is 1 - exp(-1) of the way there.
+    f = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+    f.update(0.0, 0.025)
+    for _ in range(12):
+        last = f.update(1.0, 0.025)
+    assert last == pytest.approx(1.0 - math.exp(-1.0), abs=1e-9)  # dimensionless
+
+
+def test_low_pass_breaks_its_chain_on_nan_and_restarts_from_the_next_sample():
+    # A NaN is no value. The next finite sample starts the filter afresh, so
+    # nothing from before the gap is blended in.
+    f = gap_logic.LowPass(0.3)
+    f.update(0.0, 0.025)
+    assert math.isnan(f.update(math.nan, 0.025))
+    assert f.update(1.0, 0.025) == 1.0
+
+
+def test_low_pass_reset_forgets_its_value():
+    f = gap_logic.LowPass(0.3)
+    f.update(5.0, 0.025)
+    f.reset()
+    assert f.update(1.0, 0.025) == 1.0
+
+
+def test_low_pass_refuses_a_negative_dt_and_a_non_positive_time_constant():
+    with pytest.raises(ValueError, match='dt'):
+        gap_logic.LowPass(0.3).update(1.0, -0.01)
+    with pytest.raises(ValueError, match='time_constant_s'):
+        gap_logic.LowPass(0.0)
+
+
+# --- AdaptiveGrip: the rise, the cut, and their bounds -----------------------
+
+def test_ten_seconds_of_grip_raises_the_limit_to_the_ceiling_by_the_closed_form():
+    # oracle: closed form -- min(ceiling, base + rise_per_s * t) at t = 10 s.
+    grip = _grip()
+    for _ in range(100):
+        grip.update(1.0, FULL_DEMAND, 0.1)
+    assert grip.limit == pytest.approx(min(3.0, 2.0 + 0.2 * 10.0), abs=1e-9)  # m/s^2
+
+
+def test_two_seconds_of_grip_raises_the_limit_by_the_rate_alone():
+    # oracle: closed form -- 2.0 + 0.2 * 2 = 2.4, below the ceiling, so only
+    # the rate sets it. Keeps the 10 s test above from passing on the ceiling alone.
+    grip = _grip()
+    for _ in range(20):
+        grip.update(1.0, FULL_DEMAND, 0.1)
+    assert grip.limit == pytest.approx(2.4, abs=1e-9)  # m/s^2
+
+
+def test_one_slip_tick_cuts_the_limit_to_cut_factor_of_itself():
+    # oracle: closed form -- 2.8 * 0.85 = 2.38.
+    grip = _grip(limit=2.8)
+    assert grip.update(0.5, FULL_DEMAND, 0.025) == pytest.approx(2.8 * 0.85, abs=1e-12)
+
+
+def test_a_cut_never_takes_the_limit_below_the_base():
+    # oracle: invariant -- the floor. From 2.1 at 0.85 a tick, the limit goes
+    # under 2.0 on the third tick; it must stop at the base instead.
+    grip = _grip(limit=2.1)
+    for _ in range(50):
+        grip.update(0.5, FULL_DEMAND, 0.025)
+    assert grip.limit == 2.0  # m/s^2
+
+
+def test_a_rise_never_takes_the_limit_above_the_ceiling():
+    # oracle: invariant -- the ceiling.
+    grip = _grip(limit=2.9)
+    for _ in range(50):
+        grip.update(1.0, FULL_DEMAND, 0.025)
+    assert grip.limit == 3.0  # m/s^2
+
+
+def test_a_ratio_exactly_at_hold_counts_as_grip():
+    # The hold boundary is inclusive: ratio >= hold_ratio rises.
+    grip = _grip()
+    grip.update(0.95, FULL_DEMAND, 0.1)
+    assert grip.limit == pytest.approx(2.0 + 0.2 * 0.1, abs=1e-12)  # m/s^2
+
+
+def test_a_ratio_just_under_hold_holds_the_limit():
+    grip = _grip()
+    grip.update(0.95 - 1e-9, FULL_DEMAND, 0.1)
+    assert grip.limit == 2.0  # m/s^2
+
+
+def test_a_ratio_exactly_at_slip_is_not_a_slip():
+    # The slip boundary is exclusive: ratio < slip_ratio cuts, equal does not.
+    grip = _grip(limit=2.8)
+    grip.update(0.90, FULL_DEMAND, 0.025)
+    assert grip.limit == 2.8  # m/s^2
+
+
+def test_a_ratio_just_under_slip_is_a_slip():
+    grip = _grip(limit=2.8)
+    grip.update(0.90 - 1e-9, FULL_DEMAND, 0.025)
+    assert grip.limit == pytest.approx(2.8 * 0.85, abs=1e-12)  # m/s^2
+
+
+def test_a_ratio_between_slip_and_hold_holds_the_limit():
+    grip = _grip(limit=2.4)
+    grip.update(0.92, FULL_DEMAND, 0.1)
+    assert grip.limit == 2.4  # m/s^2
+
+
+def test_a_demand_exactly_at_the_judge_fraction_is_judged():
+    # The judge boundary is inclusive: demand == judge_fraction * limit is judged.
+    grip = _grip(limit=2.0)
+    grip.update(1.0, 0.8 * 2.0, 0.1)
+    assert grip.limit == pytest.approx(2.0 + 0.2 * 0.1, abs=1e-12)  # m/s^2
+
+
+def test_a_demand_just_under_the_judge_fraction_is_not_judged():
+    grip = _grip(limit=2.0)
+    grip.update(1.0, 0.8 * 2.0 - 1e-9, 0.1)
+    assert grip.limit == 2.0  # m/s^2
+
+
+def test_low_demand_leaves_the_limit_alone_whatever_the_ratio():
+    # 0.8 * 2.4 = 1.92 m/s^2: at 0.5 the car is not asking the tyres for enough.
+    grip = _grip(limit=2.4)
+    grip.update(1.0, 0.5, 0.1)
+    grip.update(0.5, 0.5, 0.1)
+    assert grip.limit == 2.4  # m/s^2
+
+
+def test_a_nan_ratio_leaves_the_limit_alone():
+    grip = _grip(limit=2.4)
+    grip.update(math.nan, FULL_DEMAND, 0.1)
+    assert grip.limit == 2.4  # m/s^2
+
+
+@pytest.mark.parametrize('demand', [math.nan, math.inf])
+def test_a_non_finite_demand_leaves_the_limit_alone(demand):
+    grip = _grip(limit=2.4)
+    grip.update(1.0, demand, 0.1)
+    assert grip.limit == 2.4  # m/s^2
+
+
+def test_zero_dt_judges_but_moves_nothing_on_a_rise():
+    grip = _grip(limit=2.4)
+    grip.update(1.0, FULL_DEMAND, 0.0)
+    assert grip.limit == 2.4  # m/s^2
+
+
+@pytest.mark.parametrize('dt', [-0.1, math.nan, math.inf])
+def test_a_bad_dt_is_refused(dt):
+    with pytest.raises(ValueError, match='dt'):
+        _grip().update(1.0, FULL_DEMAND, dt)
+
+
+def test_the_limit_starts_at_the_base_unless_told_otherwise():
+    assert _grip().limit == 2.0  # m/s^2
+
+
+@pytest.mark.parametrize('overrides, match', [
+    (dict(ceiling=1.9), 'ceiling'),
+    (dict(slip_ratio=0.95, hold_ratio=0.95), 'slip_ratio'),
+    (dict(slip_ratio=0.96), 'slip_ratio'),
+    (dict(cut_factor=0.0), 'cut_factor'),
+    (dict(cut_factor=1.01), 'cut_factor'),
+    (dict(rise_per_s=-0.1), 'rise_per_s'),
+    (dict(judge_fraction=-0.1), 'judge_fraction'),
+    (dict(limit=3.5), 'limit'),
+    (dict(base=0.0, ceiling=3.0), 'base'),
+    (dict(hold_ratio=math.nan), 'finite'),
+])
+def test_a_band_that_cannot_hold_is_refused(overrides, match):
+    with pytest.raises(ValueError, match=match):
+        _grip(**overrides)
+
+
+# --- AdaptiveGrip: following max_lateral_accel ------------------------------
+
+def test_following_a_new_base_restarts_the_limit_at_it():
+    grip = _grip(limit=2.6)
+    grip.follow_base(2.4, 3.0)
+    assert (grip.base, grip.limit, grip.ceiling) == (2.4, 2.4, 3.0)
+
+
+def test_a_base_above_the_configured_ceiling_lifts_the_ceiling_and_a_lower_base_brings_it_back():
+    grip = _grip()
+    grip.follow_base(3.5, 3.0)
+    assert (grip.ceiling, grip.limit) == (3.5, 3.5)
+    grip.follow_base(2.4, 3.0)
+    assert grip.ceiling == 3.0  # recomputed from the configured ceiling, not kept
+
+
+def test_following_the_same_base_changes_nothing():
+    grip = _grip(limit=2.6)
+    grip.follow_base(2.0, 3.0)
+    assert grip.limit == 2.6  # m/s^2
+
+
+def test_following_a_base_refuses_a_non_positive_value():
+    with pytest.raises(ValueError, match='base'):
+        _grip().follow_base(0.0, 3.0)
+
+
+# --- adaptive_grip_step: the grip ratio judged on a whole tick --------------
+
+def test_a_car_on_the_circle_the_steering_asks_for_rises_by_the_rate_each_tick():
+    # oracle: closed form. On the circle the rack asks for, every tick has
+    # ratio 1.0 and a demand of 2.0 m/s^2 (judged below 2.5). Ten ticks of
+    # 0.1 s give 2.0 + 0.2 * 1.0.
+    steering = math.atan(GRIP_WHEELBASE / 2.0)
+    grip = _grip()
+    ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+    limit = None
+    for _ in range(10):
+        limit = gap_logic.adaptive_grip_step(
+            grip, ratio_filter, _kinematic_yaw(2.0, steering), 2.0, steering,
+            GRIP_WHEELBASE, 0.1)
+    assert limit == pytest.approx(2.0 + 0.2 * 1.0, abs=1e-9)  # m/s^2
+
+
+def test_a_tick_with_no_judgement_makes_none_and_restarts_the_filter():
+    # Below 1 m/s the ratio is NaN, so the limit holds and the filter forgets.
+    steering = math.atan(GRIP_WHEELBASE / 2.0)
+    grip = _grip(limit=2.2)
+    ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
+    ratio_filter.update(0.4, 0.1)
+    limit = gap_logic.adaptive_grip_step(
+        grip, ratio_filter, 0.4, 0.5, steering, GRIP_WHEELBASE, 0.1)
+    assert limit == 2.2  # m/s^2
+    assert ratio_filter.value is None

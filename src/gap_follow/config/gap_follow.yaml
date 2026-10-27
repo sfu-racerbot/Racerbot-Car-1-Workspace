@@ -177,6 +177,23 @@ gap_follow_node:
     imu_topic: /imu/data
     imu_status_topic: /imu/status
     imu_timeout_sec: 0.1
+    # --- Adaptive grip from the gyro (docs/gap-follow.md#adaptive-grip-imu) ---
+    # Ships OFF. When on, the lateral limit behind the curvature speed caps
+    # starts at max_lateral_accel. The gyro's grip ratio (about 1.0 when the
+    # tyres make the turn the rack asks for) is averaged over 0.3 s, then: at or
+    # above adaptive_grip_hold_ratio the limit rises by adaptive_grip_rise_per_s
+    # up to adaptive_grip_ceiling; below adaptive_grip_slip_ratio (sliding) it is
+    # cut to adaptive_grip_cut_factor of itself, never below max_lateral_accel.
+    # A tick where the car asks for less than adaptive_grip_judge_fraction of the
+    # limit is not judged. Turn it on with gap_follow_launch.py adaptive_grip:=true.
+    # Not yet run in the simulator or on the car (docs/gap-follow.md#adaptive-grip-imu).
+    enable_adaptive_grip: false
+    adaptive_grip_ceiling: 3.0
+    adaptive_grip_rise_per_s: 0.2
+    adaptive_grip_cut_factor: 0.85
+    adaptive_grip_hold_ratio: 0.95
+    adaptive_grip_slip_ratio: 0.90
+    adaptive_grip_judge_fraction: 0.8
     # --- Rectangular vehicle footprint ---
     # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
     # published figures the earlier values came from:

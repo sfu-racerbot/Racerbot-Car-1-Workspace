@@ -83,6 +83,18 @@ class GapFollowNode(Node):
         self.declare_parameter('imu_topic', '/imu/data')
         self.declare_parameter('imu_status_topic', '/imu/status')
         self.declare_parameter('imu_timeout_sec', 0.1)
+        # Adaptive grip (docs/gap-follow.md#adaptive-grip-imu): the lateral limit
+        # behind the curvature speed caps starts at max_lateral_accel, rises while
+        # the gyro says the tyres are making the turn the rack asks for, and is
+        # cut when they are not. Ships OFF. It trusts the gyro through the same
+        # gate as steering damping (_imu_gate).
+        self.declare_parameter('enable_adaptive_grip', False)
+        self.declare_parameter('adaptive_grip_ceiling', 3.0)
+        self.declare_parameter('adaptive_grip_rise_per_s', 0.2)
+        self.declare_parameter('adaptive_grip_cut_factor', 0.85)
+        self.declare_parameter('adaptive_grip_hold_ratio', 0.95)
+        self.declare_parameter('adaptive_grip_slip_ratio', 0.90)
+        self.declare_parameter('adaptive_grip_judge_fraction', 0.8)
         # Padded collision envelope around this car's rear-axle base_link.
         # wheelbase, laser_offset_x and the 0.30 m the car measures over the
         # tires were tape-measured 2026-08-24; car_width is that 0.30 m plus
@@ -348,6 +360,20 @@ class GapFollowNode(Node):
         self.imu_topic = self.get_parameter('imu_topic').value
         self.imu_status_topic = self.get_parameter('imu_status_topic').value
         self.imu_timeout_sec = float(self.get_parameter('imu_timeout_sec').value)
+        self.enable_adaptive_grip = bool(
+            self.get_parameter('enable_adaptive_grip').value)
+        self.adaptive_grip_ceiling = float(
+            self.get_parameter('adaptive_grip_ceiling').value)
+        self.adaptive_grip_rise_per_s = float(
+            self.get_parameter('adaptive_grip_rise_per_s').value)
+        self.adaptive_grip_cut_factor = float(
+            self.get_parameter('adaptive_grip_cut_factor').value)
+        self.adaptive_grip_hold_ratio = float(
+            self.get_parameter('adaptive_grip_hold_ratio').value)
+        self.adaptive_grip_slip_ratio = float(
+            self.get_parameter('adaptive_grip_slip_ratio').value)
+        self.adaptive_grip_judge_fraction = float(
+            self.get_parameter('adaptive_grip_judge_fraction').value)
         self.car_width = float(self.get_parameter('car_width').value)
         self.car_length = float(self.get_parameter('car_length').value)
         self.wheelbase = float(self.get_parameter('wheelbase').value)
@@ -539,6 +565,28 @@ class GapFollowNode(Node):
                 'steering_damping_gain must be finite and non-negative (seconds)')
         if not (math.isfinite(self.imu_timeout_sec) and self.imu_timeout_sec > 0.0):
             raise ValueError('imu_timeout_sec must be finite and positive')
+        # Checked with the feature off as well, like steering_damping_gain: a
+        # broken value must not wait for someone to switch the feature on.
+        if not (math.isfinite(self.adaptive_grip_ceiling)
+                and self.adaptive_grip_ceiling > 0.0):
+            raise ValueError('adaptive_grip_ceiling must be finite and positive')
+        if not (math.isfinite(self.adaptive_grip_rise_per_s)
+                and self.adaptive_grip_rise_per_s >= 0.0):
+            raise ValueError(
+                'adaptive_grip_rise_per_s must be finite and non-negative')
+        if not (math.isfinite(self.adaptive_grip_cut_factor)
+                and 0.0 < self.adaptive_grip_cut_factor <= 1.0):
+            raise ValueError('adaptive_grip_cut_factor must be in (0, 1]')
+        if not (math.isfinite(self.adaptive_grip_hold_ratio)
+                and math.isfinite(self.adaptive_grip_slip_ratio)
+                and self.adaptive_grip_slip_ratio < self.adaptive_grip_hold_ratio):
+            raise ValueError(
+                'adaptive_grip_slip_ratio must be finite and below '
+                'adaptive_grip_hold_ratio, or the two bands overlap')
+        if not (math.isfinite(self.adaptive_grip_judge_fraction)
+                and self.adaptive_grip_judge_fraction >= 0.0):
+            raise ValueError(
+                'adaptive_grip_judge_fraction must be finite and non-negative')
         if not (math.isfinite(self.gap_switch_margin) and self.gap_switch_margin >= 1.0):
             raise ValueError(
                 'gap_switch_margin must be finite and at least 1.0 -- below that, a '
@@ -618,6 +666,18 @@ class GapFollowNode(Node):
         self.imu_yaw_rate = math.nan
         self.last_imu_time = None
         self.imu_state = None
+        # Adaptive grip: the lateral limit and the low-pass on its ratio. Built
+        # even with the feature off, so its checks always run, and read only
+        # when it is on. Its base follows max_lateral_accel, which is live-tunable.
+        self.adaptive_grip = gap_logic.AdaptiveGrip(
+            base=self.max_lateral_accel,
+            ceiling=max(self.adaptive_grip_ceiling, self.max_lateral_accel),
+            rise_per_s=self.adaptive_grip_rise_per_s,
+            cut_factor=self.adaptive_grip_cut_factor,
+            hold_ratio=self.adaptive_grip_hold_ratio,
+            slip_ratio=self.adaptive_grip_slip_ratio,
+            judge_fraction=self.adaptive_grip_judge_fraction)
+        self.grip_ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
         self.current_speed = 0.0
         self.last_odom_time = None
         self.last_commanded_speed = 0.0
@@ -695,9 +755,9 @@ class GapFollowNode(Node):
             Odometry, self.odom_topic, self.odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
-        # Subscribed only when steering damping is on, so with it off the node's
-        # ROS graph is exactly what it was before the feature existed.
-        if self.enable_steering_damping:
+        # Subscribed only when a gyro feature is on, so with both off the node's
+        # ROS graph is exactly what it was before those features existed.
+        if self.enable_steering_damping or self.enable_adaptive_grip:
             self.imu_sub = self.create_subscription(
                 Imu, self.imu_topic, self.imu_callback, 10)
             self.imu_status_sub = self.create_subscription(
@@ -764,31 +824,73 @@ class GapFollowNode(Node):
             state = None
         self.imu_state = state if isinstance(state, str) else None
 
+    def _imu_gate(self):
+        """The gyro's verdict for this tick: (yaw rate, None) while it can be
+        trusted, otherwise (None, why).
+
+        The gyro is trusted only while /imu/status says 'ok' and the latest
+        /imu/data arrived within imu_timeout_sec. Steering damping and the
+        adaptive grip both call this, so they cannot disagree about whether
+        the gyro is usable (docs/gap-follow.md#steering-damping-gyro).
+        """
+        if self.last_imu_time is None:
+            return None, 'no imu'
+        age_sec = (self.get_clock().now() - self.last_imu_time).nanoseconds / 1e9
+        if not age_sec < self.imu_timeout_sec:
+            return None, 'imu stale'
+        if self.imu_state is None:
+            return None, 'no imu'
+        if self.imu_state == 'waiting':
+            return None, 'imu waiting'
+        if self.imu_state != 'ok':
+            return None, 'imu fault'
+        if not math.isfinite(self.imu_yaw_rate):
+            return None, 'imu yaw not finite'
+        return self.imu_yaw_rate, None
+
     def _steering_damping_term(self):
         """This tick's steering damping in radians, and -- when the feature is
         on but the gyro cannot be trusted -- the reason it is zero.
 
-        The gyro is trusted only while /imu/status says 'ok' and the latest
-        /imu/data arrived within imu_timeout_sec. Any other state adds exactly
-        zero, which is what the node commands with the feature off
-        (docs/gap-follow.md#steering-damping-gyro).
+        Any untrusted gyro adds exactly zero, which is what the node commands
+        with the feature off (docs/gap-follow.md#steering-damping-gyro).
         """
         if not self.enable_steering_damping:
             return 0.0, None
-        if self.last_imu_time is None:
-            return 0.0, 'no imu'
-        age_sec = (self.get_clock().now() - self.last_imu_time).nanoseconds / 1e9
-        if not age_sec < self.imu_timeout_sec:
-            return 0.0, 'imu stale'
-        if self.imu_state is None:
-            return 0.0, 'no imu'
-        if self.imu_state == 'waiting':
-            return 0.0, 'imu waiting'
-        if self.imu_state != 'ok':
-            return 0.0, 'imu fault'
-        if not math.isfinite(self.imu_yaw_rate):
-            return 0.0, 'imu yaw not finite'
-        return gap_logic.steering_damping(self.imu_yaw_rate, self.steering_damping_gain), None
+        yaw_rate, why = self._imu_gate()
+        if why is not None:
+            return 0.0, why
+        return gap_logic.steering_damping(yaw_rate, self.steering_damping_gain), None
+
+    def _lateral_limit(self, steering: float, dt: float):
+        """This tick's lateral-acceleration limit for the curvature speed caps,
+        and -- when the feature is on but the gyro cannot be trusted -- the
+        reason the limit is the plain max_lateral_accel
+        (docs/gap-follow.md#adaptive-grip-imu).
+
+        With the feature off this returns max_lateral_accel and touches no
+        state, so the node is exactly what it was before the feature existed.
+        With it on and the gyro trusted, the limit is judged from the grip ratio.
+        An untrusted gyro restarts the limit at the base.
+        """
+        if not self.enable_adaptive_grip:
+            return self.max_lateral_accel, None
+        grip = self.adaptive_grip
+        # max_lateral_accel is live-tunable and is the floor, so follow it.
+        grip.follow_base(self.max_lateral_accel, self.adaptive_grip_ceiling)
+        yaw_rate, why = self._imu_gate()
+        if why is not None:
+            grip.limit = grip.base
+            self.grip_ratio_filter.reset()
+            return grip.limit, why
+        # Measured speed, not the speed basis: the lateral acceleration is made
+        # from the speed the car has. Stale odometry gives no judgement, so the
+        # limit holds; only an untrusted gyro restarts it at the base.
+        speed = self.current_speed if self._odom_fresh() else math.nan
+        limit = gap_logic.adaptive_grip_step(
+            grip, self.grip_ratio_filter, yaw_rate, speed, steering,
+            self.wheelbase, dt)
+        return limit, None
 
     def _odom_fresh(self) -> bool:
         if self.last_odom_time is None or not math.isfinite(self.current_speed):
@@ -1281,6 +1383,9 @@ class GapFollowNode(Node):
             self.max_steering_rate,
         )
         self.steering_basis = steering_angle
+        # The lateral limit both curvature caps below use: max_lateral_accel,
+        # or the adaptive grip's judged limit (docs/gap-follow.md#adaptive-grip-imu).
+        lateral_limit, grip_off = self._lateral_limit(steering_angle, command_dt)
 
         # Use the clipped requested curvature for the lateral-acceleration
         # ceiling, so speed falls before the rate-limited rack reaches a newly
@@ -1289,7 +1394,7 @@ class GapFollowNode(Node):
         # command immediately.
         limited_curvature = math.tan(desired_steering) / self.wheelbase
         curve_speed = gap_logic.curvature_speed_limit(
-            limited_curvature, self.max_lateral_accel, self.max_speed)
+            limited_curvature, lateral_limit, self.max_speed)
         normal_speed = max(self.min_speed, curve_speed)
 
         # Cornering anticipation: an *earlier* look at the same curvature
@@ -1318,7 +1423,7 @@ class GapFollowNode(Node):
             ))
             anticipated_curvature = math.tan(anticipated_steering) / self.wheelbase
             anticipated_speed = gap_logic.curvature_speed_limit(
-                anticipated_curvature, self.max_lateral_accel, self.max_speed)
+                anticipated_curvature, lateral_limit, self.max_speed)
 
         # The braking ceiling's clearance. With swept-path clearance on, it is
         # how far the body can drive along the arc it is on -- checked for both
@@ -1434,6 +1539,14 @@ class GapFollowNode(Node):
                 f"{self.imu_yaw_rate:+.3f}rad/s)")
         else:
             damping_text = ""
+        # The same rule for the adaptive grip: named while it is on, with the
+        # reason the limit is the plain base, and empty when it is off.
+        if grip_off is not None:
+            grip_text = f", adaptive_grip_off: {grip_off}"
+        elif self.enable_adaptive_grip:
+            grip_text = f", adaptive grip limit {lateral_limit:.2f}m/s^2"
+        else:
+            grip_text = ""
         guard_text = (
             f", arc guard {requested_steering:+.3f}->{desired_steering:+.3f}rad "
             f"(requested arc blocked)"
@@ -1489,7 +1602,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{guard_text}{steering_shape_text}{speed_shape_text}")
+            f"{damping_text}{grip_text}{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
         # Every speed ceiling that competed for this tick, so the dashboard

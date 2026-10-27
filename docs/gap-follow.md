@@ -25,6 +25,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 12. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
 13. [Keeping the mirror honest](#keeping-the-mirror-honest)
 14. [Steering damping (gyro)](#steering-damping-gyro)
+15. [Adaptive grip (IMU)](#adaptive-grip-imu)
 
 ## Highlights
 
@@ -139,6 +140,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
 | `enable_steering_damping` | `false` | No gyro term: the steering is what it was before 2026-10-27. Turn it on with `steering_damping:=true`, which also starts the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
+| `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
@@ -540,6 +542,90 @@ Do these in order, as in [Validation](#validation). Each step needs the one befo
 `tools/f1tenth_sim/gap_mirror.py` has the same term, and `test_gap_mirror_parity.py` checks it against the node. `tools/f1tenth_sim/eval_gap.py --set enable_steering_damping=true` runs it on the simulated tracks. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay, so a gain that helps there may help less on the car.
 
 TODO(verify): the simulator's result for the gain sweep (`steering_damping_gain` at 0.04, 0.07 and 0.10) is not written in this doc yet.
+
+## Adaptive grip (IMU)
+
+> **Who this is for:** anyone turning on the adaptive grip, or checking what it does on the car.
+> **Read first:** [Safety](#safety) and [Validation](#validation). This changes how fast the car can take a corner, so the same order applies: wheels off first, then low speed.
+> **You'll be able to:** turn it on, tell when it is working, and know what it falls back to.
+> **Time:** 10 minutes to read, plus the car checks.
+
+Adaptive grip is **off by default**. It lets the car take corners a little faster while the gyro says the tires are holding. It backs off when they start to slide.
+
+### What it does, in plain words
+
+Every corner has a sideways limit: how hard the tires can push the car before it slides. The node uses a number for that limit, `max_lateral_accel`, which is 2.5 m/s² (metres per second squared) in the shipped config. The speed cap for a corner comes from that number.
+
+The gyro measures the car's *yaw rate*, how fast the car is turning. The node compares that with the turn the steering asks for. The result is the **grip ratio**. A ratio of 1.0 means the tires are making the turn the steering asks for. A ratio below 1.0 means the car is turning less than asked, which is what sliding looks like.
+
+While the ratio stays at or above 0.95, the limit rises by 0.2 m/s² each second, up to 3.0 m/s². When the ratio falls below 0.90, the limit is cut to 85% of itself. It never goes below `max_lateral_accel`.
+
+Three details stop it from reacting to noise:
+
+- The ratio is smoothed over about 0.3 seconds, so one odd reading cannot cut the limit.
+- The node judges the tires only when the steering asks for at least 80% of the current limit. On a gentle bend the car is not pushing the tires, so a slide would tell it nothing.
+- On a straight, or below 1 m/s, nothing is judged. The limit holds where it is.
+
+### What it never does
+
+It never stops the car. The LB deadman, the time-to-collision brake and the emergency stops work as before. Hold LB as always. Let go and the car stops, with or without this feature.
+
+It can let the car take corners faster than `max_lateral_accel` allows. That is the whole point, and it is why the feature ships off and why the car test order below matters.
+
+### Turning it on
+
+**Terminal 1** — hardware, as in [Steering damping](#steering-damping-gyro):
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+ros2 launch f1tenth_stack bringup_launch.py
+```
+
+**Working when:** the motor controller (VESC) and the LiDAR come up. This never moves the car by itself.
+
+**Terminal 2** — `gap_follow` with its IMU stack:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+ros2 launch gap_follow gap_follow_launch.py adaptive_grip:=true
+```
+
+**Working when:** the decision lines name an `adaptive grip limit` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
+
+The two gyro features can run together: `steering_damping:=true adaptive_grip:=true` starts the IMU stack once. Do not also run `map_course`, and do not run `teleop_launch.py` beside it. Both are the same warnings as in [Steering damping](#steering-damping-gyro).
+
+### What it falls back to
+
+Whenever the gyro cannot be trusted, the limit goes back to `max_lateral_accel`, and the ratio smoothing starts again. The car then corners exactly as it does with the feature off, and it keeps driving. The reason appears in the decision log, and as `adaptive_grip_off: <reason>` on `/drive_intent`. The reasons are the same as for steering damping:
+
+| Reason | What it means | What to do |
+|---|---|---|
+| `imu waiting` | The IMU is still starting: its gyro bias is not removed yet, or the gravity check has not run. | Keep the car still for about 3 seconds. |
+| `imu fault` | The IMU reports a fault: all six readings zero, a non-finite value, a failed gravity check, or no sample for too long. | Read `/imu/status`. See [the imu_bridge README](../src/imu_bridge/README.md). |
+| `imu stale` | The newest gyro sample is older than `imu_timeout_sec` (0.1 s). | The IMU stream has stopped. Check the imu_bridge output. |
+| `no imu` | The node has never received a sample or a status. | Check that the IMU stack is running. |
+| `imu yaw not finite` | A NaN or infinite yaw rate arrived with status `ok`. The bridge should report a fault first, so this points at the bridge. | Stop, and look at `/imu/data`. |
+
+One more case gives no reason, because it is not a gyro fault. If the wheel speed on `/odom` goes stale, the limit holds where it is. Nothing is judged, and the limit is not reset. The time-to-collision brake still stops the car on stale odometry, when it is on.
+
+### The car test order
+
+Do these in order, as in [Validation](#validation). Each step needs the one before it.
+
+1. **Fallback check, wheels off the ground.** Start the launch with the car on a stand, and keep it still. The decision lines should say `adaptive_grip_off: imu waiting` for about 3 seconds, and then `adaptive grip limit 2.50m/s^2`. That is the base, unchanged.
+2. **Low speed does nothing, on purpose.** The node judges only when the sideways push the steering asks for reaches 80% of the limit. That push grows with speed squared, so with the shipped 2.5 m/s²:
+   - at the 0.33 rad steering limit, judging starts at about 1.45 m/s;
+   - at 0.2 rad, it starts at about 1.9 m/s;
+   - at 1 m/s, the limit never moves.
+
+   A low-speed run therefore shows nothing. That is correct.
+3. **Floor, about 2 m/s, open space.** Start with `max_speed:=2.0` added to the launch command, and drive one corner with LB held and someone ready to let go. The limit should stay near 2.5 while the car grips. It should drop if the car slides. If the car feels loose, or the limit keeps falling, let go of LB and restart with `adaptive_grip:=false`.
+
+### What the simulator says
+
+TODO(verify): the simulator's results for the adaptive grip are not written in this doc yet. The controller's solo and head-to-head runs will fill this in.
+
+`tools/f1tenth_sim/gap_mirror.py` has the same rule, and `test_gap_mirror_parity.py` checks it against the node. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay. So the car may do worse than the simulator says.
 
 ## See also
 

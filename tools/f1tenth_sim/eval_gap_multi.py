@@ -188,7 +188,11 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
         for k, ctrl in enumerate(ctrls):
             ego = obs[f"agent_{k}"]
             state = np.asarray(ego["std_state"], dtype=float)
-            steer, speed = ctrl.command(ego["scan"], float(state[3]), step)
+            # The gym's true yaw rate (std_state[5]). The mirror reads it only
+            # with steering damping or the adaptive grip on, so with both off
+            # this changes nothing.
+            steer, speed = ctrl.command(ego["scan"], float(state[3]), step,
+                                        yaw_rate=float(state[5]))
             st = stats[k]
             st["ticks"] += 1
             st["speed_sum"] += speed
