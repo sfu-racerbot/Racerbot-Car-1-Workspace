@@ -37,17 +37,18 @@ def generate_launch_description():
         'max_speed', default_value='',
         description='Top speed for this run (m/s), up to 5.0: e.g. 1.0 for '
                     'a first floor test, 5.0 for a fast straight. Empty: '
-                    'gap_follow.yaml\'s max_speed. Refused above 5.0. Below '
+                    'gap_follow.yaml\'s max_speed (5.0 on car 1). Refused above 5.0. Below '
                     'the YAML value, min_speed, corner_speed and '
                     'corner_speed_wide are lowered with it; above it, only '
                     'max_speed rises.')
 
     steering_damping_arg = DeclareLaunchArgument(
-        'steering_damping', default_value='false',
-        description='true: steer against the car\'s own rotation, using the gyro yaw '
-                    'rate in /imu/data. Starts imu_bridge\'s vehicle_state_launch.py '
-                    '(the IMU stack). Ships off; simulator-validated only, not yet run '
-                    'on the floor (docs/gap-follow.md#steering-damping-gyro).')
+        'steering_damping', default_value='true',
+        description='true (the default since 2026-10-27): steer against the car\'s own '
+                    'rotation, using the gyro yaw rate in /imu/data. Starts imu_bridge\'s '
+                    'vehicle_state_launch.py (the IMU stack). false turns it off. '
+                    'Simulator-validated only, not yet run on the floor '
+                    '(docs/gap-follow.md#steering-damping-gyro).')
     adaptive_grip_arg = DeclareLaunchArgument(
         'adaptive_grip', default_value='false',
         description='true: raise or cut the lateral limit behind the corner speed '

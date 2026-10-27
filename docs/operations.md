@@ -265,7 +265,7 @@ The deadman behavior is **required, not optional** — see [writing-your-own-nod
 
 Its parameters — speed limits, steering limits, safety bubble radius, emergency stop distance, `deadman_button`, `joy_timeout_sec`, `enable_deadman` — live in `src/gap_follow/config/gap_follow.yaml`.
 
-Defaults are deliberately conservative (`max_speed: 2.5` m/s). Raise them gradually rather than all at once, and re-test with the wheels off the ground after every change.
+The shipped defaults are the race defaults of 2026-10-27 (`max_speed: 5.0` m/s), not conservative ones ([race defaults](gap-follow.md#race-defaults-2026-10-27)). For a slower first run, pass `max_speed:=` on the launch line. Re-test with the wheels off the ground after every change.
 
 ## Racing with the pure-pursuit stack
 

@@ -43,7 +43,9 @@ def test_true_turns_the_grip_on_and_starts_the_imu_stack():
 
 
 def test_false_keeps_the_grip_off_and_starts_no_imu_stack():
-    nodes, includes, ctx = _launch()
+    # Damping ships on (2026-10-27), and it starts the IMU stack too, so both
+    # switches are pinned off here: only then does "no IMU stack" hold.
+    nodes, includes, ctx = _launch(steering_damping='false')
     assert _node_params(_gap_node(nodes), ctx)['enable_adaptive_grip'] is False
     assert includes == []
 

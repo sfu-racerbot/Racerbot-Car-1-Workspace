@@ -5,7 +5,8 @@ _flag() that file copies from racerbot_launch's map_course_launch.py: 'true'
 or '1' for on, 'false' or '0' for off, and anything else refused before
 anything starts. true also starts imu_bridge's vehicle_state_launch.py (the
 IMU stack that publishes /imu/data and /imu/status) and sets
-enable_steering_damping on the node. false does neither, and is the default.
+enable_steering_damping on the node. false does neither. true is the default
+since 2026-10-27 (the race defaults), so a bare launch starts the IMU stack.
 
 Nothing is started: the launch description is built, and its node-building
 step is evaluated with launch's own LaunchContext. Needs ROS sourced and the
@@ -76,12 +77,12 @@ def _gap_node(nodes):
     return gap[0]
 
 
-def test_the_argument_defaults_to_false():
-    # oracle: spec -- docs/gap-follow.md#steering-damping-gyro: the feature ships off.
+def test_the_argument_defaults_to_true():
+    # oracle: spec -- docs/gap-follow.md#race-defaults-2026-10-27: damping ships on.
     ld = gl.generate_launch_description()
     defaults = {e.name: ''.join(s.perform(LaunchContext()) for s in e.default_value)
                 for e in ld.entities if isinstance(e, DeclareLaunchArgument)}
-    assert defaults['steering_damping'] == 'false'
+    assert defaults['steering_damping'] == 'true'
 
 
 def test_true_turns_damping_on_and_starts_the_imu_stack():
@@ -91,8 +92,16 @@ def test_true_turns_damping_on_and_starts_the_imu_stack():
     assert includes[0].launch_description_source.location.endswith('/vehicle_state_launch.py')
 
 
-def test_false_keeps_damping_off_and_starts_no_imu_stack():
+def test_the_shipped_default_turns_damping_on_and_starts_the_imu_stack():
+    # Bare launch, no argument: what the car runs by default since 2026-10-27.
     nodes, includes, ctx = _launch()
+    assert _node_params(_gap_node(nodes), ctx)['enable_steering_damping'] is True
+    assert len(includes) == 1
+    assert includes[0].launch_description_source.location.endswith('/vehicle_state_launch.py')
+
+
+def test_false_keeps_damping_off_and_starts_no_imu_stack():
+    nodes, includes, ctx = _launch(steering_damping='false')
     assert _node_params(_gap_node(nodes), ctx)['enable_steering_damping'] is False
     assert includes == []
 

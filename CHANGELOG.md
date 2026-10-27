@@ -6,7 +6,31 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-24 (latest) — Gyro odometry for SLAM; every mapping run recorded and explained
+## 2026-10-27 (latest) — gap_follow race defaults (not yet driven on the car)
+
+Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated only: **not yet driven on the car.** The numbers, and how to go back, are in `docs/gap-follow.md#race-defaults-2026-10-27`.
+
+### gap_follow
+
+- **Changed shipped defaults** (`config/gap_follow.yaml`; the launch arguments follow):
+  - `max_speed` 3.5 → 5.0. `min_speed` 1.0 → 1.429, `corner_speed` 1.5 → 2.143, `corner_speed_wide` 1.9 → 2.714, `narrow_corridor_speed` 2.5 → 3.571 (scaled by 5.0/3.5).
+  - `max_acceleration` 3.0 → 5.0. This is the speed ramp, never braking.
+  - `enable_steering_damping` false → true, and `steering_damping_gain` 0.03 → 0.10 s. The `steering_damping` launch argument now defaults to `true`, so a bare launch starts the IMU stack. Without a healthy IMU the term adds exactly zero.
+  - `enable_corner_setup` true → false.
+  - Unchanged: `enable_adaptive_grip` (still off), `max_lateral_accel` (2.5), `max_braking_decel` (3.0), the deadman, the time-to-collision brake and the clearance stops.
+- **Live tuning:** `corner_speed` range 0.1–2.0 → 0.1–2.85 (2.0 × 5.0/3.5), so the shipped value sits inside the panel's range.
+- **Comment fix:** the YAML header and `src/gap_follow/README.md` said `max_acceleration` is the braking the car assumes. That is `max_braking_decel`.
+- **Tests:** `test_race_defaults.py` (new, 7 tests, runs unsourced) pins the table. The old-default tests that changed are listed in the commit message.
+
+### racerbot_launch
+
+- `map_course` and the other mapping launches read the same YAML. Unless `mapping_max_speed:=` is given, mapping laps now run at up to 5.0 m/s.
+
+### Needs on-car validation
+
+- All of the above. Order: wheels off, then the floor at `max_speed:=1.0`. Check the IMU with `ros2 topic echo /imu/status --once` before the first run with steering damping on.
+
+## 2026-10-24 — Gyro odometry for SLAM; every mapping run recorded and explained
 
 For the first IMU mapping test (A/B, `docs/launchstart.md#testing-the-imu-in-mapping-ab`).
 Built and checked off the car: **not yet driven on.**

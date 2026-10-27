@@ -70,7 +70,9 @@ def _command(params, yaw_rate=None):
 
 
 def _off():
-    return _tuned(gap_mirror.node_params())
+    # Pinned off explicitly: the shipped YAML turns steering damping on since
+    # 2026-10-27, and "off" has to mean off for the comparisons that use it.
+    return _tuned(dict(gap_mirror.node_params(), enable_steering_damping=False))
 
 
 def _on(gain=GAIN):

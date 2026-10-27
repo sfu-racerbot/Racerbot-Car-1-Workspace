@@ -12,20 +12,21 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 ## Contents
 
 1. [Highlights](#highlights)
-2. [What changed, in plain words](#what-changed-in-plain-words)
-3. [Safety](#safety)
-4. [Validation](#validation) — the order to bring it up on the car
-5. [Turning a feature off](#turning-a-feature-off)
-6. [The 2026-10-19 run](#the-2026-10-19-run) — why the car braked, and what changed
-7. [Checking it in the simulator](#checking-it-in-the-simulator)
-8. [Swept-path clearance](#swept-path-clearance)
-9. [Arc guard](#arc-guard)
-10. [Corner setup](#corner-setup)
-11. [Measured results](#measured-results)
-12. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
-13. [Keeping the mirror honest](#keeping-the-mirror-honest)
-14. [Steering damping (gyro)](#steering-damping-gyro)
-15. [Adaptive grip (IMU)](#adaptive-grip-imu)
+2. [Race defaults (2026-10-27)](#race-defaults-2026-10-27) — what changed, the evidence, and how to go back
+3. [What changed, in plain words](#what-changed-in-plain-words)
+4. [Safety](#safety)
+5. [Validation](#validation) — the order to bring it up on the car
+6. [Turning a feature off](#turning-a-feature-off)
+7. [The 2026-10-19 run](#the-2026-10-19-run) — why the car braked, and what changed
+8. [Checking it in the simulator](#checking-it-in-the-simulator)
+9. [Swept-path clearance](#swept-path-clearance)
+10. [Arc guard](#arc-guard)
+11. [Corner setup](#corner-setup)
+12. [Measured results](#measured-results)
+13. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
+14. [Keeping the mirror honest](#keeping-the-mirror-honest)
+15. [Steering damping (gyro)](#steering-damping-gyro)
+16. [Adaptive grip (IMU)](#adaptive-grip-imu)
 
 ## Highlights
 
@@ -44,6 +45,65 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 **Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, then to 2.5 m/s² on 2026-10-26.
 
 The 2.5 step rests on a map run's grip reading (`20261026-194514`). That run was driven at a 2.0 ceiling, so no run has yet used 2.5 on the floor. The 2026-10-19 floor run and that map run disagree on grip above 2.0 m/s². [The 2026-10-19 run](#the-2026-10-19-run) has both readings.
+
+## Race defaults (2026-10-27)
+
+> **Who this is for:** anyone about to run `gap_follow` on the car, or quoting a number from its simulator runs.
+> **Read first:** [Validation](#validation). The new defaults are a speed increase, so the same order applies.
+> **You'll be able to:** say what changed on 2026-10-27, read the evidence, and go back to the old setup.
+> **Time:** 10 minutes.
+
+The team asked for a faster `gap_follow` with less weave, one that can win races. The shipped setup changed to the one that was fastest in the simulator with no wall contact. **Nothing has been driven on the car at these values yet.**
+
+### What changed
+
+- **Top speed 3.5 → 5.0 m/s** (`max_speed`). A launch can still lower it, for example `max_speed:=1.0` for a first floor run. A launch cannot raise it above 5.0.
+- **The speeds tied to the top speed, scaled by 5.0 / 3.5:** `min_speed` 1.0 → 1.429, `corner_speed` 1.5 → 2.143, `corner_speed_wide` 1.9 → 2.714, `narrow_corridor_speed` 2.5 → 3.571. A lower `max_speed:=` also lowers `min_speed`, `corner_speed` and `corner_speed_wide`.
+- **Steering damping on** (`enable_steering_damping: true`), gain 0.03 → 0.10 s. It starts the IMU stack, the sensor that reads the car's turn rate. Without a healthy IMU it adds exactly zero.
+- **Corner setup off** (`enable_corner_setup: false`). Its values are kept.
+- **Speed ramp 3.0 → 5.0 m/s²** (`max_acceleration`). It limits how fast a speed command may rise. It never limits braking.
+
+Left alone on purpose: the LB hold ([deadman](glossary.md#deadman)), the time-to-collision brake, and the emergency and forward clearance stops. Also unchanged are `max_braking_decel` (3.0 m/s²), `max_lateral_accel` (2.5 m/s²) and `max_steering_angle` (0.33 rad). Adaptive grip still ships off.
+
+### The evidence
+
+These are simulator runs with `tools/f1tenth_sim/eval_gap.py` on the indoor layouts and car 1's course (`car1_course_2026_10_26`). Each row is 24 runs: both directions, with seeds 12345 and 12346. Every run in every row finished one lap with no wall contact, and every row had 48 stop ticks in total.
+
+| Setting | Mean lap, 24 runs | Car 1 course lap, 4 runs | Steering reversals per second, mean | Car 1 reversals per second |
+|---|---|---|---|---|
+| Before: the 2026-10-26 setup | 15.04 s | 14.00 s | 0.85 | 1.13 |
+| Damping 0.10, corner setup off, speed ramp 5.0 | 13.58 s | 12.55 s | 0.60 | 0.54 |
+| **Shipped now:** the same, plus top speed 5.0 and the scaled speeds | **12.26 s** | **12.40 s** | 0.65 | 0.49 |
+
+The "before" row is the same protocol, with the old values passed to `eval_gap.py` as `--set` overrides:
+
+- `max_speed=3.5`, `min_speed=1.0`, `corner_speed=1.5`, `corner_speed_wide=1.9`, `narrow_corridor_speed=2.5`
+- `max_acceleration=3.0`, `enable_steering_damping=false`, `enable_corner_setup=true`
+
+### What this evidence does not show
+
+- It is the simulator only. The simulated car is close to this one, not the same. The first floor runs will show what the model misses.
+- The simulator gives the controller the gym's true turn rate, with no sensor noise and no delay. The real gyro has both, so steering damping is less tested than the table suggests.
+- Steering damping also resists a steady turn. For the same gap bearing, the steady steering is `1 / (1 + gain × speed / wheelbase)` of what it would be without the term, about two thirds at 2 m/s. Watch for the car running wide through a corner.
+- The corner cap, where `corner_speed` and `corner_speed_wide` act, never set the speed in these runs. On the car it set the speed on about 80% of the driving ticks in the 2026-08-06 run, so the scaled corner speeds are the least tested part of this change.
+- The car's speed loop already lags a 3.0 m/s² ramp (measured 2026-10-27), so on the car the 5.0 ramp mostly removes a software limit. VESC tuning is a team note in [the plan](superpowers/specs/2026-10-26-slam-and-gap-follow-plan.md).
+
+### Going back
+
+- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term and the IMU stack off. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
+- **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
+  - `enable_steering_damping: false`, `steering_damping_gain: 0.03` and `enable_corner_setup: true`.
+  - `max_speed: 3.5`, `min_speed: 1.0`, `corner_speed: 1.5`, `corner_speed_wide: 1.9`, `narrow_corridor_speed: 2.5` and `max_acceleration: 3.0`.
+- Only `max_speed`, `steering_damping`, `adaptive_grip` and `opponent_awareness` are launch arguments. The other settings need the file.
+
+### Other launches that read the same file
+
+- `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
+- `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does, so do not run the two together.
+
+### Before the first run on the car
+
+Follow [Validation](#validation) exactly: wheels off with the stack up, then the floor. On the floor, pass `max_speed:=1.0` for the first run. To test the speed change alone first, turn steering damping off with `steering_damping:=false`.
 
 ## What changed, in plain words
 
@@ -80,6 +140,7 @@ The simulator's car is close to this one, but not identical. Its grip has been r
    - **Working when:** the wheels turn away from your hand.
    - The node's decision log (one line a second in the `gap_follow_launch.py` terminal) mentions `swept clearance`, `corner setup` or `arc guard` when they act.
 3. **Floor, low speed, open space, with the recorder on.** Lower the speed first: set `max_speed` to about 1.0 m/s and `max_lateral_accel` back to 1.0. Both can be changed live from the dashboard's tuning panel. Record every floor run (commands below), so the next change can be checked against what the car really did.
+   - Since 2026-10-27 the top speed is 5.0 m/s unless a launch says otherwise, so this step is not optional ([race defaults](#race-defaults-2026-10-27)).
    - Drive a straight corridor, then a single corner, with someone ready to let go of LB.
 4. **Raise speed in steps.** Raise `max_lateral_accel` toward 2.5 only after the low-speed runs look right. No run has used 2.5 on the floor yet, so its first run follows the same order as any speed increase: wheels off, then low speed.
    - **If the car slides or runs wide in corners:** the floor has less grip than the simulator. Keep `max_lateral_accel` at the highest value that stayed planted.
@@ -135,11 +196,11 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 |---|---|---|
 | `enable_swept_clearance` | `true` | Speed is limited by the closest reading in the ±30° forward cone again, as before. |
 | `enable_arc_guard` | `true` | The car steers exactly where the gap logic says. |
-| `enable_corner_setup` | `true` | No move to the outside before a turn. Corridor centering works as before. |
-| `narrow_corridor_speed` | `2.5` | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
+| `enable_corner_setup` | `false` (since 2026-10-27; was `true`) | Shipped off: no move to the outside before a turn. Corridor centering works as before. To turn it on, set it to `true` in the YAML and restart. |
+| `narrow_corridor_speed` | `3.571` (since 2026-10-27; was `2.5`) | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
-| `enable_steering_damping` | `false` | No gyro term: the steering is what it was before 2026-10-27. Turn it on with `steering_damping:=true`, which also starts the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
+| `enable_steering_damping` | `true` (since 2026-10-27; was `false`) | No gyro term: the steering is what it was before 2026-10-27. Turn it off with `steering_damping:=false` on the launch line, which also skips the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
@@ -477,15 +538,19 @@ python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 > **You'll be able to:** turn it on, tell when it is working, and know what it falls back to.
 > **Time:** 10 minutes to read, plus the car checks.
 
-Steering damping is **off by default**. It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
+Steering damping is **on by default** since 2026-10-27 ([race defaults](#race-defaults-2026-10-27)). It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
 
 ### What it does, in plain words
 
 The steering wobbles. In two recorded runs from 2026-10-26 it swung back and forth about 0.6 times a second, and the gyro moved in step with it. The weave diagnosis that found this is `tools/run_analysis/weave.py`, run on 2026-10-27.
 
-The correction pushes against the turn. A car turning left fast is asked for a little more right steering, and the other way round. Its size is `steering_damping_gain` times the yaw rate. The gain is a time, in seconds. At 1 rad/s of turning (about 57 degrees a second) and the shipped gain of 0.03 s, the correction is 0.03 rad, about 1.7 degrees.
+The correction pushes against the turn. A car turning left fast is asked for a little more right steering, and the other way round.
 
-The numbers behind the shipped gain are in the comment above `enable_steering_damping` in `config/gap_follow.yaml`.
+Its size is `steering_damping_gain` times the yaw rate. The gain is a time, in seconds. At 1 rad/s of turning (about 57 degrees a second) and the shipped gain of 0.10 s (0.03 s before 2026-10-27), the correction is 0.10 rad, about 5.7 degrees.
+
+The term also resists a steady turn. For the same gap bearing, the steady steering is `1 / (1 + gain × speed / wheelbase)` of what it would be without the term: about two thirds at 2 m/s with the shipped gain.
+
+The numbers behind the gain are in the comment above `enable_steering_damping` in `config/gap_follow.yaml`.
 
 ### What it never does
 
@@ -504,14 +569,16 @@ ros2 launch f1tenth_stack bringup_launch.py
 
 **Working when:** the motor controller (VESC) and the LiDAR come up. This never moves the car by itself.
 
-**Terminal 2** — `gap_follow` with its IMU stack:
+**Terminal 2** — `gap_follow` with its IMU stack. Steering damping is on by default, so the bare launch starts it:
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
-ros2 launch gap_follow gap_follow_launch.py steering_damping:=true
+ros2 launch gap_follow gap_follow_launch.py
 ```
 
 **Working when:** the decision lines name a `steering damping` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
+
+To run without the gyro term, and without the IMU stack, add `steering_damping:=false` to the launch line.
 
 Do not also run `map_course`. It starts the same IMU stack, and two copies would fight over the sensor. Do not run `teleop_launch.py` beside it either: its `/teleop` always wins the mux, as in [Recording a floor run](#recording-a-floor-run).
 
@@ -541,7 +608,7 @@ Do these in order, as in [Validation](#validation). Each step needs the one befo
 
 `tools/f1tenth_sim/gap_mirror.py` has the same term, and `test_gap_mirror_parity.py` checks it against the node. `tools/f1tenth_sim/eval_gap.py --set enable_steering_damping=true` runs it on the simulated tracks. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay, so a gain that helps there may help less on the car.
 
-TODO(verify): the simulator's result for the gain sweep (`steering_damping_gain` at 0.04, 0.07 and 0.10) is not written in this doc yet.
+The gain of 0.10 that ships is in the [race table](#race-defaults-2026-10-27). TODO(verify): the sweep at 0.04 and 0.07 is still not written in this doc.
 
 ## Adaptive grip (IMU)
 

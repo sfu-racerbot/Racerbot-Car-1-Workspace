@@ -288,6 +288,14 @@ Anything not covered by A4-A6 gets built later, each with its own simulator evid
 
 Each test needs the previous step to pass. Never skip ahead: the simulator does not sign off a physical car.
 
+### Shipped 2026-10-27: the race defaults
+
+Decided 2026-10-27: the goal is a race-winning `gap_follow`, not a conservative one. The shipped defaults now carry the damping from A5 (on, gain 0.10 s), corner setup from A6 switched off, and a 5.0 m/s top speed with the speeds tied to it scaled by 5.0/3.5. A4 (`max_lateral_accel` 2.5) is unchanged, and adaptive grip still ships off.
+
+A7 said to raise the ramp only if the car reaches 3.0 m/s². It does not (measured 2026-10-27), so the 5.0 ramp was shipped against that rule. On the car it mostly removes a software limit, because the lag is in the VESC speed loop, which is a team note.
+
+The evidence, the numbers and how to go back are in [gap-follow.md](../../gap-follow.md#race-defaults-2026-10-27). Nothing here has run on the car yet, so the car order in A8 applies.
+
 ## Part B: later
 
 Each of these needs its own written plan before it is built.

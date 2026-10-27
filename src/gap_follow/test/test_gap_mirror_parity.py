@@ -115,9 +115,13 @@ def test_mirror_commands_what_the_node_commands(node):
     node.drive_pub.publish = lambda msg: published.append(msg)
 
     scans = _scene_sequence()
+    # This sequence exists to exercise corner setup, which ships OFF since
+    # 2026-10-27, so it is switched on for the node and the mirror alike.
     params = gap_mirror.node_params()
     params['command_slew_max_dt'] = DT
+    params['enable_corner_setup'] = True
     node.command_slew_max_dt = DT
+    node.enable_corner_setup = True
     mirror = gap_mirror.GapController(params, _Lidar(scans[0][0]))
     # Already rolling fast with the rack hard left while the corridor runs
     # straight: the first ticks are braked by the arc the rack is still on.
@@ -320,7 +324,9 @@ def _grip_scene_sequence():
 
 def test_mirror_matches_the_node_with_adaptive_grip_on():
     """The same comparison with the adaptive grip on at the shipped values, on a
-    steady corridor at 2 m/s. Eight ticks warm up with the IMU at fault, long
+    steady corridor at 2 m/s. Steering damping is pinned off: it ships on since
+    2026-10-27, and with it on no healthy tick moved the limit, so the test
+    would prove nothing about the grip. Eight ticks warm up with the IMU at fault, long
     enough for the rack to settle on the corridor's steering, so the first
     judged tick is not lagged by the rack's slew. Then the healthy part: the car
     yaws as the rack was last commanded, scaled to a grip ratio of 1.0 for
@@ -329,7 +335,8 @@ def test_mirror_matches_the_node_with_adaptive_grip_on():
     The healthy part must really move the limit both ways, or the agreement
     proves nothing (docs/gap-follow.md#adaptive-grip-imu)."""
     rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
-                     '-p', 'enable_adaptive_grip:=true', *TEST_ONLY_DRIVE])
+                     '-p', 'enable_adaptive_grip:=true',
+                     '-p', 'enable_steering_damping:=false', *TEST_ONLY_DRIVE])
     node = GapFollowNode()
     try:
         assert node.drive_pub.topic_name == '/test_only/drive'
@@ -338,6 +345,7 @@ def test_mirror_matches_the_node_with_adaptive_grip_on():
         node.command_slew_max_dt = DT
         params = gap_mirror.node_params()
         params['enable_adaptive_grip'] = True
+        params['enable_steering_damping'] = False
         params['command_slew_max_dt'] = DT
         joy = Joy()
         joy.buttons = [0] * 5

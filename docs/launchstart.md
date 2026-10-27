@@ -91,7 +91,7 @@ ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true
 
 It follows a slower car instead of squeezing past it, and passes only on a straight with room. On a track as narrow as ours it will mostly follow. Do not run two cars at once without it.
 
-**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 3.5 on car 1). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, e.g. `max_speed:=5.0`, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`, so raise those in the YAML too if the car should be faster everywhere. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. Going faster: wheels off the ground first, then open space.
+**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 5.0 on car 1 since 2026-10-27, was 3.5). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, e.g. `max_speed:=5.0`, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`, so raise those in the YAML too if the car should be faster everywhere. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. Going faster: wheels off the ground first, then open space.
 
 ### Car 1 and car 2 together: first run
 
