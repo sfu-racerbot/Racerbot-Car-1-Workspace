@@ -35,7 +35,8 @@ Everything in Part A's Global Constraints applies unchanged, plus these decision
 | B3 Simulated IMU | Any time after Part A | B4's closed-loop tests need it |
 | B4 `gap_follow` IMU features | B3 merged | Each feature is proven in the simulator first |
 | **B6 Overtaking: priority 1** | Part A done. The team confirmed on 2026-10-27 that the course has room to pass | Races are lost behind the other car today |
-| B7 Car 1's course in the simulator | Part A Task 4 produces a clean `map.pgm` of the course | It needs a map |
+| B7 Car 1's course in the simulator | **Done 2026-10-27** (`car1_course_2026_10_26`, commit `a343d44`) | |
+| **B9 Two controlled cars in `racerbot_sim`, and racing team A: priority 2** | Part A done. Can run beside B6 | The real nodes, and team A's real code, race ours |
 
 B5 (recording every run) is done: the **bringup datalogger** (`auto_record`) merged to `main` on 2026-10-26. The SLAM-specific additions it still lacks are listed under B1.
 
@@ -192,7 +193,9 @@ Owned by the bringup-datalogger session. Nothing to build here beyond the B1 con
 So B6 is now a tuning-and-behaviour task, not a policy question.
 
 **Build, in this order:**
-1. **Stop stalling behind another car.** In the 2026-10-27 head-to-head (`eval_gap_multi.py`, car 1's course, seed 12346), the trailing car stopped 2.7 cm from the other car. It never restarted: creep speed is 0 and `gap_follow` never reverses. The 2026-10-26 races showed the same pattern: the follow cap was usually 0.00 m/s. Following must hold the leader's speed minus a gap, never a dead stop while the leader moves.
+1. **Stop stalling behind another car.** In the 2026-10-27 head-to-head (`eval_gap_multi.py`, car 1's course, seed 12346), the trailing car stopped 2.7 cm from the other car. It never restarted: creep speed is 0 and `gap_follow` never reverses. The 2026-10-26 races showed the same pattern: the follow cap was usually 0.00 m/s.
+
+   Following must hold the leader's speed minus a gap, never a dead stop while the leader moves.
 2. **See the other car sooner.** `opponent_min_hits: 8` scans (0.2 s) delays recognition. On the real races the car was recognised on only about 5% of logged seconds.
 3. **Size passes to the real car.**
    - Re-derive `opponent_radius` from the car's measured 0.30 × 0.58 m outline instead of a circle.
@@ -211,6 +214,60 @@ So B6 is now a tuning-and-behaviour task, not a policy question.
 **Evidence base:**
 - The 19:51, 19:59 and 20:07 races' decision logs. They have no bags; future races get bags through B5.
 - `gap_follow_launch.py opponent_awareness:=true` in the multi-car simulator (`docs/gap-follow.md#several-cars-at-once`).
+
+## B9. Two controlled cars in `racerbot_sim`, and racing team A (priority 2 after Part A)
+
+**What exists:** `tools/f1tenth_sim/eval_gap_multi.py` (Part A Task 14) races two or more of **our** `gap_follow` controllers. It has no ROS: each car is a `gap_mirror` copy of our node, with per-car `--car-set` settings and a head-to-head score. It is fast and good for tuning, but it cannot run the real nodes or launch files, and it cannot run team A's code.
+
+**What `racerbot_sim` has today:** several cars, but only the first is driven by ROS. The others are scripted `CenterlineFollower` opponents (`sim_bridge.py`, `OpponentPlan`).
+
+**Build:**
+
+1. **A second ROS-controlled car in `racerbot_sim`.** `gym_bridge_node` gets a `controlled_cars` parameter (default 1, today's behaviour). Each car beyond the first gets its own namespace, `/car2/...`:
+   - `scan`, `odom`, the TF frames `car2/odom` → `car2/base_link` → `car2/laser`, and a `drive` subscription;
+   - a forged-deadman `/car2/joy` from `sim_joy_node`, so each car's own deadman gate is exercised.
+
+   The existing hardware interlock covers every namespace, so the simulator refuses to start beside real drivers.
+
+   Tests: pure-function tests on namespacing and topic maps in `sim_bridge.py`. The interlock refuses for each car. Car 2's commands move only car 2.
+2. **A two-car launch,** `sim_race_launch.py`: one bringup for the simulator, then two control layers, each remapped into its namespace.
+   - Car 1 is our `gap_follow_launch.py`.
+   - Car 2 is chosen by an argument: `ours` (a second `gap_follow` with its own params file, for ours-vs-ours) or `team_a` (team A's node).
+   - Recording uses the normal run recorder, with both namespaces.
+3. **Team A's real node on car 2.**
+   - Build `src/racerbot_a/src/disparity_extender` (and `ftg`) with `colcon build --packages-select disparity_extender ftg`. Remember car 1's local `COLCON_IGNORE` on `racerbot_a`'s `pure_pursuit`, whose package name clashes with ours.
+   - Run it with its sim settings (`enable_deadman:=false`, safety node as its README says), remapped to `/car2/scan` and `/car2/drive`. Their deadman lives in their own `safety_node`.
+   - Score with a shared race referee (laps, gap, overtakes, contacts) computed from the simulator's ground truth, never from either car's own claims.
+4. **Optional, for fast tuning:** a Python copy of `disparity_extender` (about 250 lines of C++) as a controller type in `eval_gap_multi.py`.
+
+   Before any result is trusted, a **parity test** must show it gives the same command as the compiled node on recorded scans, to 1e-6.
+
+**Done when:**
+- `ros2 launch racerbot_sim sim_race_launch.py opponent:=team_a track:=car1_course_2026_10_26` races our `gap_follow` against team A's `disparity_extender` on car 1's course;
+- the referee prints the result;
+- the full-ROS result for ours-vs-ours agrees in ranking with `eval_gap_multi.py` on the same settings.
+
+**Keep in mind:** a simulator win is evidence, not a verdict. The real races, now recorded by bringup's `auto_record`, are the check.
+
+## Coverage of every request (2026-10-26/27)
+
+| Request | Where |
+|---|---|
+| Where yesterday's maps are; why SLAM failed; which IMU parts are wired | Answered in chat; the evidence is in the spec |
+| Fix SLAM | Part A Tasks 1-5 (done) |
+| SLAM recorded well enough to recreate and analyse in depth | B1, plus the recording contract for `auto_record` |
+| IMU in `map_course` with on/off flags | `gyro_odom` exists; B2 adds `imu_lap_turns` and `imu_all` |
+| IMU in `gap_follow` with on/off flags (one per feature plus all), falling back to today | Part A: steering damping and adaptive grip. B4: the rest. The `imu_all` shortcut is in B2/B4 |
+| Allow some slip using IMU feedback | Part A Task 15, adaptive grip (built, ships off: no simulator win yet) |
+| Simulated IMU, and bag replay for IMU features | B3 (sim IMU). `eval_gap` already feeds the gym's true yaw rate (Part A) |
+| Faster, better, race-winning `gap_follow`; aggressive defaults | Part A Tasks 6-11 and 17 (done) |
+| Two cars in the simulator to race | Fast simulator: Part A Task 14 (done). Full-ROS `racerbot_sim`: **B9** |
+| Race team A's `gap_follow` in the simulator | **B9** (their real node; optional Python copy with parity test) |
+| Improve the simulator | Grip re-checked on car 1 (Task 13); car 1's course added (B7). Two-car ROS simulator in B9 |
+| Overtaking / passing (the course has room) | **B6** |
+| Clean map of the course, used for simulator testing | Done (`~/.ros/racerbot_auto/20261026-194514-clean/`, `car1_course_2026_10_26`) |
+| Bringup logger | Merged on `main` by another session; B1 adds the SLAM pieces |
+| VESC hardware tuning | Team note (above), not a build item |
 
 ## Note for the team, after the coding: VESC speed-loop tuning
 
