@@ -351,6 +351,16 @@ Two fields tell you whether it's going to work:
 
 - **`SLAM corrections absorbed`** counts how many times the map-frame pose jumped further than the car could physically have moved. A handful over a lap is normal, and they're applied to the recorded path rather than recorded *as* path. Dozens means SLAM is struggling — check the map in the dashboard before trusting anything downstream.
 
+When a lap closes, the terminal prints one more line, for example:
+
+```
+closed at closest approach: d=0.10m, heading error=0.6deg
+```
+
+The lap closes at the point where the car came nearest its starting point, once the car has moved on a few centimetres past that point. `d` is how far that point was from the start.
+
+`heading error` is how far the car was turned away from its starting direction there. Above 15 degrees the lap fails its quality check, and the car drives one more lap, up to the `max_mapping_laps` limit.
+
 Then, once, at the handover:
 
 ```
