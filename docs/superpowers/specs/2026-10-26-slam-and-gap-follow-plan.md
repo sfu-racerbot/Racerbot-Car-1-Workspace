@@ -138,6 +138,18 @@ Made in chat on 2026-10-26. Changing one is a new decision, not a tweak.
 
 The pass/fail check never uses SLAM's own confidence numbers.
 
+#### Results (2026-10-27)
+
+Offline replays of the three gyro runs (`tools/run_analysis/slam_replay.py`, `--odom odom_imu`). Each cell is the largest correction at the car, the jumps over 1.5 m, and the loop closures (Ceres solves, the proxy `slam_metrics` uses):
+
+| Run (speed) | Baseline (`slam_tracking.yaml` only) | P1 | P2 | P3 |
+|---|---|---|---|---|
+| `20261026-194514` (3.5 m/s) | 0.59 m / 0 / 6 | 0.71 m / 0 / 3 | 0.16 m / 0 / 0 | 0.17 m / 0 / 0 |
+| `20261026-194714` (1.5 m/s) | 2.45 m / 2 / 4 | 0.47 m / 0 / 12 | 0.11 m / 0 / 0 | 0.11 m / 0 / 0 |
+| `20261026-194913` (2.5 m/s) | 2.75 m / 4 / 9 | 0.47 m / 0 / 6 | 0.14 m / 0 / 0 | 0.13 m / 0 / 0 |
+
+**Chosen: P1.** `loop_search_maximum_distance` and `loop_search_space_dimension` both at 3.0 m, in `src/racerbot_launch/config/slam_gyro.yaml`, loaded only with `gyro_odom:=true`. P2 adds 0.5 m node spacing, and P3 adds stricter loop-match responses on top of P2. Both switch loop closure off (no solves on any run), so neither is used.
+
 ### A2. Offline SLAM replay (minimal)
 
 **What.** A tool that reruns a recorded run through slam_toolbox with the car parked. It is the first slice of B1's `slam_replay`.
