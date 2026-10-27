@@ -268,9 +268,11 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 ## Record a run and analyse it
 
-**Terminal 1, first:** `ros2 launch race_diagnostics record_run.py`. It prints the folder it records into, `~/.ros/racerbot_runs/<ts>/`.
+**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/.ros/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
-Then start the mode you want as usual. Afterwards, in **any terminal**:
+To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
+
+Afterwards, in **any terminal**:
 
 ```bash
 ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<ts>

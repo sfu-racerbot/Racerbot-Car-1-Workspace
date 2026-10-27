@@ -84,7 +84,9 @@ If anything looks wrong, turn the suspect feature off (next section) and compare
 
 ### Recording a floor run
 
-Four terminals, started in this order. Full detail is in [run-diagnostics.md](run-diagnostics.md#tldr).
+**Bringup records the run for you** (since 2026-10-26, [automatic recording](run-diagnostics.md#automatic-recording)). Start Terminals 2 and 3 below, without the `| tee`, and skip Terminal 1. Bringup's terminal prints the run folder when `gap_follow` starts.
+
+The hand-started recorder still works and adds a `launch.log`. Four terminals, started in this order. Full detail is in [run-diagnostics.md](run-diagnostics.md#tldr).
 
 **Terminal 1 — the recorder. Start it first, so nothing is missed:**
 
