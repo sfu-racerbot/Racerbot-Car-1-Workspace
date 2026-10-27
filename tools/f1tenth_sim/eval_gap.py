@@ -219,7 +219,11 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         ego = obs["agent_0"]
         state = np.asarray(ego["std_state"], dtype=float)
         speed_meas = float(state[3])
-        steering, cmd_speed = ctrl.command(ego["scan"], speed_meas, step)
+        # The gym's true yaw rate (std_state is x, y, delta, v, yaw, yaw_rate,
+        # beta). The mirror reads it only with enable_steering_damping on, so
+        # with the feature off this changes nothing.
+        steering, cmd_speed = ctrl.command(ego["scan"], speed_meas, step,
+                                           yaw_rate=float(state[5]))
         steerings.append(steering)
         stop_steps += int(ctrl.stopped)
         min_body_clear = min(min_body_clear, ctrl.telemetry.get("min_clear", math.inf))

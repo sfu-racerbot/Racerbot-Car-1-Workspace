@@ -39,6 +39,10 @@ NOT_MIRRORED = {
     "intent_topic", "intent_rate_hz", "intent_horizon_sec", "intent_samples",
     "intent_max_length", "enable_cornering_anticipation",
     "anticipation_near_depth",
+    # Steering damping's gyro topics and their freshness check. The simulator
+    # hands the mirror the true yaw rate every tick, so there is no stale
+    # sample to time out (docs/gap-follow.md#steering-damping-gyro).
+    "imu_topic", "imu_status_topic", "imu_timeout_sec",
 }
 
 
@@ -91,6 +95,7 @@ REQUIRED_PARAMS = frozenset((
     "enable_arc_guard",
     "enable_centering",
     "enable_corner_setup",
+    "enable_steering_damping",
     "enable_swept_clearance",
     "enable_ttc",
     "escape_creep_speed",
@@ -115,6 +120,7 @@ REQUIRED_PARAMS = frozenset((
     "safety_margin",
     "speed_hold_sec",
     "steering_gain",
+    "steering_damping_gain",
     "steering_gain_speed_ref",
     "swept_clearance_margin",
     "swept_clearance_max_length",
@@ -168,6 +174,9 @@ LEGACY_VALUES = {
     "narrow_corridor_clearance": 0.05,
     "open_corridor_clearance": 0.15,
     "ttc_path_margin": None,  # None: the old corridor, safety_margin itself
+    # Steering damping (2026-10-27) did not exist: off.
+    "enable_steering_damping": False,
+    "steering_damping_gain": 0.0,
     # Opponent awareness (2026-10-22) did not exist: off. Its opponent_*
     # values are then never read, but the mirror requires them present.
     "enable_opponent_awareness": False,
@@ -202,7 +211,9 @@ class GapController:
 
     ``params`` is node_params() (optionally with overrides); ``lidar`` needs
     ``angle_min``, ``angle_increment`` and ``range_min``. ``command(scan,
-    measured_speed, step)`` returns ``(steering, speed)`` for one 40 Hz tick.
+    measured_speed, step, yaw_rate=None)`` returns ``(steering, speed)`` for one
+    40 Hz tick; ``yaw_rate`` is only read when steering damping is on, and None
+    means no healthy IMU sample this tick.
 
     Holds parameters as attributes and reproduces the node's per-scan chain:
     sanitize -> side walls/adaptive width -> footprint/TTC -> disparity extend
@@ -241,7 +252,7 @@ class GapController:
                 self.p["laser_offset_y"], self.p["car_length"])
         self.opponent_mode = None
 
-    def command(self, scan, current_speed, step):
+    def command(self, scan, current_speed, step, yaw_rate=None):
         p = self.p
         tel = self.telemetry = {}
         clean, valid = gap_logic.sanitize_ranges(
@@ -419,8 +430,14 @@ class GapController:
                          min(abs(float(current_speed)), p["max_speed"]))
         bearing_gain *= gap_logic.speed_scheduled_gain(
             gain_basis, p["steering_gain_speed_ref"])
+        # Steering damping (gap_follow_node._steering_damping_term): minus the
+        # gain times the gyro's yaw rate. yaw_rate None means no healthy IMU
+        # sample this tick, which the car answers with exactly zero.
+        damping = 0.0
+        if p["enable_steering_damping"] and yaw_rate is not None:
+            damping = gap_logic.steering_damping(yaw_rate, p["steering_damping_gain"])
         desired_steering = float(np.clip(
-            bearing_gain * target_angle + centering_bias + setup_bias,
+            bearing_gain * target_angle + centering_bias + setup_bias + damping,
             -p["max_steering_angle"], p["max_steering_angle"]))
         if p["enable_arc_guard"] and not creeping:
             speed_basis = max(self.last_commanded_speed,
@@ -514,7 +531,8 @@ class GapController:
         tel.update(target_angle=target_angle, target_distance=target_distance,
                    gap_width=(gap_end - gap_start + 1) * self.lidar.angle_increment,
                    fallback=used_fallback, creeping=creeping,
-                   centering_bias=centering_bias, desired_steering=desired_steering,
+                   centering_bias=centering_bias, steering_damping=damping,
+                   desired_steering=desired_steering,
                    requested_steering=steering,  # after the slew limit: what this tick returns
                    curve_cap=normal_speed, clearance_cap=clearance_speed,
                    corner_cap=effective_corner, binding=binding)

@@ -24,6 +24,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 11. [Measured results](#measured-results)
 12. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
 13. [Keeping the mirror honest](#keeping-the-mirror-honest)
+14. [Steering damping (gyro)](#steering-damping-gyro)
 
 ## Highlights
 
@@ -137,6 +138,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `narrow_corridor_speed` | `2.5` | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
+| `enable_steering_damping` | `false` | No gyro term: the steering is what it was before 2026-10-27. Turn it on with `steering_damping:=true`, which also starts the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
@@ -464,7 +466,80 @@ export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 ```
 
-**Working when:** `3 passed`. A failure names the tick and whether steering or speed differed.
+**Working when:** `5 passed`. A failure names the tick and whether steering or speed differed.
+
+## Steering damping (gyro)
+
+> **Who this is for:** anyone turning on steering damping, or checking what it does on the car.
+> **Read first:** [Safety](#safety) and [Validation](#validation). This changes how the car steers, so the same order applies: wheels off first, then low speed.
+> **You'll be able to:** turn it on, tell when it is working, and know what it falls back to.
+> **Time:** 10 minutes to read, plus the car checks.
+
+Steering damping is **off by default**. It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
+
+### What it does, in plain words
+
+The steering wobbles. In two recorded runs from 2026-10-26 it swung back and forth about 0.6 times a second, and the gyro moved in step with it. The weave diagnosis that found this is `tools/run_analysis/weave.py`, run on 2026-10-27.
+
+The correction pushes against the turn. A car turning left fast is asked for a little more right steering, and the other way round. Its size is `steering_damping_gain` times the yaw rate. The gain is a time, in seconds. At 1 rad/s of turning (about 57 degrees a second) and the shipped gain of 0.03 s, the correction is 0.03 rad, about 1.7 degrees.
+
+The numbers behind the shipped gain are in the comment above `enable_steering_damping` in `config/gap_follow.yaml`.
+
+### What it never does
+
+It never stops the car. It changes nothing about the LB deadman, the time-to-collision brake or the emergency stops. It only shifts the steering request, and the arc guard and the steering rate limit still check the result, as they check every other steering command.
+
+Hold LB as always. Let go and the car stops, with or without this feature.
+
+### Turning it on
+
+**Terminal 1** — hardware, as in [Recording a floor run](#recording-a-floor-run):
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+ros2 launch f1tenth_stack bringup_launch.py
+```
+
+**Working when:** the motor controller (VESC) and the LiDAR come up. This never moves the car by itself.
+
+**Terminal 2** — `gap_follow` with its IMU stack:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+ros2 launch gap_follow gap_follow_launch.py steering_damping:=true
+```
+
+**Working when:** the decision lines name a `steering damping` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
+
+Do not also run `map_course`. It starts the same IMU stack, and two copies would fight over the sensor. Do not run `teleop_launch.py` beside it either: its `/teleop` always wins the mux, as in [Recording a floor run](#recording-a-floor-run).
+
+### What it falls back to
+
+Whenever the gyro cannot be trusted, the correction is exactly zero. The car then steers exactly as it does with the feature off, and it keeps driving. The reason appears in the decision log, and as `steering_damping_off: <reason>` on `/drive_intent`, which the web dashboard's decision panel reads.
+
+| Reason | What it means | What to do |
+|---|---|---|
+| `imu waiting` | The IMU is still starting: its gyro bias is not removed yet, or the gravity check has not run. | Keep the car still for about 3 seconds. |
+| `imu fault` | The IMU reports a fault: all six readings zero, a non-finite value, a failed gravity check, or no sample for too long. | Read `/imu/status`. See [the imu_bridge README](../src/imu_bridge/README.md). |
+| `imu stale` | The newest gyro sample is older than `imu_timeout_sec` (0.1 s). | The IMU stream has stopped. Check the imu_bridge output. |
+| `no imu` | The node has never received a sample or a status. | Check that the IMU stack is running. |
+| `imu yaw not finite` | A NaN or infinite yaw rate arrived with status `ok`. The bridge should report a fault first, so this points at the bridge. | Stop, and look at `/imu/data`. |
+
+### The car test order
+
+Do these in order, as in [Validation](#validation). Each step needs the one before it.
+
+1. **Sign check, wheels off the ground.** Put the car on a stand and start both terminals above. Hold LB, then turn the car by hand to the left, counterclockwise seen from above.
+   - The yaw rate should be positive, and the decision line should show a *negative* steering damping value.
+   - If the yaw rate goes negative when you turn left, let go of LB. The IMU mount is wrong. [The imu_bridge README](../src/imu_bridge/README.md) says how to check it.
+2. **Fallback check, wheels off.** Start the launch while you turn the car. The decision lines should say `steering_damping_off: imu waiting` until the car has been still for about 3 seconds, and only then show a steering damping value.
+3. **Floor, low speed.** Set `max_speed` to about 1.0 m/s, as in [Validation](#validation). Drive a straight corridor, then one corner, with LB held and someone ready to let go. If the damping value jumps while the car is going straight, let go of LB and look at `/imu/data` before going on.
+
+### What the simulator says
+
+`tools/f1tenth_sim/gap_mirror.py` has the same term, and `test_gap_mirror_parity.py` checks it against the node. `tools/f1tenth_sim/eval_gap.py --set enable_steering_damping=true` runs it on the simulated tracks. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay, so a gain that helps there may help less on the car.
+
+TODO(verify): the simulator's result for the gain sweep (`steering_damping_gain` at 0.04, 0.07 and 0.10) is not written in this doc yet.
 
 ## See also
 

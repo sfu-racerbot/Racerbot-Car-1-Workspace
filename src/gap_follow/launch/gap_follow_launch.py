@@ -2,11 +2,22 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
+
+
+def _flag(name, value):
+    """A launch boolean, read the way racerbot_launch's map_course_launch.py reads its own."""
+    text = str(value).strip().lower()
+    if text in ('true', '1'):
+        return True
+    if text in ('false', '0'):
+        return False
+    raise RuntimeError(f"{name}:={value!r}: expected 'true' or 'false'")
 
 
 def generate_launch_description():
@@ -31,22 +42,40 @@ def generate_launch_description():
                     'corner_speed_wide are lowered with it; above it, only '
                     'max_speed rises.')
 
+    steering_damping_arg = DeclareLaunchArgument(
+        'steering_damping', default_value='false',
+        description='true: steer against the car\'s own rotation, using the gyro yaw '
+                    'rate in /imu/data. Starts imu_bridge\'s vehicle_state_launch.py '
+                    '(the IMU stack). Ships off; simulator-validated only, not yet run '
+                    'on the floor (docs/gap-follow.md#steering-damping-gyro).')
+
     def node(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
             raise RuntimeError(
                 f"opponent_awareness:={enabled!r}: use true or false")
+        damping = _flag('steering_damping',
+                        LaunchConfiguration('steering_damping').perform(context))
         speed = speed_cap_overrides(
             yaml_parameters(gap_follow_config),
             LaunchConfiguration('max_speed').perform(context))
-        return [Node(
+        actions = [Node(
             package='gap_follow',
             executable='gap_follow_node',
             name='gap_follow_node',
             output='screen',
             parameters=[gap_follow_config,
-                        {'enable_opponent_awareness': enabled == 'true'},
+                        {'enable_opponent_awareness': enabled == 'true',
+                         'enable_steering_damping': damping},
                         speed],
         )]
+        if damping:
+            # The IMU stack that publishes /imu/data and /imu/status. The same
+            # include map_course_launch.py makes, so do not run both at once.
+            actions.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('imu_bridge'), 'launch',
+                             'vehicle_state_launch.py'))))
+        return actions
 
-    return LaunchDescription([opponent_arg, max_speed_arg, OpaqueFunction(function=node)])
+    return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
+                              OpaqueFunction(function=node)])

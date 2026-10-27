@@ -1,10 +1,12 @@
+import json
 import math
 
 import numpy as np
 import rclpy
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 from rclpy.node import Node
-from sensor_msgs.msg import LaserScan, Joy
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+from sensor_msgs.msg import Imu, LaserScan, Joy
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
@@ -12,6 +14,11 @@ from std_msgs.msg import String
 from drive_intent import predict, schema
 from drive_intent.throttle import FailureLatch, IntentThrottle
 from gap_follow import gap_logic, live_tuning, opponent_tracking
+
+# /imu/status is latched by imu_bridge (its STATUS_QOS), so a node started
+# after the bridge still gets the current verdict at once.
+IMU_STATUS_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                            reliability=QoSReliabilityPolicy.RELIABLE)
 
 
 class GapFollowNode(Node):
@@ -66,6 +73,16 @@ class GapFollowNode(Node):
         self.declare_parameter('max_braking_decel', 3.0)
         self.declare_parameter('max_steering_rate', 1.0)
         self.declare_parameter('command_slew_max_dt', 0.10)
+        # Steering damping from the IMU yaw rate: minus gain x yaw, added to the
+        # requested steering before the clip, the arc guard and the slew limit.
+        # Ships OFF. Used only while /imu/status is 'ok' and /imu/data is fresh;
+        # otherwise it adds exactly zero. See gap_logic.steering_damping and
+        # docs/gap-follow.md#steering-damping-gyro.
+        self.declare_parameter('enable_steering_damping', False)
+        self.declare_parameter('steering_damping_gain', 0.0)
+        self.declare_parameter('imu_topic', '/imu/data')
+        self.declare_parameter('imu_status_topic', '/imu/status')
+        self.declare_parameter('imu_timeout_sec', 0.1)
         # Padded collision envelope around this car's rear-axle base_link.
         # wheelbase, laser_offset_x and the 0.30 m the car measures over the
         # tires were tape-measured 2026-08-24; car_width is that 0.30 m plus
@@ -324,6 +341,13 @@ class GapFollowNode(Node):
             self.get_parameter('max_steering_rate').value)
         self.command_slew_max_dt = float(
             self.get_parameter('command_slew_max_dt').value)
+        self.enable_steering_damping = bool(
+            self.get_parameter('enable_steering_damping').value)
+        self.steering_damping_gain = float(
+            self.get_parameter('steering_damping_gain').value)
+        self.imu_topic = self.get_parameter('imu_topic').value
+        self.imu_status_topic = self.get_parameter('imu_status_topic').value
+        self.imu_timeout_sec = float(self.get_parameter('imu_timeout_sec').value)
         self.car_width = float(self.get_parameter('car_width').value)
         self.car_length = float(self.get_parameter('car_length').value)
         self.wheelbase = float(self.get_parameter('wheelbase').value)
@@ -507,6 +531,14 @@ class GapFollowNode(Node):
         )
         if not all(math.isfinite(value) and value > 0.0 for value in dynamic_limits):
             raise ValueError('dynamic steering/speed limits must be finite and positive')
+        # A negative gain would steer *with* the car's rotation (positive
+        # feedback), so it is refused at startup rather than quietly ignored.
+        if not (math.isfinite(self.steering_damping_gain)
+                and self.steering_damping_gain >= 0.0):
+            raise ValueError(
+                'steering_damping_gain must be finite and non-negative (seconds)')
+        if not (math.isfinite(self.imu_timeout_sec) and self.imu_timeout_sec > 0.0):
+            raise ValueError('imu_timeout_sec must be finite and positive')
         if not (math.isfinite(self.gap_switch_margin) and self.gap_switch_margin >= 1.0):
             raise ValueError(
                 'gap_switch_margin must be finite and at least 1.0 -- below that, a '
@@ -581,6 +613,11 @@ class GapFollowNode(Node):
         self.deadman_held = False
         self.last_joy_time = None
         self.joy_button_available = False
+        # Latest gyro sample and verdict, for steering damping. None until
+        # heard from: no sample and no verdict both mean "not trusted".
+        self.imu_yaw_rate = math.nan
+        self.last_imu_time = None
+        self.imu_state = None
         self.current_speed = 0.0
         self.last_odom_time = None
         self.last_commanded_speed = 0.0
@@ -658,6 +695,14 @@ class GapFollowNode(Node):
             Odometry, self.odom_topic, self.odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
+        # Subscribed only when steering damping is on, so with it off the node's
+        # ROS graph is exactly what it was before the feature existed.
+        if self.enable_steering_damping:
+            self.imu_sub = self.create_subscription(
+                Imu, self.imu_topic, self.imu_callback, 10)
+            self.imu_status_sub = self.create_subscription(
+                String, self.imu_status_topic, self.imu_status_callback,
+                IMU_STATUS_QOS)
         self.status_timer = self.create_timer(
             min(0.25, self.scan_timeout_sec / 2.0), self._sensor_status_callback)
 
@@ -707,6 +752,43 @@ class GapFollowNode(Node):
     def odom_callback(self, msg: Odometry):
         self.current_speed = float(msg.twist.twist.linear.x)
         self.last_odom_time = self.get_clock().now()
+
+    def imu_callback(self, msg: Imu):
+        self.imu_yaw_rate = float(msg.angular_velocity.z)
+        self.last_imu_time = self.get_clock().now()
+
+    def imu_status_callback(self, msg: String):
+        try:
+            state = json.loads(msg.data).get('state')
+        except (ValueError, AttributeError):
+            state = None
+        self.imu_state = state if isinstance(state, str) else None
+
+    def _steering_damping_term(self):
+        """This tick's steering damping in radians, and -- when the feature is
+        on but the gyro cannot be trusted -- the reason it is zero.
+
+        The gyro is trusted only while /imu/status says 'ok' and the latest
+        /imu/data arrived within imu_timeout_sec. Any other state adds exactly
+        zero, which is what the node commands with the feature off
+        (docs/gap-follow.md#steering-damping-gyro).
+        """
+        if not self.enable_steering_damping:
+            return 0.0, None
+        if self.last_imu_time is None:
+            return 0.0, 'no imu'
+        age_sec = (self.get_clock().now() - self.last_imu_time).nanoseconds / 1e9
+        if not age_sec < self.imu_timeout_sec:
+            return 0.0, 'imu stale'
+        if self.imu_state is None:
+            return 0.0, 'no imu'
+        if self.imu_state == 'waiting':
+            return 0.0, 'imu waiting'
+        if self.imu_state != 'ok':
+            return 0.0, 'imu fault'
+        if not math.isfinite(self.imu_yaw_rate):
+            return 0.0, 'imu yaw not finite'
+        return gap_logic.steering_damping(self.imu_yaw_rate, self.steering_damping_gain), None
 
     def _odom_fresh(self) -> bool:
         if self.last_odom_time is None or not math.isfinite(self.current_speed):
@@ -1165,8 +1247,12 @@ class GapFollowNode(Node):
         # the heading loop keeps its phase margin (gap_logic.speed_scheduled_gain).
         bearing_gain = self.steering_gain * gap_logic.speed_scheduled_gain(
             self._speed_basis(), self.steering_gain_speed_ref)
+        # Steering damping opposes the car's measured yaw rate. It joins the
+        # request here, so the clip, the arc guard and the slew limit all check
+        # the damped command (docs/gap-follow.md#steering-damping-gyro).
+        damping, damping_off = self._steering_damping_term()
         requested_steering = float(np.clip(
-            bearing_gain * target_angle + centering_bias + setup_bias,
+            bearing_gain * target_angle + centering_bias + setup_bias + damping,
             -self.max_steering_angle,
             self.max_steering_angle,
         ))
@@ -1337,6 +1423,17 @@ class GapFollowNode(Node):
         setup_text = (
             f", corner setup {setup_bias:+.3f}rad at weight {setup_weight:.2f}"
             if setup_weight > 0.0 else "")
+        # Named whenever the feature is on: its value while the gyro is trusted,
+        # or the reason it is zero on this tick. Empty when the feature is off,
+        # so the reason text is exactly what it was before the feature existed.
+        if damping_off is not None:
+            damping_text = f", steering_damping_off: {damping_off}"
+        elif self.enable_steering_damping:
+            damping_text = (
+                f", steering damping {damping:+.3f}rad (gyro yaw "
+                f"{self.imu_yaw_rate:+.3f}rad/s)")
+        else:
+            damping_text = ""
         guard_text = (
             f", arc guard {requested_steering:+.3f}->{desired_steering:+.3f}rad "
             f"(requested arc blocked)"
@@ -1392,7 +1489,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{guard_text}{steering_shape_text}{speed_shape_text}")
+            f"{damping_text}{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
         # Every speed ceiling that competed for this tick, so the dashboard

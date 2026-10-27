@@ -29,6 +29,7 @@ The processing pipeline, in the order the node applies it:
   near_gap_bearing    -> the same gap's near-only bearing, for anticipation
   side_wall_distance  -> perpendicular distance to the wall on one side
   corridor_centering  -> bounded cross-track bias, faded in on straights
+  steering_damping    -> gyro yaw rate, opposed; added before the clip
   corridor_width_fac. -> how open the sensed corridor is, as a 0..1 fade
   scale_between       -> blend a margin/speed between its narrow/wide values
 """
@@ -1180,6 +1181,27 @@ def corner_setup_bias(left_distance: float, right_distance: float,
     position = turn_sign * (left_distance - right_distance) / 2.0
     magnitude = min(max_bias, max(-max_bias, gain * (target - position)))
     return -turn_sign * magnitude * weight, weight
+
+
+def steering_damping(yaw_rate: float, gain_s: float) -> float:
+    """Steering, in radians, that opposes the car's own rotation.
+
+    ``yaw_rate`` is the gyro's z rate in rad/s from /imu/data, positive to the
+    left (imu_bridge's car axes: x forward, y left, z up). ``gain_s`` is a time
+    constant in seconds, and the term is ``-gain_s * yaw_rate``: a car turning
+    left is steered right by gain_s radians per rad/s. gap_follow_node adds it
+    to the requested steering before the clip, the arc guard and the slew limit
+    (docs/gap-follow.md#steering-damping-gyro), so everything downstream checks
+    the damped command.
+
+    Exactly zero whenever the term cannot be trusted: a non-finite yaw rate or
+    gain (never NaN steering), or a gain that is not positive. A negative gain
+    would steer *with* the rotation, so it switches the term off rather than
+    flipping it.
+    """
+    if not (math.isfinite(yaw_rate) and math.isfinite(gain_s)) or gain_s <= 0.0:
+        return 0.0
+    return -gain_s * yaw_rate
 
 
 def corridor_width_factor(left_distance: float, right_distance: float,

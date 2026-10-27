@@ -157,6 +157,26 @@ gap_follow_node:
     narrow_corridor_speed: 2.5
     narrow_corridor_clearance: 0.05
     open_corridor_clearance: 0.15
+    # --- Steering damping from the IMU yaw rate (docs/gap-follow.md#steering-damping-gyro) ---
+    # Ships OFF. When on, the steering request gets -steering_damping_gain x
+    # the gyro's yaw rate added to it, before the clip, the arc guard and the
+    # slew limit, so the car steers against its own rotation. The term is used
+    # only while /imu/status says 'ok' and /imu/data is fresh (imu_timeout_sec);
+    # otherwise it adds exactly zero. Turn it on with
+    # gap_follow_launch.py steering_damping:=true.
+    #
+    # The gain, in seconds, is 0.03. The weave diagnosis of runs 20261026-194514
+    # and 20261026-194913 (tools/run_analysis/weave.py, 2026-10-27) found the
+    # steering loop itself oscillating: 0.625 Hz, steering-to-gyro coherence
+    # 0.95-0.97, measured steering lag tau 0.125-0.150 s, and loop damping ratio
+    # zeta 0.60-0.65. With the loop model zeta = (1 + Kd v / L) / (2 sqrt(tau v K
+    # / L)), a Kd of 0.03 s brings zeta to about 0.7 at 2 m/s. Not measured on
+    # the car: simulator-validated only (docs/gap-follow.md#steering-damping-gyro).
+    enable_steering_damping: false
+    steering_damping_gain: 0.03
+    imu_topic: /imu/data
+    imu_status_topic: /imu/status
+    imu_timeout_sec: 0.1
     # --- Rectangular vehicle footprint ---
     # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
     # published figures the earlier values came from:

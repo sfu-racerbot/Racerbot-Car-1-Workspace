@@ -36,6 +36,7 @@ Test any increase wheels-off first, then at low speed in open space.
 ## Interface
 
 - **Subscribes:** `/scan` (`sensor_msgs/LaserScan`), `/odom` (`nav_msgs/Odometry`, for TTC), `/joy` (`sensor_msgs/Joy`, for the deadman button)
+- **Also subscribes, only with `enable_steering_damping` on:** `/imu/data` (`sensor_msgs/Imu`, the gyro's yaw rate) and `/imu/status` (`std_msgs/String`, the IMU's verdict, latched). See [steering damping](../../docs/gap-follow.md#steering-damping-gyro)
 - **Publishes:** `/drive` (`ackermann_msgs/AckermannDriveStamped`)
 
 The launch file sends ROS logs to the terminal. Each controller state change is
@@ -456,6 +457,9 @@ apex, only change the car's pace approaching one.
 | `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
 | `max_acceleration` | `3.0` m/s² | Cap on how fast a speed *command* may rise; braking is never limited |
 | `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew. Shipped YAML: `2.0` (simulator-validated only) |
+| `enable_steering_damping` | `false` | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn on with `gap_follow_launch.py steering_damping:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
+| `steering_damping_gain` | `0.0` s (shipped YAML: `0.03`) | Gain for the term above, in seconds. Refused at startup if negative or not finite |
+| `imu_topic` / `imu_status_topic` / `imu_timeout_sec` | `/imu/data` / `/imu/status` / `0.1` s | The gyro samples, their verdict, and how old a sample may be before the term turns off. `imu_timeout_sec` is refused at startup unless positive |
 | `ttc_path_margin` | `0.05` m | How far beyond the body's side the TTC brake still counts an obstacle as in the path (was the full `safety_margin`, 0.18 m, before 2026-10-20). Must be between 0 and `safety_margin`. See [docs/gap-follow.md](../../docs/gap-follow.md#the-2026-10-19-run) |
 | `braking_latency_sec` | `0.25` s | Time the car keeps its speed after a slower command; the stopping-distance ceiling subtracts `speed × latency` from the room it sees. `0` = the old formula |
 | `steering_gain_speed_ref` | `0.0` m/s (off) | Above this speed the steering gain falls as `ref / speed`, so fast corrections are smaller. Shipped YAML: `1.8` |

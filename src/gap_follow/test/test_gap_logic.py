@@ -1029,3 +1029,49 @@ def test_side_clearance_speed_limit_rejects_bad_parameters():
         gap_logic.side_clearance_speed_limit(0.1, 2.0, 0.15, 0.15, 4.0)
     with pytest.raises(ValueError, match='max_speed must be finite'):
         gap_logic.side_clearance_speed_limit(0.1, 2.0, 0.05, 0.15, math.inf)
+
+
+# ============================================================================
+# steering_damping: the gyro's yaw rate, opposed, in radians
+# (docs/gap-follow.md#steering-damping-gyro)
+# ============================================================================
+
+def test_steering_damping_is_minus_gain_times_yaw_rate():
+    # oracle: closed form -- the law is -gain_s * yaw_rate.
+    assert gap_logic.steering_damping(0.5, 0.07) == pytest.approx(-0.035, abs=1e-12)  # rad
+
+
+def test_a_left_yaw_rate_is_damped_to_the_right():
+    # oracle: invariant -- yaw is positive to the left (imu_bridge: x forward,
+    # y left, z up), so the damping steers right, and the mirror image steers
+    # left.
+    assert gap_logic.steering_damping(1.0, 0.07) < 0.0
+    assert gap_logic.steering_damping(-1.0, 0.07) > 0.0
+    assert gap_logic.steering_damping(1.0, 0.07) == pytest.approx(-0.07, abs=1e-12)  # rad
+    assert gap_logic.steering_damping(-1.0, 0.07) == pytest.approx(0.07, abs=1e-12)  # rad
+
+
+@pytest.mark.parametrize('yaw, gain', [(0.3, 0.05), (-2.0, 0.1), (4.0, 0.02)])
+def test_damping_is_linear_in_yaw_rate_and_in_gain(yaw, gain):
+    # oracle: invariant -- doubling either input doubles the term.
+    base = gap_logic.steering_damping(yaw, gain)
+    assert gap_logic.steering_damping(2.0 * yaw, gain) == pytest.approx(2.0 * base, abs=1e-12)  # rad
+    assert gap_logic.steering_damping(yaw, 2.0 * gain) == pytest.approx(2.0 * base, abs=1e-12)  # rad
+
+
+def test_zero_yaw_rate_adds_no_steering():
+    assert gap_logic.steering_damping(0.0, 0.07) == 0.0
+
+
+@pytest.mark.parametrize('yaw', [math.nan, math.inf, -math.inf])
+def test_a_non_finite_yaw_rate_adds_exactly_zero(yaw):
+    # A bad gyro sample must never become NaN steering
+    # (docs/gap-follow.md#steering-damping-gyro).
+    assert gap_logic.steering_damping(yaw, 0.07) == 0.0
+
+
+@pytest.mark.parametrize('gain', [0.0, -0.07, -1.0, math.nan, math.inf])
+def test_a_zero_negative_or_non_finite_gain_adds_exactly_zero(gain):
+    # A negative gain would steer *with* the rotation (positive feedback), so
+    # it must switch the term off, never flip it.
+    assert gap_logic.steering_damping(0.5, gain) == 0.0

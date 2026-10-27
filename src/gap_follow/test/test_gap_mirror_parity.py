@@ -13,6 +13,7 @@ published steering and speed tick by tick. Needs ROS sourced:
     export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
     python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 """
+import json
 import math
 import os
 import sys
@@ -22,7 +23,8 @@ import pytest
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Imu, Joy
+from std_msgs.msg import String
 
 from gap_follow.gap_follow_node import GapFollowNode
 
@@ -231,6 +233,79 @@ def test_mirror_matches_the_node_with_opponent_awareness_on():
         # a confirmed mover for most of the run, and the follow cap binding.
         assert sum(m is not None for m, _b in modes) >= 30, modes
         assert sum(b == 'follow' for _m, b in modes) >= 5, modes
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def _feed_imu(node, state, yaw_rate):
+    """What imu_bridge publishes for one tick: its verdict, then one sample."""
+    node.imu_status_callback(String(data=json.dumps(
+        {'state': state, 'reason': None, 'imu': 'bno'})))
+    msg = Imu()
+    msg.angular_velocity.z = float(yaw_rate)
+    node.imu_callback(msg)
+
+
+def test_mirror_matches_the_node_with_steering_damping_on():
+    """The same comparison with steering damping on at the shipped gain, a yaw
+    rate that swings both ways, and a faulty IMU for the last third of the
+    sequence. In that third both must add exactly nothing, and they must agree
+    on every tick. The healthy part must really exercise the term, or this
+    proves nothing about it (docs/gap-follow.md#steering-damping-gyro)."""
+    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+                     '-p', 'enable_steering_damping:=true', *TEST_ONLY_DRIVE])
+    node = GapFollowNode()
+    try:
+        assert node.drive_pub.topic_name == '/test_only/drive'
+        published = []
+        node.drive_pub.publish = lambda msg: published.append(msg)
+        node.command_slew_max_dt = DT
+        params = gap_mirror.node_params()
+        params['enable_steering_damping'] = True
+        params['command_slew_max_dt'] = DT
+        joy = Joy()
+        joy.buttons = [0] * 5
+        joy.buttons[4] = 1
+        scans = _scene_sequence()
+        mirror = gap_mirror.GapController(params, _Lidar(scans[0][0]))
+        speed = 2.0
+        node.last_commanded_speed = speed
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+        healthy_ticks = 2 * len(scans) // 3
+        damping = []
+        for step, (scan, forced_speed) in enumerate(scans):
+            if forced_speed is not None:
+                speed = node.last_commanded_speed = forced_speed
+            yaw = 2.0 * math.sin(0.35 * step)   # rad/s: left, then right
+            healthy = step < healthy_ticks
+            _feed_imu(node, 'ok' if healthy else 'fault', yaw)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            if node.last_command_time is not None:
+                node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            mirror.steering_basis = node.steering_basis
+            mirror.last_commanded_speed = node.last_commanded_speed
+            mirror.previous_target_idx = node.previous_target_idx
+            mirror.last_command_time = step - 1
+            node.scan_callback(scan)
+            expected_steering, expected_speed = mirror.command(
+                np.asarray(scan.ranges), speed, step,
+                yaw_rate=yaw if healthy else None)
+            drive = published[-1].drive
+            assert drive.steering_angle == pytest.approx(expected_steering, abs=TOLERANCE), (
+                f'tick {step}: steering')
+            assert drive.speed == pytest.approx(expected_speed, abs=TOLERANCE), (
+                f'tick {step}: speed')
+            damping.append(mirror.telemetry.get('steering_damping', 0.0))
+            speed = max(drive.speed, 0.8 * speed)
+        # The healthy part must carry a real term on enough driving ticks, or
+        # the agreement above is agreement about nothing.
+        assert sum(abs(d) > 1e-3 for d in damping[:healthy_ticks]) >= 10, damping
+        assert all(d == 0.0 for d in damping[healthy_ticks:]), damping
     finally:
         node.destroy_node()
         rclpy.shutdown()
