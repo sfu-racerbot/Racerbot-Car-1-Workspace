@@ -416,7 +416,9 @@
 
 ### Task 13: Calibrate the simulator's grip to car 1
 
-**Why:** `tools/f1tenth_sim/sim_fidelity/calibration.py`'s `surface_friction` 0.55 (a 5.4 m/s² friction circle) was fitted to run `20261019-200703`, which is car 2's floor. Car 1 achieved 93% of its commanded turn at 2.5-3.0 m/s² on 2026-10-26. Racing in the simulator decides nothing while its grip is another car's.
+**Why:** `tools/f1tenth_sim/sim_fidelity/calibration.py`'s `surface_friction` 0.55 (a 5.4 m/s² friction circle) was fitted to run `20261019-200703`. That run is not on car 1: likely car 2's floor, since the workspace was ported from car 2 on 2026-10-23, but unverified. Car 1 achieved 93% of its commanded turn at 2.5-3.0 m/s² on 2026-10-26. Racing in the simulator decides nothing while its grip may be another car's.
+
+**Result (2026-10-27):** the refit on car 1's runs confirmed 0.55. Run `20261026-194514` is at its minimum there, and `-194913` is nearly flat. No value changed; only the provenance now cites car 1 (commits `2594468`, `641c23b`).
 
 **Files:** `tools/f1tenth_sim/sim_fidelity/calibration.py` (value and provenance entry), `docs/sim-fidelity-audit.md` (one row), plus any test in `tools/f1tenth_sim/tests/` that pins the provenance format.
 
