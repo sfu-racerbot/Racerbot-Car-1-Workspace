@@ -287,7 +287,8 @@
 
 **Files:**
 - Modify: `src/gap_follow/config/gap_follow.yaml:110`, `src/gap_follow/README.md:455` (shipped value), `docs/gap-follow.md` lines 42, 80, 139, 165 and 424 (each says the shipped value is 2.0)
-- **Do not** change `src/neural_racer/*`: its 2.0 is that package's own decision, deferred to its Phase 10+.
+- **Decision, 2026-10-26:** `src/neural_racer/test/test_config.py::test_wrapper_values_match_gap_follow` requires `neural_racer.yaml`'s `max_lateral_accel` to equal `gap_follow.yaml`'s. The user chose to raise **both** to 2.5 and leave the test unchanged. That lifts `neural_racer.yaml`'s "Phase 10+" reservation for this one value. Nothing else in `src/neural_racer/` changes.
+- The grip evidence was measured with the limit at 2.0, and `docs/gap-follow.md`'s 2026-10-19 floor run reported sliding above 2.0. The docs give both measurements, and the first floor runs at 2.5 follow the wheels-off, then low-speed order. Task 15 replaces the guess with a measured, adaptive limit.
 
 - [ ] **Step 1: Find any test pinning the shipped value.** `grep -rn "max_lateral_accel" src/gap_follow/test tools/f1tenth_sim/tests src/racerbot_launch/test`. If a test asserts 2.0 as a spec, **stop and report** under Hard rule 2.
 - [ ] **Step 2: Simulator check before the change.**
@@ -413,7 +414,79 @@
     - Do not build it here.
 - [ ] **Step 3: Record** the table in the spec's A7 section with the next three levers ranked. Commit.
 
+### Task 13: Calibrate the simulator's grip to car 1
+
+**Why:** `tools/f1tenth_sim/sim_fidelity/calibration.py`'s `surface_friction` 0.55 (a 5.4 m/s² friction circle) was fitted to run `20261019-200703`, which is car 2's floor. Car 1 achieved 93% of its commanded turn at 2.5-3.0 m/s² on 2026-10-26. Racing in the simulator decides nothing while its grip is another car's.
+
+**Files:** `tools/f1tenth_sim/sim_fidelity/calibration.py` (value and provenance entry), `docs/sim-fidelity-audit.md` (one row), plus any test in `tools/f1tenth_sim/tests/` that pins the provenance format.
+
+- [ ] **Step 1: Fit, inline by the controller.** Run `tools/run_analysis/fit_sim.py <run> --grid surface_friction=0.25,0.30,0.35,0.40,0.45,0.55` on `20261026-194514` and `20261026-194913`, each LB hold. Pick the value that best fits both runs. Also report the steering delay and servo gain the fitter prefers, without changing them, as the input for Task 7.
+- [ ] **Step 2: Change and cite.** Set `surface_friction` to the fit, with provenance `MEASURED` naming both runs and the grid result. Keep the Oct-19 value in the provenance text as car 2's.
+- [ ] **Step 3: Re-run the baselines.** Run `eval_gap.py --track indoor` before and after the change and record both in the commit. This is a simulator calibration, not a test oracle change; a test pinning 0.55 means stop and report.
+
+### Task 14: Head-to-head racing between two of our cars
+
+**Files:** `tools/f1tenth_sim/eval_gap_multi.py`, and `tools/f1tenth_sim/tests/test_eval_gap_multi_head_to_head.py` (new).
+
+**Interfaces:**
+- Produces:
+  - CLI `--car-set N:name=value` (repeatable; N is the 0-based car index), applied after `--set`, so each car runs its own `gap_follow` parameters.
+  - `head_to_head(run_result: dict) -> dict`, a pure function, with keys:
+    - `finish_order` (car indices, by time to complete `--laps`; unfinished cars last, ordered by distance);
+    - `gap_s` (time between the first two finishers, or `inf`);
+    - `overtakes` (per car: how many times it moved from behind to ahead along the centreline);
+    - `contacts` (per car, from sim_fidelity's chassis check, never gym's flag);
+    - `winner` (the first finisher with no contact, else `None`).
+  - Per-seed and aggregate output: wins per car, mean gap and contacts. Exit 0 always for a head-to-head run; it is a comparison, not a pass/fail.
+  - **Start fairness:** with `--swap-starts`, every seed is run twice with the start order swapped, so starting position cancels out.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `head_to_head` on synthetic results: a clean win, a win with contact (the winner is the clean car), nobody finishing, and an overtake counted once, not on every tick of side-by-side.
+  - `--car-set` parsing: a bad index or a malformed item raises `SystemExit` naming the bad item.
+- [ ] **Step 2: Implement.** Hard rule 1: count every tick as an overtake, and the overtake test must fail.
+- [ ] **Step 3: Smoke.** Run `--cars 2 --car-set 1:max_lateral_accel=2.0 --swap-starts --seeds 2 --track indoor_wide` and show the table. Commit.
+
+### Task 15: Adaptive grip from the IMU (`adaptive_grip`)
+
+**Gate:** Tasks 9 (IMU subscription and gating), 13 and 14 are done.
+
+**Files:** `src/gap_follow/gap_follow/gap_logic.py`, `gap_follow_node.py`, `config/gap_follow.yaml`, `launch/gap_follow_launch.py`, `tools/f1tenth_sim/gap_mirror.py`, `eval_gap.py`, `eval_gap_multi.py`, `docs/gap-follow.md`, `src/gap_follow/README.md`. Tests in `src/gap_follow/test/test_gap_logic.py` and the Task 9 node-test file.
+
+**Interfaces:**
+- Produces:
+  - `gap_logic.grip_ratio(yaw_rate: float, speed: float, steering: float, wheelbase: float) -> float`: `yaw_rate*speed / (speed**2*tan(steering)/wheelbase)`. Returns `nan` when `speed < 1.0` or `|steering| < 0.05`, or for non-finite inputs.
+  - `gap_logic.AdaptiveGrip`, a dataclass with fields `base`, `ceiling`, `rise_per_s`, `cut_factor`, `hold_ratio`, `slip_ratio`, `judge_fraction` and `limit`. Its method `update(ratio: float, demand: float, dt: float) -> float` returns the lateral limit to use this tick:
+    - if `ratio` is nan, or `demand < judge_fraction*limit`: unchanged;
+    - if `ratio >= hold_ratio`: `limit = min(ceiling, limit + rise_per_s*dt)`;
+    - if `ratio < slip_ratio`: `limit = max(base, limit*cut_factor)`;
+    - otherwise unchanged.
+  - Node parameters:
+    - `enable_adaptive_grip` (default `False` in code and YAML);
+    - `adaptive_grip_ceiling` (3.0), `adaptive_grip_rise_per_s` (0.2), `adaptive_grip_cut_factor` (0.85), `adaptive_grip_hold_ratio` (0.95), `adaptive_grip_slip_ratio` (0.90), `adaptive_grip_judge_fraction` (0.8);
+    - the base is `max_lateral_accel`;
+    - the ratio is low-passed with a 0.3 s time constant before judging.
+  - The curve cap and cornering anticipation use the adaptive limit instead of `max_lateral_accel`.
+  - **IMU failure:** with the IMU not `ok`, stale, never received or NaN, the limit resets to `max_lateral_accel`, today's behaviour, and `/drive_intent` gets `adaptive_grip_off: <why>`. This reuses Task 9's IMU gating.
+  - Launch argument: `adaptive_grip:=true|false` in `gap_follow_launch.py`, which starts the IMU stack like `steering_damping:=true`.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `grip_ratio`, oracle closed form: on a circle of radius 2 m at 2 m/s, true yaw rate 1.0 rad/s and steering `atan(0.36/2)` give 1.0 (`abs=1e-12`). Half the yaw rate gives 0.5. Each guard returns nan.
+  - `AdaptiveGrip`, oracle closed form:
+    - 10 s of ratio 1.0 at full demand from 2.0 gives `min(3.0, 2.0 + 0.2*10)`;
+    - one slip tick from 2.8 gives `2.8*0.85`;
+    - never below `base`, never above `ceiling`;
+    - low demand leaves it unchanged;
+    - nan leaves it unchanged.
+  - Node tests: flag on with a healthy IMU raises the curve-capped published speed over time on a fixed scan and yaw-rate feed. Each IMU failure mode publishes exactly the fixed-2.0 command, with the `/drive_intent` reason.
+  - The four deadman deny-path tests with the flag on.
+- [ ] **Step 2: Run them; they fail. Implement; they pass.** Hard rule 1 breaks: flip the comparison in the hold branch (`>=` to `<`), and remove the `base` floor.
+- [ ] **Step 3: Mirror it.** `gap_mirror` takes the yaw rate (already added in Task 9). `eval_gap` and `eval_gap_multi` pass the gym's true yaw rate. Parity passes with the flag off.
+- [ ] **Step 4: Prove it in the simulator, inline.** With Task 13's grip, `eval_gap.py --track indoor` with the flag on must give no new contacts and stops. Then race `eval_gap_multi.py --cars 2 --car-set 1:enable_adaptive_grip=true --swap-starts --seeds 6` on each indoor track. Record wins, gap and contacts in the spec. The flag ships **off** either way; it is only proposed for floor testing if it wins without contacts.
+- [ ] **Step 5: Docs, full suite, commit.** Document it in `docs/gap-follow.md` ("Adaptive grip (IMU)": what it does, how it falls back, the car test order) and in the README parameter table. Run `check_docs.py`.
+
 ### Task 12: Final verification and hand-over
+
+**Run order (decided 2026-10-26):** Tasks 1-11 and 13-15 before Task 12. Task 13 runs before Tasks 8, 9 and 10's simulator checks, so they judge against car 1's grip.
 
 - [ ] **Step 1: Run every affected suite,** sourced and isolated, comparing each collected count to `grep -c '^def test'`:
   - `src/gap_follow/test/`, `src/pure_pursuit/test/`, `src/racerbot_launch/test/`
