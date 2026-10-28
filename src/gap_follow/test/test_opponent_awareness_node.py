@@ -207,3 +207,75 @@ def test_tracking_uses_the_scan_stamps_not_a_fixed_rate():
     finally:
         OPP_SPEED = saved
     assert mode is None
+
+
+@pytest.fixture
+def aware_node():
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    yield node, published
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+def _follow_tick(node, published, step, gap, ego_speed, joy_state='held'):
+    scan = _raycast(_corridor(2.0, 2.0) + _box(gap + FRONT - LASER_X))
+    ns = round((100.0 + step * DT) * 1e9)
+    scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+    if joy_state in ('held', 'released', 'stale'):
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, int(joy_state != 'released')]
+        node.joy_callback(joy)
+        if joy_state == 'stale':
+            node.last_joy_time = node.get_clock().now() - Duration(
+                seconds=node.joy_timeout_sec + DT)
+    odom = Odometry()
+    odom.twist.twist.linear.x = float(ego_speed)
+    node.odom_callback(odom)
+    node.steering_basis = 0.0
+    node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+    node.scan_callback(scan)
+    return published[-1].drive.speed
+
+
+def test_known_stopped_car_publishes_zero_then_resumes(aware_node):
+    node, published = aware_node
+    # Leader and ego roll together at 1 m/s: constant gap, real confirmation.
+    for step in range(40):
+        _follow_tick(node, published, step, 0.4, 1.0)
+    for step in range(40, 64):
+        stopped_speed = _follow_tick(node, published, step, 0.4, 0.0)
+    # oracle: R2 gap-only law at 0.4 < 0.5 m, on the published command.
+    assert stopped_speed == 0.0
+    assert node.opponents.followed_body()
+    speeds = [_follow_tick(node, published, 64 + k, 0.4 + k * DT, 0.0)
+              for k in range(1, 13)]
+    # oracle: leader moves 0.3 m at 1 m/s; gap now exceeds minimum by 0.2 m.
+    assert speeds[-1] > 0.0
+
+
+def _deadman_with_moving_car(aware_node, state):
+    node, published = aware_node
+    # A leader at 1 m/s recedes from the stationary ego, confirming a real track.
+    for step in range(40):
+        speed = _follow_tick(node, published, step, 1.5 + step * DT, 0.0, state)
+    return speed
+
+
+def test_awareness_deadman_held_publishes_motion(aware_node):
+    # oracle: LB policy permissive path, open road and a moving car ahead.
+    assert _deadman_with_moving_car(aware_node, 'held') > 0.0
+
+
+def test_awareness_deadman_released_publishes_zero(aware_node):
+    # oracle: CLAUDE.md safety model; released LB must deny motion.
+    assert _deadman_with_moving_car(aware_node, 'released') == 0.0
+
+
+def test_awareness_deadman_never_received_publishes_zero(aware_node):
+    # oracle: CLAUDE.md safety model; absent /joy must deny motion.
+    assert _deadman_with_moving_car(aware_node, 'never') == 0.0
+
+
+def test_awareness_deadman_stale_publishes_zero(aware_node):
+    # oracle: CLAUDE.md safety model; expired /joy must deny motion.
+    assert _deadman_with_moving_car(aware_node, 'stale') == 0.0

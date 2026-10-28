@@ -739,3 +739,93 @@ def test_validate_rejects_servo_model_values():
         ot.OpponentParams(steer_gain=0.0).validate()
     with pytest.raises(ValueError, match='opponent_steer_delay must be >= 0'):
         ot.OpponentParams(steer_delay=-0.01).validate()
+
+
+def _confirmed_follow_layer(**kwargs):
+    layer = ot.OpponentAwareness(ot.OpponentParams(**kwargs), WHEELBASE,
+                                 LASER_X, 0.0, CAR_LENGTH)
+    # Real detections confirm a 1 m/s car, not an injected confirmation flag.
+    _feed(layer.tracker, [(1.0 + k * 0.025, 0.0) for k in range(40)])
+    assert layer.tracker.tracks[0].moving  # oracle: constant-velocity target
+    return layer
+
+
+def test_follow_leader_two_mps_at_its_time_gap():
+    layer = _layer_with_track(FRONT + 2.5, 0.0, 2.0, 0.0,
+                              follow_time_gap=1.0, follow_min_gap=0.5)
+    # oracle: closed form, gap-only law; leader speed cancels at its time gap.
+    assert layer.follow_cap() == pytest.approx((2.5 - 0.5) / 1.0, abs=1e-12)
+
+
+def test_confirmed_car_stays_followed_when_it_stops():
+    layer = _confirmed_follow_layer()
+    t = layer.tracker.tracks[0]
+    for _ in range(24):
+        layer.tracker.update([(t.x, t.y, 0.0)], 0.025)
+    # oracle: R2 hold invariant, despite the unchanged moving latch releasing.
+    assert not t.moving
+    assert layer.followed_body()
+    assert math.isfinite(layer.follow_cap())
+    # Noise at rest must not turn a confirmed car into an oncoming car.
+    t.vx = -0.01
+    assert layer.followed_body()
+    assert layer.moving_body() == []
+
+
+@pytest.mark.parametrize('offset', [0.0, 0.001, -0.001])
+def test_follow_minimum_gap_exact_boundary(offset):
+    p = ot.OpponentParams(follow_min_gap=0.5, follow_time_gap=1.0)
+    # oracle: closed form; below the minimum is clamped, never negative.
+    result = ot.follow_speed_cap([(FRONT + p.follow_min_gap + offset, 0.0)], FRONT, p)
+    assert result == pytest.approx(max(0.0, offset / p.follow_time_gap), abs=1e-12)
+
+
+def test_held_car_cap_rises_with_gap():
+    layer = _confirmed_follow_layer()
+    t = layer.tracker.tracks[0]
+    for _ in range(24):
+        layer.tracker.update([(t.x, t.y, 0.0)], 0.025)
+    t.vx = t.vy = 0.0
+    caps = []
+    for gap in (0.6, 0.8):
+        t.x = FRONT + gap
+        caps.append(layer.follow_cap())
+        # oracle: closed form independent of the stopped leader's velocity.
+        assert caps[-1] == pytest.approx(
+            (gap - layer.params.follow_min_gap) / layer.params.follow_time_gap, abs=1e-12)
+    assert caps[1] > caps[0]  # oracle: increasing gap must release a zero cap
+
+
+def test_held_car_release_exact_boundary():
+    # Binary-exact dt makes equality a timing oracle, not floating-point drift.
+    dt, release = 0.125, 2.0
+    layer = _confirmed_follow_layer(stopped_release_sec=release)
+    t = layer.tracker.tracks[0]
+    t.vx = t.vy = 0.0
+    for _ in range(round(release / dt)):
+        layer.tracker.update([(t.x, t.y, 0.0)], dt)
+    # oracle: R2 inclusive hold through exactly release seconds.
+    assert layer.followed_body()
+    layer.tracker.update([(t.x, t.y, 0.0)], dt)
+    assert layer.followed_body() == []
+    assert layer.follow_cap() == math.inf
+
+
+@pytest.mark.parametrize('flicker', [False, True])
+def test_never_confirmed_wall_is_never_followed(flicker):
+    layer = ot.OpponentAwareness(ot.OpponentParams(), WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+    for k in range(80):
+        # Flickering fragment moves in the filter, but never has min_hits scans.
+        x = 1.0 + k * 0.025 if flicker else 2.0
+        detections = [] if flicker and k % 4 == 3 else [(x, 0.0, 0.0)]
+        layer.tracker.update(detections, 0.025)
+        # oracle: Review Focus 2, only once-moving-confirmed tracks may be held.
+        assert layer.followed_body() == []
+        assert layer.follow_cap() == math.inf
+
+
+@pytest.mark.parametrize('value', [0.0, -1.0, math.nan, math.inf])
+def test_stopped_release_must_be_positive_finite(value):
+    # oracle: parameter validation contract, seconds must be positive and finite.
+    with pytest.raises(ValueError, match='opponent_stopped_release_sec must be positive'):
+        ot.OpponentParams(stopped_release_sec=value).validate()
