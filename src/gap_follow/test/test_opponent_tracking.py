@@ -851,6 +851,7 @@ def test_stopped_release_must_be_positive_finite(value):
 
 
 def test_held_leader_cap_is_independent_of_passing_a_moving_car():
+    # Review mutation: using the pass-dependent held band fails the cap oracle.
     layer = _confirmed_follow_layer()
     held = layer.tracker.tracks[0]
     for _ in range(24):

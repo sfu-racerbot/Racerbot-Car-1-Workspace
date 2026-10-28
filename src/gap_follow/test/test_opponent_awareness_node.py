@@ -282,8 +282,9 @@ def _confirm_moving_car(aware_node):
 
 
 def test_awareness_deadman_held_publishes_motion(aware_node):
-    # R2 step 4: all four new deadman assertions were flipped and failed;
-    # the deadman implementation itself was never modified.
+    # R2 review step 5: all four revised command expectations were flipped
+    # and failed, after adding moving-car confirmation and the fresh-node
+    # no-Joy control. The deadman implementation itself was never modified.
     # oracle: LB policy permissive path, open road and a moving car ahead.
     assert _confirm_moving_car(aware_node)[-1] > 0.0
 

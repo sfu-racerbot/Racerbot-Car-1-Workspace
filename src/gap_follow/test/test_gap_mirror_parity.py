@@ -262,6 +262,7 @@ def test_mirror_matches_stopped_then_departing_confirmed_car():
         joy.buttons = [0, 0, 0, 0, 1]
         # Start equivalently once. Each controller carries its own command,
         # steering basis and target history through every subsequent scan.
+        # Review mutation: discarding the mirror's carried rack fails at tick 1.
         node.steering_basis = mirror.steering_basis = 0.0
         node.last_commanded_speed = mirror.last_commanded_speed = 0.0
         for step in range(76):
