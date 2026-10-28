@@ -40,6 +40,12 @@ def _validate_controlled_cars(context):
     return []
 
 
+def _mux(mux_config, namespace='', condition=None):
+    return Node(package='ackermann_mux', executable='ackermann_mux',
+                name='ackermann_mux', namespace=namespace,
+                parameters=[mux_config], condition=condition)
+
+
 def generate_launch_description():
     mux_config = os.path.join(
         get_package_share_directory('f1tenth_stack'), 'config', 'mux.yaml')
@@ -98,12 +104,7 @@ def generate_launch_description():
             'release_after_sec': LaunchConfiguration('release_after_sec'),
         }],
     )
-    ackermann_mux = Node(
-        package='ackermann_mux',
-        executable='ackermann_mux',
-        name='ackermann_mux',
-        parameters=[mux_config],
-    )
+    ackermann_mux = _mux(mux_config)
     static_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -119,9 +120,7 @@ def generate_launch_description():
         parameters=[{'joy_topic': '/car2/joy',
                      'hold_deadman': LaunchConfiguration('hold_deadman'),
                      'release_after_sec': LaunchConfiguration('release_after_sec')}])
-    car2_mux = Node(package='ackermann_mux', executable='ackermann_mux',
-                    name='ackermann_mux', namespace='car2', parameters=[mux_config],
-                    condition=second_car)
+    car2_mux = _mux(mux_config, namespace='car2', condition=second_car)
     car2_tf = Node(package='tf2_ros', executable='static_transform_publisher',
                    name='static_baselink_to_laser', namespace='car2', condition=second_car,
                    arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0',

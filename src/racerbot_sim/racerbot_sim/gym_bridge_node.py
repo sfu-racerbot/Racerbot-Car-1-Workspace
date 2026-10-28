@@ -80,6 +80,7 @@ class GymBridgeNode(Node):
         self.declare_parameter('odom_speed_noise_std', 0.01)
         self.declare_parameter('odom_yaw_rate_scale', 1.0)
         self.declare_parameter('publish_ground_truth', True)
+        self.declare_parameter('interlock_discovery_hold_sec', 3.0)
 
         def value(name):
             return self.get_parameter(name).value
@@ -127,7 +128,8 @@ class GymBridgeNode(Node):
         ))
 
         self.interlock = HardwareInterlock(
-            self, 'simulated /scan and /odom')
+            self, 'simulated /scan and /odom',
+            discovery_hold_sec=float(value('interlock_discovery_hold_sec')))
         self.commanded_speed = 0.0
         self.commanded_steering = 0.0
         self.last_command_time = None

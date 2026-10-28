@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -161,12 +162,12 @@ def ros_context():
         return p
     yield node, start
     for process in processes:
-        process.terminate()
+        os.killpg(process.pid, signal.SIGTERM)
     for process in processes:
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
     node.destroy_node()
     rclpy.shutdown()
@@ -175,7 +176,7 @@ def ros_context():
 def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
     node, start = ros_context
     hardware = rclpy.create_node('urg_node')
-    received = {topic: 0 for topic in ['/scan', '/car2/scan', '/odom', '/car2/odom', '/car2/joy']}
+    received = {topic: 0 for topic in ['/scan', '/car2/scan', '/odom', '/car2/odom', '/joy', '/car2/joy']}
     def callback(topic):
         def record(_):
             received[topic] += 1
@@ -185,6 +186,7 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         node.create_subscription(kind, topic, callback(topic), 10)
     try:
         start('gym_bridge_node', '-p', 'controlled_cars:=2')
+        start('sim_joy_node')
         start('sim_joy_node', '-r', '__ns:=/car2', '-p', 'joy_topic:=/car2/joy')
         # oracle: active hardware suppresses all synthetic sensor and joy output.
         assert not _spin_until(node, lambda: any(received.values()), 3.0), received
