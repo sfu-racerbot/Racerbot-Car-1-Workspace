@@ -643,9 +643,9 @@ class OpponentAwareness:
         """Physical room on the selected side, before ego-width inflation.
 
         Project sensed returns into base_link. Beside each opponent's
-        longitudinal footprint, the nearest return outside its inflated side
-        is the wall bounding that side's gap. Using the full footprint span
-        makes a narrowing visible in this scan veto passing immediately.
+        predicted longitudinal footprint, the nearest return outside its
+        inflated side is the wall bounding that side's gap. Check every
+        prediction step, so a narrowing ahead vetoes passing immediately.
         The selected gap's middle bearing chooses the side; a gap pointing
         into the opponent has zero room. This measures room only for the
         pass decision; all driving safety checks retain the original scan.
@@ -660,20 +660,25 @@ class OpponentAwareness:
         bearing = float(a[(start + end) // 2])
         room = math.inf
         p = self.params
+        steps = int(math.floor(p.prediction_horizon / p.prediction_step + 1e-9))
         for m in self.moving_body():
-            cx, cy, hx, hy = _rectangle((*m[:4], m[5]), self.laser_x, self.laser_y, p)
+            centre_x, centre_y, hx, hy = _rectangle(
+                (*m[:4], m[5]), self.laser_x, self.laser_y, p)
             half_l = p.length / 2 + p.passing_margin
             half_w = p.width / 2 + p.passing_margin
             extent_x = abs(hx) * half_l + abs(hy) * half_w
             extent_y = abs(hy) * half_l + abs(hx) * half_w
-            target_y = self.laser_y + (cx - self.laser_x) * math.tan(bearing)
-            side = 1.0 if target_y > cy else -1.0
-            if abs(target_y - cy) <= extent_y:
-                return 0.0
-            beside = (np.isfinite(r) & (xs >= cx - extent_x) & (xs <= cx + extent_x)
-                      & (side * (ys - cy) > extent_y))
-            if np.any(beside):
-                room = min(room, float(np.min(side * (ys[beside] - cy))) - extent_y)
+            for k in range(steps + 1):
+                cx = centre_x + m[2] * k * p.prediction_step
+                cy = centre_y + m[3] * k * p.prediction_step
+                target_y = self.laser_y + (cx - self.laser_x) * math.tan(bearing)
+                side = 1.0 if target_y > cy else -1.0
+                if abs(target_y - cy) <= extent_y:
+                    return 0.0
+                beside = (np.isfinite(r) & (xs >= cx - extent_x) & (xs <= cx + extent_x)
+                          & (side * (ys - cy) > extent_y))
+                if np.any(beside):
+                    room = min(room, float(np.min(side * (ys[beside] - cy))) - extent_y)
         return room
 
     def follow_cap(self, passing: bool = True) -> float:

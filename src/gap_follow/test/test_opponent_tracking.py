@@ -1025,3 +1025,48 @@ def test_rectangle_synthetic_corridor_aborts_on_first_narrow_tick():
                 (LASER_X + 2.0 - FRONT - layer.params.follow_min_gap) /
                 layer.params.follow_time_gap, abs=1e-12)
     assert modes == ['pass', 'follow']  # oracle: no tick of latched passing
+
+
+def test_rectangle_prediction_checks_narrowing_beyond_current_body():
+    layer = ot.OpponentAwareness(ot.OpponentParams(passing_margin=0.05),
+                                 WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+    layer.tracker.tracks = [ot.Track(LASER_X + 2.0, 0.0, vx=1.0, moving=True,
+                                     near_range=2.0)]
+    side = (int(np.searchsorted(ANGLES, 0.15)), int(np.searchsorted(ANGLES, 0.25)), False)
+    # The neck starts beyond the present inflated rectangle's front, inside
+    # its prediction horizon. Both walls are visible beside the other car.
+    neck_x = LASER_X + 2.0 + CAR_LENGTH + 0.1
+    walls = [((-1.0, s * .76), (neck_x, s * .76)) for s in (-1, 1)]
+    walls += [((neck_x, s * .76), (neck_x, s * .53)) for s in (-1, 1)]
+    walls += [((neck_x, s * .53), (8.0, s * .53)) for s in (-1, 1)]
+    window, _ = _scan(walls + _box(LASER_X + 2.0 + CAR_LENGTH / 2, 0.0))
+    # oracle: once prediction reaches the neck, room is .53-.155-.05=.325,
+    # too narrow for ego's .31+2*.05=.41 m, on this first observed tick.
+    assert layer.passing_gap_width(window, ANGLES, side) == pytest.approx(
+        1.06 / 2 - layer.params.width / 2 - layer.params.passing_margin, abs=1e-12)
+
+
+@pytest.mark.parametrize('heading', [0.0, math.pi / 2])
+def test_rectangle_crossing_side_beam_closed_form(heading):
+    p = ot.OpponentParams(passing_margin=0.05, prediction_horizon=0.0)
+    near = 2.0
+    transverse = p.width / 2 if heading == 0.0 else p.length / 2
+    y = transverse + p.passing_margin - .001
+    angle = math.atan2(y, near - p.passing_margin)
+    out = ot.inflate_predicted([10.0], [angle],
+                               [(LASER_X + near, 0.0, math.cos(heading),
+                                 math.sin(heading), near)], LASER_X, 0, p)
+    # oracle: rear view spans W, crossing view spans L; both meet x=d-margin.
+    assert out[0] == pytest.approx((near - p.passing_margin) / math.cos(angle), abs=1e-12)
+
+
+def test_rectangle_undefined_heading_uses_line_of_sight():
+    p = ot.OpponentParams(passing_margin=0.05, prediction_horizon=0.0)
+    # Below half moving_speed, even a perpendicular velocity must not set h.
+    angle = math.atan2((p.length + p.width) / 4 + p.passing_margin,
+                       2.0 - p.passing_margin)
+    out = ot.inflate_predicted([10.0, 10.0], [0.0, angle],
+                               [(LASER_X + 2.0, 0.0, 0.0, .29, 2.0)], LASER_X, 0, p)
+    # oracle: line-of-sight rear face d, regardless of the low-speed vector.
+    assert out[0] == pytest.approx(2.0 - p.passing_margin, abs=1e-12)
+    assert out[1] == 10.0  # oracle: beyond rear-view width, inside crossing length

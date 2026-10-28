@@ -259,8 +259,12 @@ def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
         modes = []
         for step in range(60):
             t = step * DT
-            # Stationary ego: real 1 m/s target motion establishes heading.
-            x, y = (2.5, -0.5 + t) if crossing else (2.0 + t, 0.0)
+            # Stationary ego: real target motion establishes heading. Keep
+            # the whole crossing car within the walls: over 60 ticks its
+            # centre runs from -0.6 to +0.58 m, plus 0.29 m half-length,
+            # strictly inside the +/-1 m walls. Previously y=-0.5+t drove
+            # into the wall: detection merges at tick 45, contact at tick 49.
+            x, y = (2.5, -0.6 + 0.8 * t) if crossing else (3.0 - t, 0.0)
             width = 2.0 if crossing else (1.52 if step < 45 else 1.06)
             box = _box(x, y, yaw=math.pi / 2 if crossing else 0.0)
             scan = _raycast(_corridor(width / 2, width / 2) +
@@ -268,10 +272,13 @@ def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
             ns = round((100.0 + t) * 1e9)
             scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
             node.joy_callback(joy)
-            node.odom_callback(Odometry())
+            odom = Odometry()
+            odom.twist.twist.linear.x = 0.0 if crossing else 2.0
+            node.odom_callback(odom)
             node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
             node.scan_callback(scan)
-            steering, speed = mirror.command(np.asarray(scan.ranges), 0.0, step)
+            steering, speed = mirror.command(
+                np.asarray(scan.ranges), odom.twist.twist.linear.x, step)
             # oracle: integration invariant, independent controller histories.
             assert published[-1].drive.speed == pytest.approx(speed, abs=TOLERANCE)
             assert published[-1].drive.steering_angle == pytest.approx(steering, abs=TOLERANCE)
