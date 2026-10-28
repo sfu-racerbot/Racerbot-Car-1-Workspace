@@ -262,6 +262,8 @@ def _deadman_with_moving_car(aware_node, state):
 
 
 def test_awareness_deadman_held_publishes_motion(aware_node):
+    # R2 step 4: all four new deadman assertions were flipped and failed;
+    # the deadman implementation itself was never modified.
     # oracle: LB policy permissive path, open road and a moving car ahead.
     assert _deadman_with_moving_car(aware_node, 'held') > 0.0
 

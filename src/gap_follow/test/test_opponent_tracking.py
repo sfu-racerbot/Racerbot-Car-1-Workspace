@@ -741,6 +741,10 @@ def test_validate_rejects_servo_model_values():
         ot.OpponentParams(steer_delay=-0.01).validate()
 
 
+# R2 step-4 mutation checks: dropping the hold kills the stopped-car test;
+# ignoring its timeout kills the release test; holding unconfirmed tracks kills
+# both wall cases; forcing zero kills the increasing-gap test; removing the
+# zero clamp kills the -1 mm boundary. Constant caps kill the closed-form tests.
 def _confirmed_follow_layer(**kwargs):
     layer = ot.OpponentAwareness(ot.OpponentParams(**kwargs), WHEELBASE,
                                  LASER_X, 0.0, CAR_LENGTH)
