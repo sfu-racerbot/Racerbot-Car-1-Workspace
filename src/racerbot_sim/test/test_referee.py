@@ -15,6 +15,12 @@ Referee, overtakes and stalls stubs failed all 36 cases in this file;
 the Referee stub also failed all three position-fed parity scenarios.
 Numeric mutations caught: finish comparison flipped, reverse sign ignored,
 perimeter +10%, XY swapped, update returning its input, and arc wrap removed.
+
+R6 review round 1 audit (2026-10-28): loss accounting disabled failed all four
+step-gap tests and the node clock test; joining persistence windows across
+missing steps failed the stall and overtake tests; counting received samples
+as elapsed time failed the 1.5 s gap oracle (reported 0.5 s); accepting duplicate
+steps failed the unchanged-result invariant. All mutations were restored.
 """
 
 import json

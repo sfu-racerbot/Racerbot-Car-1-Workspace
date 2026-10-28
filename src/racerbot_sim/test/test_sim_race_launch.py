@@ -26,6 +26,12 @@ Thus the orders agree but the winner/finishing verdict disagrees in both
 lineups. ROS logs show swept-clearance caps falling to zero and 'no imu';
 these observations do not establish the cause of the fidelity difference.
 IMU simulation remains Part B3, outside R6; no controller settings were tuned.
+
+Review round 1 mutation audit: stale separate poses failed the status-position
+oracle before the fix; depth 10 and BEST_EFFORT each failed the status QoS test;
+writing missed_steps=1 failed all three live race JSON checks; dropping probe
+step 10 failed deadman completeness despite zero referee loss. Restoring broad
+stray-process patterns failed the quoted-brief regression. All breaks restored.
 """
 
 import contextlib
