@@ -36,6 +36,16 @@
 - **Docs** under `docs/` follow the `novice-docs` skill, and `check_docs.py` must add no new findings.
 - **Commits** end with the attribution line the session's system prompt gives. Never push to `main`.
 
+## Execution notes (2026-10-28)
+
+Decisions taken before Task R1, with the user:
+- **Branch:** `part-b1-racing`, from `main`, which already holds Part A (PR #5). The "merge Part A first" step above is done.
+- **Who types:** opencode sessions on the OpenAI subscription. `openai/gpt-6.1-sol` implements R2 and R4 (the code that sets speed) and does the final whole-branch review. `openai/gpt-6.1-terra` implements R1, R3, R5, R6 and R7 and reviews each task. The controlling session writes every brief, re-runs every gate and reads every diff.
+- **Where they work:** a worktree at `.oc-worktrees/oc/part-b1-racing`, with its own build. `RB_WS=<worktree> rb <command>` runs there instead of `~/racerbot-ws`; without `RB_WS`, `rb` is unchanged.
+- **Team A is used as built, never copied or edited.** Task R8 (a Python port of `disparity_extender`) is **dropped**. Tuning against team A uses their compiled node in `racerbot_sim` (R7).
+- **Team A's own deadman and TTC stay on** (their launch defaults), not their README's simulator setting `enable_deadman:=false`. Car 2's `sim_joy_node` forges LB on `/car2/joy` for them, so Review Focus 4 is tested on their side too.
+- **Their `safety_node` subscribes to absolute names:** `/scan`, `/joy`, `/drive_raw`, `/ego_racecar/odom`. A `/car2` namespace does not move these, so R7 remaps each one explicitly (`/scan:=/car2/scan` and so on). The static check in R7 step 4 covers both the relative and the absolute names.
+
 ## Review Focus
 
 1. **The leader stops dead** in front of the follower: the follower must stop with it, without contact, and **resume** when the leader moves on. Today it never resumes.
