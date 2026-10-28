@@ -239,6 +239,9 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         kind = Joy if topic.endswith('joy') else Odometry if topic.endswith('odom') else LaserScan
         node.create_subscription(kind, topic, callback(topic), 10)
     try:
+        # oracle: all subscribers exist on the graph before any publisher starts.
+        assert _spin_until(node, lambda: all(node.count_subscribers(topic) > 0
+                                             for topic in received), 5.0)
         start('gym_bridge_node', '-p', 'controlled_cars:=2')
         start('sim_joy_node')
         start('sim_joy_node', '-r', '__ns:=/car2', '-p', 'joy_topic:=/car2/joy')
@@ -246,7 +249,7 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         assert _spin_until(node, lambda: all(node.count_publishers(topic) > 0
                                              for topic in received), 20.0)
         # oracle: active hardware suppresses all synthetic sensor and joy output.
-        assert not _spin_until(node, lambda: any(received.values()), 3.0), received
+        assert not _spin_until(node, lambda: any(received.values()), 5.0), received
     finally:
         hardware.destroy_node()
     # oracle: after the hardware disappears both scans resume.
