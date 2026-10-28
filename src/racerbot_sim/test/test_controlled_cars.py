@@ -119,6 +119,35 @@ def make_bridge(tmp_path):
         bridge.close()
 
 
+@pytest.mark.parametrize('offsets', [(), (0.0, -5.0)])
+def test_controlled_start_poses_follow_centerline_offsets(make_bridge, offsets):
+    b = make_bridge(controlled_cars=2, controlled_start_offsets_m=offsets)
+    xy = b.centerline
+    lengths = np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)
+    arc = np.concatenate(([0.0], np.cumsum(lengths)))
+
+    def point(s):
+        s %= arc[-1]
+        i = np.searchsorted(arc, s, side='right') - 1
+        return xy[i] + (xy[(i + 1) % len(xy)] - xy[i]) * ((s - arc[i]) / lengths[i])
+
+    for i, offset in enumerate(offsets or (0.0, -3.0)):
+        p, ahead = point(offset), point(offset + 0.2)
+        expected_yaw = math.atan2(ahead[1] - p[1], ahead[0] - p[0])
+        state = b.agent_state(i)
+        # oracle: independent arc-length interpolation on the generated loop.
+        assert state.x == pytest.approx(p[0], abs=0.05)  # m
+        assert state.y == pytest.approx(p[1], abs=0.05)  # m
+        assert state.yaw == pytest.approx(expected_yaw, abs=0.05)  # rad
+
+
+def test_invalid_controlled_offset_count_rejected():
+    # oracle: one offset is required for each controlled car.
+    with pytest.raises(ValueError, match='controlled_start_offsets_m'):
+        sim.SimConfig(track_path='', centerline=np.zeros((4, 2)),
+                      controlled_cars=2, controlled_start_offsets_m=(0.0,))
+
+
 @pytest.mark.parametrize('moving', [0, 1])
 def test_independent_motion_and_odometry(make_bridge, moving):
     b = make_bridge(controlled_cars=2)
