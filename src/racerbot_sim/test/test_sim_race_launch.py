@@ -10,6 +10,22 @@ domain (the car's graph is domain 0, and this must never see it):
 Each launch is stopped through tools/racerbot_sim/harness_procs.py, which only
 signals the process group this test started. The launch-level refusals (bad
 opponent, bad track) run in a second or two; the two races take ~30 s each.
+
+R6 acceptance measurement (2026-10-28, seed 12345, shipped YAML, recording on):
+car1_course_2026_10_26, 3 laps, normal and swapped starts both timed out at
+300 sim seconds with no winner or contacts. The front slot reached 1.916
+laps, the trailer 0.949; orders were [1, 2] and [2, 1]. Both live CLI checks
+of /car2/gap_follow_node max_speed returned 5.0. Artifacts: /tmp/oc-part-b1-r6/
+normal/ and swapped/ (race.json, launch.log and recording/).
+
+The deciding eval_gap_multi comparison (--workers 2, --swap-starts, --laps 3,
+--set enable_steering_damping=false) finished both cars: normal 36.80/39.05 s,
+swapped car 2 36.15 s then car 1 37.95 s. Shipped damping: normal 37.93/39.03 s,
+swapped car 2 36.48 s then car 1 37.90 s. Fast output uses 0-based car indices.
+Thus the orders agree but the winner/finishing verdict disagrees in both
+lineups. ROS logs show swept-clearance caps falling to zero and 'no imu';
+these observations do not establish the cause of the fidelity difference.
+IMU simulation remains Part B3, outside R6; no controller settings were tuned.
 """
 
 import contextlib
@@ -222,6 +238,18 @@ def test_car2_without_lb_stays_still_while_car1_drives(tmp_path, probe):
     assert race['finish_time_s'][0] is not None, 'car 1 should have finished 0.2 laps'
     assert race['finish_time_s'][1] is None, 'car 2 cannot finish 0.2 laps while it is stopped'
     assert race['timed_out'] is True
+
+
+def test_integer_lap_argument_preserves_numeric_race_requirement(tmp_path):
+    # oracle: spec, the documented laps:=3 CLI must reach the double ROS parameter.
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'laps:=3', 'record:=false',
+                      'timeout_s:=1', f'output_dir:={tmp_path}') as proc:
+        assert proc.wait(timeout=90) == 0, _tail(tmp_path / 'launch.log')
+    assert (tmp_path / 'race.json').exists(), _tail(tmp_path / 'launch.log')
+    race = json.loads((tmp_path / 'race.json').read_text())
+    assert race['race_laps'] == 3.0
+    assert race['timed_out'] is True
+    assert race['sim_time_s'] == pytest.approx(1.0, abs=0.025)  # one simulator control step, seconds
 
 
 @pytest.mark.parametrize('argument, expected', [
