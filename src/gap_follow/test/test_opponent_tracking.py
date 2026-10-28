@@ -319,17 +319,18 @@ def test_velocity_clamp():
 
 # --- inflate_predicted ----------------------------------------------------------
 
-def test_stationary_disc_entry_range_is_closed_form():
-    # Disc of radius R = radius + passing_margin centred d ahead of the
-    # laser: the beam straight at it enters at d - R.
+def test_stationary_rectangle_entry_range_is_closed_form():
+    # oracle: R4 visible-face centre recovery replaces the old disc oracle.
+    # At rest heading defaults to line of sight; entry is near face - margin.
     params = ot.OpponentParams(radius=0.3, passing_margin=0.15, prediction_horizon=0.0)
     window = np.full(ANGLES.size, MAX_RANGE)
-    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 2.0, 0.0, 0.0, 0.0)],
+    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 2.0, 0.0, 0.0, 0.0, 2.0)],
                                LASER_X, 0.0, params)
     mid = int(np.argmin(np.abs(ANGLES)))
-    assert out[mid] == pytest.approx(2.0 - 0.45, abs=1e-9)
-    # A beam at bearing b grazes it when 2*sin(b) = R.
-    graze = math.asin(0.45 / 2.0)
+    assert out[mid] == pytest.approx(2.0 - params.passing_margin, abs=1e-9)
+    # oracle: closed form tangent at the inflated rear corner.
+    graze = math.atan2(params.width / 2 + params.passing_margin,
+                       2.0 - params.passing_margin)
     assert np.all(out[np.abs(ANGLES) > graze + 0.01] == MAX_RANGE)
     assert np.all(out[np.abs(ANGLES) < graze - 0.01] < MAX_RANGE)
     assert window[mid] == MAX_RANGE                        # input not modified
@@ -338,7 +339,7 @@ def test_stationary_disc_entry_range_is_closed_form():
 def test_inflation_never_lengthens_a_beam():
     params = ot.OpponentParams(prediction_horizon=0.0)
     window = np.full(ANGLES.size, 1.0)
-    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 3.0, 0.0, 0.0, 0.0)],
+    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 3.0, 0.0, 0.0, 0.0, 3.0)],
                                LASER_X, 0.0, params)
     assert np.array_equal(out, window)
 
@@ -346,7 +347,7 @@ def test_inflation_never_lengthens_a_beam():
 def test_prediction_blocks_where_the_car_is_going_not_only_where_it_is():
     # A car 2 m ahead driving left at 2 m/s will be at y = +1.6 m after 0.8 s.
     window = np.full(ANGLES.size, MAX_RANGE)
-    opp = [(LASER_X + 2.0, 0.0, 0.0, 2.0)]
+    opp = [(LASER_X + 2.0, 0.0, 0.0, 2.0, 2.0)]
     ahead = ot.inflate_predicted(window, ANGLES, opp, LASER_X, 0.0,
                                  ot.OpponentParams(prediction_horizon=0.8))
     now_only = ot.inflate_predicted(window, ANGLES, opp, LASER_X, 0.0,
@@ -359,10 +360,11 @@ def test_prediction_blocks_where_the_car_is_going_not_only_where_it_is():
     assert ahead[away] == MAX_RANGE
 
 
-def test_laser_inside_a_disc_gets_the_floor():
+def test_laser_inside_a_rectangle_gets_the_floor():
     params = ot.OpponentParams(radius=0.3, passing_margin=0.15, prediction_horizon=0.0)
     window = np.full(ANGLES.size, MAX_RANGE)
-    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 0.2, 0.0, 0.0, 0.0)],
+    # oracle: near face at 0.1 m, inside the 0.15 m expanded rear face.
+    out = ot.inflate_predicted(window, ANGLES, [(LASER_X + 0.1, 0.0, 0.0, 0.0, 0.1)],
                                LASER_X, 0.0, params, floor=0.05)
     mid = int(np.argmin(np.abs(ANGLES)))
     assert out[mid] == pytest.approx(0.05, abs=1e-12)
@@ -461,7 +463,7 @@ def test_layer_reports_a_moving_car_with_its_ground_speed():
     layer = _run_scene(ego_speed=3.0, opp_speed=1.5)
     movers = layer.moving_body()
     assert len(movers) == 1
-    x, y, vx, vy, near_x = movers[0]
+    x, y, vx, vy, near_x, _near_range = movers[0]
     # Ground speed, not closing speed: 1.5, not 1.5 - 3.0.
     assert vx == pytest.approx(1.5, abs=0.05)
     assert vy == pytest.approx(0.0, abs=0.05)
@@ -636,10 +638,10 @@ def test_association_takes_the_closest_pair_first():
 
 def test_prediction_follows_motion_along_x_too():
     # 2 m ahead and 1 m left of the laser, driving +x at 2 m/s: in 0.8 s it
-    # is 3.6 m ahead. A beam at 10 deg misses where it is now (its disc
-    # spans ~15-38 deg) but crosses where it is going.
+    # is 3.6 m ahead. A beam at 10 deg misses where it is now but crosses
+    # the rectangle where it is going (oracle: motion and visibility).
     window = np.full(ANGLES.size, MAX_RANGE)
-    opp = [(LASER_X + 2.0, 1.0, 2.0, 0.0)]
+    opp = [(LASER_X + 2.0, 1.0, 2.0, 0.0, math.hypot(2.0, 1.0))]
     beam = int(np.argmin(np.abs(ANGLES - math.radians(10.0))))
     now_only = ot.inflate_predicted(window, ANGLES, opp, LASER_X, 0.0,
                                     ot.OpponentParams(prediction_horizon=0.0))

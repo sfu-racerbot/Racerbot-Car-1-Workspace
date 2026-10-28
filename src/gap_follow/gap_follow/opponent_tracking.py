@@ -64,7 +64,9 @@ class OpponentParams:
     max_misses: int = 6              # scans unseen before a track is dropped
     moving_speed: float = 0.6        # m/s, world-frame speed to count as moving
     stopped_release_sec: float = 1.0  # s, follow-only hold after moving releases
-    radius: float = 0.30             # m, opponent footprint around its centroid
+    radius: float = 0.30             # m, rear relevance cutoff only (not a footprint)
+    length: float = 0.58             # m, padded opponent length
+    width: float = 0.31              # m, tire width plus 5 mm padding per side
     passing_margin: float = 0.15     # m, extra room demanded beside it
     prediction_horizon: float = 0.8  # s, how far ahead its path is blocked
     prediction_step: float = 0.1     # s
@@ -96,7 +98,7 @@ class OpponentParams:
     def validate(self):
         """Raise ValueError naming the first unusable value."""
         positive = ('min_width', 'max_width', 'max_range', 'segment_jump',
-                    'gate', 'moving_speed', 'radius', 'prediction_step',
+                    'gate', 'moving_speed', 'radius', 'length', 'width', 'prediction_step',
                     'follow_time_gap', 'follow_lateral', 'relevant_lateral',
                     'pass_max_steering', 'pass_max_heading_deg', 'max_track_speed',
                     'steer_gain', 'steer_rate_max', 'stopped_release_sec')
@@ -132,6 +134,7 @@ class Detection:
     near_x: float     # x of the cluster point nearest the car (base_link)
     lo: int           # first and last beam index in the scan
     hi: int
+    near_range: float  # minimum beam range, measured from the LiDAR
 
 
 def segment_objects(ranges, valid, angles, laser_x, laser_y,
@@ -183,7 +186,7 @@ def segment_objects(ranges, valid, angles, laser_x, laser_y,
         if not (params.min_width <= width <= params.max_width):
             continue
         out.append(Detection(float(np.mean(xs)), float(np.mean(ys)), width,
-                             float(np.min(xs)), lo, hi))
+                             float(np.min(xs)), lo, hi, float(np.min(seg))))
     return out
 
 
@@ -273,6 +276,7 @@ class Track:
     track_id: int = 0
     confirmed_car: bool = False  # only latched by the existing moving rule
     stopped_sec: float = 0.0     # time since moving was last true
+    near_range: float = math.nan  # last observed minimum LiDAR range
 
     @property
     def speed(self) -> float:
@@ -301,7 +305,11 @@ class OpponentTracker:
         self.tracks = []
 
     def update(self, detections_world, dt: float):
-        """``detections_world``: list of (x, y, near_dx) in the fixed frame."""
+        """Detections: (world x, world y, body near_dx, LiDAR near_range).
+
+        Three-element synthetic observations remain usable for tracking-only
+        callers; only scan observations supply a range for inflation.
+        """
         p = self.params
         for t in self.tracks:
             t.x += t.vx * dt
@@ -325,7 +333,7 @@ class OpponentTracker:
             used_t.add(ti)
             used_d.add(di)
             t = self.tracks[ti]
-            zx, zy, near_dx = detections_world[di]
+            zx, zy, near_dx, *near_range = detections_world[di]
             rx, ry = zx - t.x, zy - t.y
             t.x += p.alpha * rx
             t.y += p.alpha * ry
@@ -336,6 +344,8 @@ class OpponentTracker:
                 t.vx *= p.max_track_speed / sp
                 t.vy *= p.max_track_speed / sp
             t.near_dx = near_dx
+            if near_range:
+                t.near_range = near_range[0]
             t.hits += 1
             t.streak += 1
             t.misses = 0
@@ -347,6 +357,7 @@ class OpponentTracker:
         for di, det in enumerate(detections_world):
             if di not in used_d:
                 self.tracks.append(Track(det[0], det[1], near_dx=det[2],
+                                         near_range=det[3] if len(det) > 3 else math.nan,
                                          track_id=self._next_id))
                 self._next_id += 1
         for t in self.tracks:
@@ -361,38 +372,75 @@ class OpponentTracker:
                 t.stopped_sec += dt
 
 
+def _rectangle(opponent, laser_x, laser_y, params):
+    """Centre and heading of a visible-face observation, in base_link."""
+    ox, oy, vx, vy, near_range = opponent
+    dx, dy = ox - laser_x, oy - laser_y
+    distance = math.hypot(dx, dy)
+    ux, uy = (dx / distance, dy / distance) if distance > 0.0 else (1.0, 0.0)
+    speed = math.hypot(vx, vy)
+    hx, hy = ((vx / speed, vy / speed) if speed >= 0.5 * params.moving_speed
+              else (ux, uy))
+    support = (params.length / 2 * abs(ux * hx + uy * hy)
+               + params.width / 2 * abs(-ux * hy + uy * hx))
+    return (laser_x + ux * (near_range + support),
+            laser_y + uy * (near_range + support), hx, hy)
+
+
 def inflate_predicted(window, beam_angles, opponents_body, laser_x, laser_y,
                       params: OpponentParams, floor: float = 0.05):
     """A copy of ``window`` in which each opponent's footprint, swept along
     its predicted path, reads as an obstacle.
 
-    ``opponents_body`` is a list of (x, y, vx, vy) in base_link, velocity
+    ``opponents_body`` is (x, y, vx, vy, near_range) in base_link, velocity
     relative to the ground (not to this car: the space the other car will
-    occupy does not depend on how this one moves). The footprint is a disc
-    of ``radius + passing_margin`` at every ``prediction_step`` from 0 to
-    ``prediction_horizon``. Each beam is shortened to where it would enter
-    the nearest disc, never lengthened, and never below ``floor``.
+    occupy does not depend on how this one moves). Let P be the LiDAR,
+    c the visible cluster centroid, u=(c-P)/|c-P|, h the ground-velocity
+    heading, and h_perp its perpendicular. Recover the centre as
+    P + u * (near_range + s), with support distance
+    s = length/2 * |u.h| + width/2 * |u.h_perp|. The three exact support
+    cases are a rear view (s=L/2), a side view (s=W/2), and a 45-degree
+    corner view (s=(L/2+W/2)/sqrt(2)). Below half moving_speed use h=u.
+
+    Half-extents are length/2+passing_margin and width/2+passing_margin.
+    At every prediction_step through prediction_horizon, intersect rays
+    with the oriented rectangle using closed-form slabs. Entry equals
+    near_range-passing_margin for straight rear and side views. Never
+    lengthen a beam; clamp new entries to floor and preserve NaN beams.
     """
     out = np.array(window, dtype=float, copy=True)
     if not opponents_body:
         return out
     ang = np.asarray(beam_angles, dtype=float)
     cos_a, sin_a = np.cos(ang), np.sin(ang)
-    radius = params.radius + params.passing_margin
+    half_l = params.length / 2 + params.passing_margin
+    half_w = params.width / 2 + params.passing_margin
     steps = int(math.floor(params.prediction_horizon / params.prediction_step + 1e-9))
-    for ox, oy, vx, vy in opponents_body:
+    for opponent in opponents_body:
+        _ox, _oy, vx, vy, near_range = opponent
+        if not math.isfinite(near_range) or near_range < 0.0:
+            continue
+        centre_x, centre_y, hx, hy = _rectangle(opponent, laser_x, laser_y, params)
+        directions = (cos_a * hx + sin_a * hy, -cos_a * hy + sin_a * hx)
         for k in range(steps + 1):
             t = k * params.prediction_step
-            cx = ox + vx * t - laser_x
-            cy = oy + vy * t - laser_y
-            along = cx * cos_a + cy * sin_a
-            perp_sq = cx * cx + cy * cy - along * along
-            inside = cx * cx + cy * cy <= radius * radius
-            hit = (perp_sq <= radius * radius) & ((along > 0.0) | inside)
-            if not np.any(hit):
-                continue
-            entry = along - np.sqrt(np.maximum(radius * radius - perp_sq, 0.0))
-            entry = np.where(inside, floor, np.maximum(entry, floor))
+            cx = centre_x + vx * t - laser_x
+            cy = centre_y + vy * t - laser_y
+            centres = (cx * hx + cy * hy, -cx * hy + cy * hx)
+            entry = np.zeros_like(ang)
+            exit_range = np.full_like(ang, math.inf)
+            for direction, centre, extent in zip(directions, centres, (half_l, half_w)):
+                parallel = np.abs(direction) < 1e-12
+                divisor = np.where(parallel, 1.0, direction)
+                a = (centre - extent) / divisor
+                b = (centre + extent) / divisor
+                slab_entry = np.where(parallel, -math.inf, np.minimum(a, b))
+                slab_exit = np.where(parallel, math.inf, np.maximum(a, b))
+                slab_exit = np.where(parallel & (abs(centre) > extent), -math.inf, slab_exit)
+                entry = np.maximum(entry, slab_entry)
+                exit_range = np.minimum(exit_range, slab_exit)
+            hit = exit_range >= entry
+            entry = np.maximum(entry, floor)
             out = np.where(hit, np.minimum(out, entry), out)
     return out
 
@@ -413,7 +461,8 @@ def pass_allowed(opponents_body, steering: float, params: OpponentParams) -> boo
     if abs(steering) > params.pass_max_steering:
         return False
     limit = math.radians(params.pass_max_heading_deg)
-    for _x, _y, vx, vy, _near_x in opponents_body:
+    for opponent in opponents_body:
+        vx, vy = opponent[2:4]
         if abs(math.atan2(vy, vx)) > limit:
             return False
     return True
@@ -444,7 +493,7 @@ def follow_speed_cap(opponents_body, front_x: float, params: OpponentParams,
     return cap
 
 
-def avoidance_usable(avoid, plain) -> bool:
+def avoidance_usable(avoid, plain, *, gap_width=math.inf, required_width=0.0) -> bool:
     """Whether the gap found with opponents inflated may replace the plain one.
 
     Both are ``(gap_start, gap_end, used_fallback)`` from
@@ -455,10 +504,15 @@ def avoidance_usable(avoid, plain) -> bool:
     hairpin shortened the beams through the hairpin, and the inflated search
     sent the follower into a dead-end corner it could not creep out of.
     When this says no, the caller uses the plain gap and the follow cap.
+    The physical gap beside the inflated opponent must also fit this car
+    plus a passing margin on each side. Recheck every tick, including passes
+    already under way: no passing latch overrides a newly narrow section.
     """
     a_start, a_end, a_fallback = avoid
     p_start, p_end, p_fallback = plain
     if a_start is None:
+        return False
+    if not gap_width >= required_width:
         return False
     if p_start is None:
         return True       # plain found nothing; avoid's gap is all there is
@@ -514,17 +568,18 @@ class OpponentAwareness:
         world = []
         for d in self.detections:
             wx, wy = self.ego.to_world(d.x, d.y)
-            world.append((wx, wy, d.near_x - d.x))
+            world.append((wx, wy, d.near_x - d.x, d.near_range))
         if dt is None:
-            for wx, wy, near_dx in world:
+            for wx, wy, near_dx, near_range in world:
                 self.tracker.tracks.append(Track(wx, wy, near_dx=near_dx,
+                                                 near_range=near_range,
                                                  track_id=self.tracker._next_id))
                 self.tracker._next_id += 1
         else:
             self.tracker.update(world, dt)
 
     def moving_body(self):
-        """Relevant moving tracks as (x, y, vx, vy, near_x) in base_link.
+        """Moving tracks: (x, y, vx, vy, near_x, LiDAR near_range).
 
         Relevant: not behind this car, within ``relevant_lateral`` to either
         side, and moving the same general way (forward ground velocity in
@@ -545,13 +600,13 @@ class OpponentAwareness:
             bvx, bvy = self.ego.vector_to_body(t.vx, t.vy)
             if bvx < 0.0:
                 continue
-            out.append((bx, by, bvx, bvy, bx + t.near_dx))
+            out.append((bx, by, bvx, bvy, bx + t.near_dx, t.near_range))
         return out
 
     def augment(self, window, beam_angles):
         movers = self.moving_body()
         return inflate_predicted(
-            window, beam_angles, [m[:4] for m in movers],
+            window, beam_angles, [(*m[:4], m[5]) for m in movers],
             self.laser_x, self.laser_y, self.params)
 
     def followed_body(self):
@@ -578,11 +633,48 @@ class OpponentAwareness:
                     or math.hypot(bx, by) > p.max_range):
                 continue
             bvx, bvy = self.ego.vector_to_body(t.vx, t.vy)
-            out.append((bx, by, bvx, bvy, bx + t.near_dx))
+            out.append((bx, by, bvx, bvy, bx + t.near_dx, t.near_range))
         return out
 
     def may_pass(self, steering: float) -> bool:
         return pass_allowed(self.moving_body(), steering, self.params)
+
+    def passing_gap_width(self, window, beam_angles, gap):
+        """Physical room on the selected side, before ego-width inflation.
+
+        Project sensed returns into base_link. Beside each opponent's
+        longitudinal footprint, the nearest return outside its inflated side
+        is the wall bounding that side's gap. Using the full footprint span
+        makes a narrowing visible in this scan veto passing immediately.
+        The selected gap's middle bearing chooses the side; a gap pointing
+        into the opponent has zero room. This measures room only for the
+        pass decision; all driving safety checks retain the original scan.
+        """
+        start, end, _fallback = gap
+        if start is None:
+            return 0.0
+        a = np.asarray(beam_angles, dtype=float)
+        r = np.asarray(window, dtype=float)
+        xs = self.laser_x + r * np.cos(a)
+        ys = self.laser_y + r * np.sin(a)
+        bearing = float(a[(start + end) // 2])
+        room = math.inf
+        p = self.params
+        for m in self.moving_body():
+            cx, cy, hx, hy = _rectangle((*m[:4], m[5]), self.laser_x, self.laser_y, p)
+            half_l = p.length / 2 + p.passing_margin
+            half_w = p.width / 2 + p.passing_margin
+            extent_x = abs(hx) * half_l + abs(hy) * half_w
+            extent_y = abs(hy) * half_l + abs(hx) * half_w
+            target_y = self.laser_y + (cx - self.laser_x) * math.tan(bearing)
+            side = 1.0 if target_y > cy else -1.0
+            if abs(target_y - cy) <= extent_y:
+                return 0.0
+            beside = (np.isfinite(r) & (xs >= cx - extent_x) & (xs <= cx + extent_x)
+                      & (side * (ys - cy) > extent_y))
+            if np.any(beside):
+                room = min(room, float(np.min(side * (ys[beside] - cy))) - extent_y)
+        return room
 
     def follow_cap(self, passing: bool = True) -> float:
         """Moving cars use the pass-dependent band; held cars always use the

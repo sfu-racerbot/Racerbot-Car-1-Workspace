@@ -261,7 +261,7 @@ def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
             t = step * DT
             # Stationary ego: real 1 m/s target motion establishes heading.
             x, y = (2.5, -0.5 + t) if crossing else (2.0 + t, 0.0)
-            width = 1.52 if step < 45 else 1.06
+            width = 2.0 if crossing else (1.52 if step < 45 else 1.06)
             box = _box(x, y, yaw=math.pi / 2 if crossing else 0.0)
             scan = _raycast(_corridor(width / 2, width / 2) +
                             [((a[0] - 0.26, a[1]), (b[0] - 0.26, b[1])) for a, b in box])

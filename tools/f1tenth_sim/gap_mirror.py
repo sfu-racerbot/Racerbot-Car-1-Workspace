@@ -155,6 +155,8 @@ REQUIRED_PARAMS = frozenset((
     "opponent_moving_speed",
     "opponent_stopped_release_sec",
     "opponent_radius",
+    "opponent_length",
+    "opponent_width",
     "opponent_passing_margin",
     "opponent_prediction_horizon",
     "opponent_prediction_step",
@@ -396,7 +398,12 @@ class GapController:
             # means follow instead.
             # And only on a straight (opponent_tracking.pass_allowed).
             passing = (self.opponents.may_pass(self.steering_basis)
-                       and opponent_tracking.avoidance_usable(avoid[1:], plain[1:]))
+                       and opponent_tracking.avoidance_usable(
+                           avoid[1:], plain[1:],
+                           gap_width=self.opponents.passing_gap_width(
+                               window, beam_angles, avoid[1:]),
+                           required_width=p["car_width"]
+                           + 2 * self.opponents.params.passing_margin))
             if passing:
                 processed, gap_start, gap_end, used_fallback = avoid
                 self.opponent_mode = "clear"

@@ -1265,7 +1265,12 @@ class GapFollowNode(Node):
             plain = self._select_gap(
                 window, window_valid, scan.angle_increment, beam_angles)
             passing = (self.opponents.may_pass(self.steering_basis)
-                       and opponent_tracking.avoidance_usable(avoid[2:5], plain[2:5]))
+                       and opponent_tracking.avoidance_usable(
+                           avoid[2:5], plain[2:5],
+                           gap_width=self.opponents.passing_gap_width(
+                               window, beam_angles, avoid[2:5]),
+                           required_width=self.car_width
+                           + 2 * self.opponents.params.passing_margin))
             self.opponent_mode = 'clear' if passing else 'follow'
             (window, closest_dist, gap_start, gap_end, used_fallback,
              target_idx_in_window, near_bearing) = avoid if passing else plain

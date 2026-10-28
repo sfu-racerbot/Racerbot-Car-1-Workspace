@@ -515,7 +515,9 @@ gap_follow_node:
     # or stalls, no added solo stops. Ship fastest tested: seed 12346's former
     # stuck follower finishes in 27.62 s at 1 s vs 29.18 s at 2/3 s.
     opponent_stopped_release_sec: 1.0  # s; inclusive hold, release one tick later
-    opponent_radius: 0.30            # m, footprint around the cluster centre
+    opponent_radius: 0.30            # m, rear relevance cutoff only; not inflation
+    opponent_length: 0.58            # m, padded outline; visible-face centre recovery
+    opponent_width: 0.31             # m, 0.30 m tire width plus 5 mm per side
     opponent_passing_margin: 0.15    # m, extra room demanded beside a moving car
     opponent_prediction_horizon: 0.8 # s of predicted path treated as blocked
     opponent_prediction_step: 0.1    # s
