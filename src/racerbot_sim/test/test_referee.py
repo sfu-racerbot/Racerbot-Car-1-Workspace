@@ -6,6 +6,15 @@ The scenarios run on a square loop 8 m round, sampled every 0.02 m, so a car
 at speed v moves v * 0.1 s of loop per tick (0.1 s is the referee tick used
 throughout). The expected numbers are closed forms of distance and speed,
 worked out in the comments, not copied from a run.
+
+R6 step 3 mutation audit (2026-10-28): reverse ignored, contact termination
+removed, both-stopped stalls counted, partial updates before validation,
+contact-tick finishes allowed, winner contact filter removed, and JSON
+sanitization removed all failed their named regression tests. LapCounter,
+Referee, overtakes and stalls stubs failed all 36 cases in this file;
+the Referee stub also failed all three position-fed parity scenarios.
+Numeric mutations caught: finish comparison flipped, reverse sign ignored,
+perimeter +10%, XY swapped, update returning its input, and arc wrap removed.
 """
 
 import json

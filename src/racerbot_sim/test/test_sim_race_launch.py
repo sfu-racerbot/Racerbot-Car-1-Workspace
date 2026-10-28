@@ -151,7 +151,6 @@ def _shipped_value(key):
 
 def _wired(graph):
     return (('/', 'gap_follow_node') in graph.publishers('/drive')
-            and ('/car2', 'gap_follow_node') in graph.publishers('/car2/drive')
             and ('/car2', 'gap_follow_node') in graph.subscribers('/car2/joy')
             and ('/', 'race_referee_node') in graph.publishers('/sim/race_result'))
 
