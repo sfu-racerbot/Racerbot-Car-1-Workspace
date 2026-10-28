@@ -15,9 +15,61 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Joy, LaserScan
 from std_msgs.msg import String
+from rclpy.clock import ClockType
+from rclpy.time import Time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from racerbot_sim import sim_bridge as sim, tracks  # noqa: E402
+from racerbot_sim.sim_joy_node import SimJoyNode  # noqa: E402
+
+
+@pytest.mark.parametrize('scenario', ['release', 'silence'])
+def test_joy_scenario_clock_starts_when_interlock_opens(scenario):
+    rclpy.init()
+    node = SimJoyNode()
+    class Clock:
+        seconds = 0.0
+        def now(self):
+            return Time(nanoseconds=int(self.seconds * 1e9), clock_type=ClockType.ROS_TIME)
+
+    clock = Clock()
+    node.get_clock = lambda: clock
+    if node.start_time is not None:
+        node.start_time = clock.now()
+
+    class Gate:
+        allowed = False
+        def safe(self):
+            return self.allowed
+
+    class Capture:
+        def __init__(self):
+            self.messages = []
+        def publish(self, message):
+            self.messages.append(message)
+
+    gate, capture = Gate(), Capture()
+    node.interlock, node.publisher = gate, capture
+    node.release_after_sec = 2.0 if scenario == 'release' else -1.0
+    node.silence_after_sec = 2.0 if scenario == 'silence' else -1.0
+    try:
+        clock.seconds = 10.0
+        node._publish()
+        # oracle: the interlock blocks every message before discovery.
+        assert capture.messages == []
+        gate.allowed = True
+        for t in (10.0, 11.999, 12.0):
+            clock.seconds = t
+            node._publish()
+        # oracle: first permitted tick starts the two-second scenario.
+        assert [m.buttons[4] for m in capture.messages[:2]] == [1, 1]
+        if scenario == 'release':
+            assert [m.buttons[4] for m in capture.messages] == [1, 1, 0]
+        else:
+            assert len(capture.messages) == 2
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_car_names_and_invalid_numbers():

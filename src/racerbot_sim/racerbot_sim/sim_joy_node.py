@@ -55,7 +55,7 @@ class SimJoyNode(Node):
         self.interlock = HardwareInterlock(
             self, 'the synthetic LB deadman', discovery_hold_sec=float(
                 self.get_parameter('interlock_discovery_hold_sec').value))
-        self.start_time = self.get_clock().now()
+        self.start_time = None
         self.publisher = self.create_publisher(
             Joy, str(self.get_parameter('joy_topic').value), 10)
         self.create_timer(1.0 / self.rate_hz, self._publish)
@@ -80,6 +80,8 @@ class SimJoyNode(Node):
     def _publish(self):
         if not self.interlock.safe():
             return
+        if self.start_time is None:
+            self.start_time = self.get_clock().now()
         if self.silence_after_sec >= 0.0 and self._elapsed() >= self.silence_after_sec:
             return
 
