@@ -42,6 +42,7 @@ Exit code 0 when every run passes; always 0 for a two-car head-to-head.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -781,6 +782,7 @@ def main(argv=None) -> int:
     ap.add_argument("--spacing", type=float, default=3.0, help="metres between start positions")
     ap.add_argument("--reverse", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--output", help="write the per-run results as JSON")
     ap.add_argument("--set", action="append", default=[], help="override a parameter for every car")
     ap.add_argument("--car-set", action="append", default=[], metavar="N:name=value",
                     help="override a parameter for car N only (0-based), applied after --set; repeatable")
@@ -799,6 +801,8 @@ def main(argv=None) -> int:
             for t in tracks for k in range(args.seeds) for order in orders]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(_job, jobs))
+    if args.output:
+        Path(args.output).write_text(json.dumps(results) + "\n")
     ok = True
     for t in tracks:
         runs = [r for r in results if r["track"] == t]
