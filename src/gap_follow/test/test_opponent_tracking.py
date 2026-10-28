@@ -777,9 +777,10 @@ def test_confirmed_car_stays_followed_when_it_stops():
     # oracle: follow-only hold cannot create an inflated obstacle or a passer.
     window = np.full(ANGLES.size, MAX_RANGE)
     assert np.array_equal(layer.augment(window, ANGLES), window)
-    # oracle: held tracks keep both follow-band and spatial relevance gates.
+    # oracle: review round 1, held tracks always use the relevant lateral band.
     t.x, t.y = FRONT + 1.0, layer.params.follow_lateral + 0.001
-    assert layer.follow_cap(passing=True) == math.inf
+    assert layer.follow_cap(passing=True) == pytest.approx(
+        (1.0 - layer.params.follow_min_gap) / layer.params.follow_time_gap, abs=1e-12)
     assert math.isfinite(layer.follow_cap(passing=False))
     for x, y in ((-layer.params.radius, 0.0),
                  (2.0, layer.params.relevant_lateral + 0.001),
@@ -847,3 +848,19 @@ def test_stopped_release_must_be_positive_finite(value):
     # oracle: parameter validation contract, seconds must be positive and finite.
     with pytest.raises(ValueError, match='opponent_stopped_release_sec must be positive'):
         ot.OpponentParams(stopped_release_sec=value).validate()
+
+
+def test_held_leader_cap_is_independent_of_passing_a_moving_car():
+    layer = _confirmed_follow_layer()
+    held = layer.tracker.tracks[0]
+    for _ in range(24):
+        layer.tracker.update([(held.x, held.y, 0.0)], 0.025)
+    held.x, held.y = FRONT + 1.5, 0.75
+    # Alongside mover permits a pass but cannot bind a forward follow cap.
+    layer.tracker.tracks.append(ot.Track(
+        0.0, -0.75, vx=1.0, moving=True, hits=50, streak=50))
+    assert layer.may_pass(0.0)  # oracle: straight-moving alongside car
+    assert not held.moving
+    # oracle: closed form; 0.45 < |y|=0.75 < 1.0 must not discard a held leader.
+    expected = (1.5 - layer.params.follow_min_gap) / layer.params.follow_time_gap
+    assert layer.follow_cap(passing=True) == pytest.approx(expected, abs=1e-12)

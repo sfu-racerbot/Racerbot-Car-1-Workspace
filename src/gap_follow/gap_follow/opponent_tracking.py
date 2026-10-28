@@ -561,7 +561,11 @@ class OpponentAwareness:
         noise cannot establish heading, so only the spatial relevance gates
         apply. A never-moving cluster cannot acquire this follow-only hold.
         """
-        out = self.moving_body()
+        return self.moving_body() + self._held_body()
+
+    def _held_body(self):
+        """Relevant confirmed cars whose moving latch has recently released."""
+        out = []
         p = self.params
         for t in self.tracker.tracks:
             # Accumulating 40 * 0.025 can exceed 1.0 by roundoff. Preserve
@@ -581,8 +585,12 @@ class OpponentAwareness:
         return pass_allowed(self.moving_body(), steering, self.params)
 
     def follow_cap(self, passing: bool = True) -> float:
-        """Follow cap for cars directly ahead when passing is allowed, and for
-        every relevant car ahead when it is not."""
-        return follow_speed_cap(
-            [(m[4], m[1]) for m in self.followed_body()], self.front_x, self.params,
+        """Moving cars use the pass-dependent band; held cars always use the
+        full relevance band, regardless of another car permitting a pass."""
+        moving_cap = follow_speed_cap(
+            [(m[4], m[1]) for m in self.moving_body()], self.front_x, self.params,
             lateral=None if passing else self.params.relevant_lateral)
+        held_cap = follow_speed_cap(
+            [(m[4], m[1]) for m in self._held_body()], self.front_x, self.params,
+            lateral=self.params.relevant_lateral)
+        return min(moving_cap, held_cap)
