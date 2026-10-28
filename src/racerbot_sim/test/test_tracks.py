@@ -203,6 +203,25 @@ def test_unknown_track_is_refused_and_names_the_directory(tmp_path):
     assert 'indoor_oval' in refused.value.args[0], 'the message should list the layouts'
 
 
+def test_centerline_for_generated_layout_does_not_write(tmp_path):
+    line = tracks.centerline_for('indoor_oval', tmp_path)
+    # oracle: closed form, layout begins at (0, -half_y), and its rounded perimeter.
+    assert line[0] == pytest.approx([0.0, -3.2], abs=1e-9)  # metres
+    expected = 4 * (5 - 1.8) + 4 * (3.2 - 1.8) + 2 * math.pi * 1.8
+    assert _lap_length(line) == pytest.approx(expected, abs=0.002)  # metres, polygon discretization
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_centerline_for_imported_map_reads_csv_without_writing(tmp_path):
+    # oracle: invariant, reads exactly the supplied CSV, without requiring a map build.
+    csv = tmp_path / 'imported_centerline.csv'
+    csv.write_text('x_m,y_m\n1,2\n3,4\n5,6\n')
+    os.utime(csv, ns=(0, 0))
+    assert tracks.centerline_for('imported', tmp_path).tolist() == [[1, 2], [3, 4], [5, 6]]
+    assert csv.stat().st_mtime_ns == 0
+    assert list(tmp_path.iterdir()) == [csv]
+
+
 def test_imported_car1_course_starts_car_one_on_its_centreline(tmp_path):
     """Gym-backed: SimBridge loads the imported map and puts car 1 on the
     first centreline point, outside every wall."""

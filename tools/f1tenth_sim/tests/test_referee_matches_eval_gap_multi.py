@@ -125,14 +125,14 @@ def test_referee_and_eval_gap_multi_score_the_same_positions_the_same_way(scenar
     assert [any(flags.values()) for flags in result['contacts']] == outcome['contacts']
 
     if math.isinf(outcome['gap_s']):
-        assert math.isinf(result['gap_s'])
+        assert result['gap_s'] is None  # strict JSON representation of undefined gap
     else:
         assert result['gap_s'] == pytest.approx(outcome['gap_s'], abs=1e-9)  # s
     assert len(result['gap_changes']) == len(outcome['gap_changes'])
     for ours, theirs in zip(result['gap_changes'], outcome['gap_changes']):
-        assert (ours['pair'][0] - 1, ours['pair'][1] - 1) == theirs['pair']
-        assert ours['leader'] - 1 == theirs['leader']
-        assert ours['trailer'] - 1 == theirs['trailer']
+        assert tuple(ours['pair']) == theirs['pair']
+        assert ours['leader'] == theirs['leader']
+        assert ours['trailer'] == theirs['trailer']
         for field in ('start_gap_s', 'end_gap_s', 'gap_change_s'):
             assert ours[field] == pytest.approx(theirs[field], abs=1e-9)  # s
     assert result['time_gained_s'] == pytest.approx(outcome['time_gained_s'], abs=1e-9)  # s

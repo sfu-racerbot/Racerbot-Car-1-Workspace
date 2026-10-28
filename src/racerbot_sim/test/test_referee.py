@@ -69,6 +69,18 @@ def test_one_forward_revolution_is_one_lap():
     assert laps[-1] == pytest.approx(1.0, abs=1e-9)  # oracle: closed form, one full perimeter
 
 
+@pytest.mark.parametrize('reverse', [False, True])
+def test_circle_revolution(reverse):
+    angles = np.linspace(0, 2 * math.pi, 2000, endpoint=False)
+    circle = np.column_stack((5 * np.cos(angles), 5 * np.sin(angles)))
+    counter = LapCounter(circle, circle[0], reverse=reverse)
+    direction = -1 if reverse else 1
+    for index in range(1, len(circle) + 1):
+        laps = counter.update(circle[(direction * index) % len(circle)])
+    # oracle: closed form, one complete revolution / one circumference.
+    assert laps == pytest.approx(1.0, abs=1e-3)  # laps
+
+
 def test_driving_the_loop_backwards_is_minus_one_lap_unless_reversed():
     # From the forward counter's view a car driving the loop the wrong way round has
     # gone one lap backwards (-1). The reversed counter scores the same motion as +1.
@@ -207,7 +219,7 @@ def test_a_trailer_ten_percent_faster_closes_the_gap_by_the_closed_form():
     pair = result['gap_changes'][0]
     start = 3.0 / 2.2  # oracle: closed form, initial 3 m deficit / trailer speed 2.2 m/s
     end = 5.0 - 4.0  # oracle: closed form, the trailer crosses at 5.0 s, the leader at 4.0 s
-    assert (pair['leader'], pair['trailer']) == (1, 2)  # car numbers
+    assert (pair['leader'], pair['trailer']) == (0, 1)  # eval_gap_multi pair indices
     assert pair['start_gap_s'] == pytest.approx(start, abs=1e-9)
     assert pair['end_gap_s'] == pytest.approx(end, abs=1e-9)
     assert pair['gap_change_s'] == pytest.approx(end - start, abs=1e-9)  # negative: the trailer closed in
@@ -242,14 +254,19 @@ def test_a_tick_with_the_wrong_number_of_cars_is_refused_and_changes_nothing():
     assert referee.sim_time_s == 0.0
 
 
-def test_a_bad_speed_for_the_second_car_leaves_the_first_car_unmoved():
+@pytest.mark.parametrize('bad_position,bad_speed', [
+    (_at(-2.8), math.nan), ([math.inf, 0.0], 2.0),
+])
+def test_a_bad_speed_for_the_second_car_leaves_the_first_car_unmoved(bad_position, bad_speed):
     # Car 1's position is valid and car 2's speed is not: the whole tick is refused, so
     # car 1's progress is not written either.
     referee = Referee(LOOP, [_at(0.0), _at(-3.0)], 0.99, DT)
-    with pytest.raises(ValueError, match='non-finite speed'):
-        referee.tick(DT, [_at(0.2), _at(-2.8)], [2.0, math.nan], [False, False], False)
-    assert referee.progress_m == [[], []]
+    before = referee.result()
+    with pytest.raises(ValueError, match='finite'):
+        referee.tick(DT, [_at(0.2), bad_position], [2.0, bad_speed], [False, False], False)
     assert referee.result()['laps'][0] == pytest.approx(0.0, abs=1e-9)  # oracle: closed form, still on the line
+    assert referee.result() == before  # oracle: invariant, rejection is atomic
+    assert referee.progress_m == [[], []]
 
 
 @pytest.mark.parametrize('build, match', [
@@ -275,38 +292,15 @@ def test_ticks_must_advance_in_time():
         referee.tick(2 * DT, [_at(0.4)], [2.0], [False], False)  # a repeat is not a new step
 
 
-# --- the feed that turns /sim/status into ticks ------------------------------
-
-def _feed():
-    return referee_module.StatusFeed(lambda xys: Referee(LOOP, xys, 0.99, DT), DT)
-
-
-def test_status_feed_ticks_once_per_new_sim_step_and_ignores_repeats():
-    feed = _feed()
-    assert feed.offer(DT, [_at(0.2), _at(-2.8)], [2.0, 2.0], [False, False], False) is True
-    # The same status again (a latched or repeated message) must not add a sample.
-    assert feed.offer(DT, [_at(0.2), _at(-2.8)], [2.0, 2.0], [False, False], False) is False
-    assert feed.offer(2 * DT, [_at(0.4), _at(-2.6)], [2.0, 2.0], [False, False], False) is True
-    assert len(feed.referee.progress_m[0]) == 2
-
-
-def test_status_feed_refuses_a_skipped_step_because_the_sample_is_lost():
-    feed = _feed()
-    feed.offer(DT, [_at(0.2), _at(-2.8)], [2.0, 2.0], [False, False], False)
-    with pytest.raises(referee_module.RaceRefused, match='missed'):
-        feed.offer(3 * DT, [_at(0.6), _at(-2.4)], [2.0, 2.0], [False, False], False)
-
-
-def test_status_feed_refuses_to_join_a_race_already_under_way():
-    feed = _feed()
-    with pytest.raises(referee_module.RaceRefused, match='after the race started'):
-        feed.offer(5.0, [_at(10.0), _at(7.0)], [2.0, 2.0], [False, False], False)
-
-
 # --- output -----------------------------------------------------------------
 
-def test_json_safe_turns_non_finite_numbers_into_null():
-    payload = referee_module.json_safe({'gap_s': math.inf, 'laps': [1.5, math.nan],
-                                        'nested': {'change': -math.inf}})
-    assert payload == {'gap_s': None, 'laps': [1.5, None], 'nested': {'change': None}}
-    assert json.loads(json.dumps(payload, allow_nan=False)) == payload  # strict JSON
+def test_result_is_strict_json_even_when_the_trailer_never_moves():
+    referee = Referee(LOOP, [_at(0.0), _at(-3.0)], 0.99, DT)
+    for index in range(21):
+        referee.tick(index * DT, [_at(index * 0.2), _at(-3.0)], [2.0, 0.0], [False, False], False)
+    payload = referee.result()
+    # oracle: spec ruling 1: undefined/infinite time metrics serialize as null.
+    assert payload['gap_s'] is None
+    assert payload['gap_changes'][0]['gap_change_s'] is None
+    assert payload['time_gained_s'] == [None, None]
+    assert json.loads(json.dumps(payload, allow_nan=False)) == payload

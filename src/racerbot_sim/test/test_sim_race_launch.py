@@ -13,6 +13,7 @@ opponent, bad track) run in a second or two; the two races take ~30 s each.
 """
 
 import contextlib
+import importlib.util
 import json
 import math
 import os
@@ -86,10 +87,7 @@ class _Probe(Node):
         self.create_subscription(String, '/sim/status', self._on_status, STATUS_QOS)
 
     def _on_status(self, message):
-        try:
-            self.status.append(json.loads(message.data))
-        except ValueError:
-            pass
+        self.status.append(json.loads(message.data))
 
 
 @pytest.fixture
@@ -136,6 +134,16 @@ def _ros_param(node_name, parameter):
     return match.group(1).strip()
 
 
+def _parameters(probe, names):
+    from rclpy.parameter_client import AsyncParameterClient
+    client = AsyncParameterClient(probe, '/car2/gap_follow_node')
+    assert client.wait_for_service(timeout_sec=10)
+    future = client.get_parameters(names)
+    rclpy.spin_until_future_complete(probe, future, timeout_sec=10)
+    assert future.done(), 'namespaced node did not answer parameter request'
+    return future.result().values
+
+
 def _shipped_value(key):
     with open(SHIPPED_GAP_FOLLOW_YAML, encoding='utf-8') as handle:
         return yaml.safe_load(handle)['gap_follow_node']['ros__parameters'][key]
@@ -173,8 +181,9 @@ def test_short_race_keeps_each_car_in_its_own_namespace_and_finishes(tmp_path, p
         assert ('/', 'gap_follow_node') in graph.subscribers('/joy')
 
         # The shipped YAML must reach the namespaced node, and its drive topic must be car 2's.
-        assert _ros_param('/car2/gap_follow_node', 'drive_topic') == '/car2/drive'
-        assert float(_ros_param('/car2/gap_follow_node', 'max_speed')) == _shipped_value('max_speed')
+        drive, speed = _parameters(probe, ['drive_topic', 'max_speed'])
+        assert drive.string_value == '/car2/drive'
+        assert speed.double_value == _shipped_value('max_speed')
 
         # The referee's footprint on the graph is its result topic and nothing that drives or senses.
         referee_topics = {topic for topic, _types in
@@ -241,3 +250,85 @@ def test_referee_creates_only_the_result_publisher():
     assert "'/sim/race_result'" in source
     for forbidden in ('/drive', '/ackermann_cmd', '/joy', '/scan', '/odom'):
         assert forbidden not in source
+
+
+@pytest.mark.parametrize('check', ['no_writes', 'status_clock'])
+def test_referee_scores_each_new_status_immediately_without_writing_tracks(tmp_path, check):
+    from geometry_msgs.msg import PoseStamped
+    from racerbot_sim.race_referee_node import RaceRefereeNode
+    from racerbot_sim import tracks
+
+    _isolated_domain()
+    rclpy.init(args=['--ros-args', '-p', f'track_directory:={tmp_path}',
+                     '-p', f'output_dir:={tmp_path / "results"}'])
+    node = None
+    try:
+        node = RaceRefereeNode()
+        # oracle: ruling C, referee startup never creates track files.
+        if check == 'no_writes':
+            assert sorted(p.name for p in tmp_path.iterdir()) == ['results']
+            return
+        line = tracks.rounded_rectangle_centerline(5.0, 3.2, 1.8)
+        for i in range(2):
+            pose = PoseStamped()
+            pose.pose.position.x, pose.pose.position.y = map(float, line[i * 10])
+            node._pose(pose, i)
+        def offer(t):
+            node._status(String(data=json.dumps(dict(
+                sim_time_s=t, cars=[dict(speed=1.0, wall_contact_now=False)] * 2,
+                car_contact_now=False))))
+        offer(0.025)
+        # oracle: ruling B, the callback ticks immediately, even faster than wall time.
+        assert node.referee.sim_time_s == 0.025
+        offer(0.05)
+        offer(0.05)
+        offer(0.025)
+        assert node.referee.sim_time_s == 0.05
+        assert [len(t) for t in node.referee.progress_m] == [2, 2]
+        deadline = time.monotonic() + 0.15
+        while time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.02)
+        assert [len(t) for t in node.referee.progress_m] == [2, 2]
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
+
+def _load_launch(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize('check', ['arguments', 'recorder'])
+def test_recorder_inherits_default_topics_and_launch_exposes_timeout(check):
+    from ament_index_python.packages import get_package_share_directory
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+    from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
+    race = _load_launch(os.path.join(ROOT, 'src/racerbot_sim/launch/sim_race_launch.py'), 'race_launch_test')
+    record = _load_launch(os.path.join(get_package_share_directory('race_diagnostics'),
+                                    'launch/record_run.py'), 'record_launch_test')
+    context = LaunchContext()
+    declarations = [a for a in race.generate_launch_description().entities
+                    if isinstance(a, DeclareLaunchArgument)]
+    for action in declarations:
+        action.execute(context)
+    # oracle: amended launch interface includes timeout, excludes unsolicited offsets.
+    if check == 'arguments':
+        assert 'timeout_s' in context.launch_configurations
+        assert 'start_offsets' not in context.launch_configurations
+        return
+    actions = race._setup(context)
+    includes = [a for a in actions if isinstance(a, IncludeLaunchDescription)]
+    assert len(includes) == 2  # bringup and recorder, as required by the launch contract
+    recorder = includes[-1]
+    topics = perform_substitutions(context, normalize_to_list_of_substitutions(
+        dict(recorder.launch_arguments)['topics'])).split()
+    # oracle: spec, every recorder default plus the specified second-car and truth topics.
+    assert set(record.DEFAULT_TOPICS) <= set(topics)
+    assert set('/car2/scan /car2/odom /car2/drive /car2/ackermann_cmd /car2/joy '
+               '/car2/drive_intent /car2/teleop /car2/safety/brake /sim/ground_truth_pose '
+               '/sim/car2/ground_truth_pose /sim/status /sim/race_result'.split()) <= set(topics)
