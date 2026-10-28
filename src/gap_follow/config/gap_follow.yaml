@@ -502,7 +502,13 @@ gap_follow_node:
     opponent_min_hits: 8             # scans (0.2 s) before a track may count as moving
     opponent_max_misses: 6           # scans unseen before a track is dropped
     opponent_moving_speed: 0.6       # m/s over the ground; odometry error makes walls drift ~0.2-0.4
-    opponent_stopped_release_sec: 2.0  # s, follow-only hold for once-confirmed cars; simulation tuning pending
+    # Follow-only hold after a confirmed car's moving latch releases. Does not
+    # enable passing/inflation, or turn never-moving wall clusters into cars.
+    # R2 simulation 2026-10-28: 1/2/3 s each passed 40 two-car races and 8 solo
+    # runs (car1_course_2026_10_26 + indoor_wide, both directions), no contacts
+    # or stalls, no added solo stops. Ship fastest tested: seed 12346's former
+    # stuck follower finishes in 27.62 s at 1 s vs 29.18 s at 2/3 s.
+    opponent_stopped_release_sec: 1.0  # s; inclusive hold, release one tick later
     opponent_radius: 0.30            # m, footprint around the cluster centre
     opponent_passing_margin: 0.15    # m, extra room demanded beside a moving car
     opponent_prediction_horizon: 0.8 # s of predicted path treated as blocked

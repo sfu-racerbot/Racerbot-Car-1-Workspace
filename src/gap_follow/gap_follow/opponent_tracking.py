@@ -63,7 +63,7 @@ class OpponentParams:
     min_hits: int = 8                # scans before a track can be "moving"
     max_misses: int = 6              # scans unseen before a track is dropped
     moving_speed: float = 0.6        # m/s, world-frame speed to count as moving
-    stopped_release_sec: float = 2.0  # s, follow-only hold after moving releases
+    stopped_release_sec: float = 1.0  # s, follow-only hold after moving releases
     radius: float = 0.30             # m, opponent footprint around its centroid
     passing_margin: float = 0.15     # m, extra room demanded beside it
     prediction_horizon: float = 0.8  # s, how far ahead its path is blocked
@@ -564,7 +564,10 @@ class OpponentAwareness:
         out = self.moving_body()
         p = self.params
         for t in self.tracker.tracks:
-            if t.moving or not t.confirmed_car or t.stopped_sec > p.stopped_release_sec:
+            # Accumulating 40 * 0.025 can exceed 1.0 by roundoff. Preserve
+            # the inclusive time boundary without extending it by a scan.
+            if (t.moving or not t.confirmed_car
+                    or t.stopped_sec > p.stopped_release_sec + 1e-12):
                 continue
             bx, by = self.ego.to_body(t.x, t.y)
             if (bx <= -p.radius or abs(by) > p.relevant_lateral

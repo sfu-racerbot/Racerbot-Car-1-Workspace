@@ -774,6 +774,19 @@ def test_confirmed_car_stays_followed_when_it_stops():
     t.vx = -0.01
     assert layer.followed_body()
     assert layer.moving_body() == []
+    # oracle: follow-only hold cannot create an inflated obstacle or a passer.
+    window = np.full(ANGLES.size, MAX_RANGE)
+    assert np.array_equal(layer.augment(window, ANGLES), window)
+    # oracle: held tracks keep both follow-band and spatial relevance gates.
+    t.x, t.y = FRONT + 1.0, layer.params.follow_lateral + 0.001
+    assert layer.follow_cap(passing=True) == math.inf
+    assert math.isfinite(layer.follow_cap(passing=False))
+    for x, y in ((-layer.params.radius, 0.0),
+                 (2.0, layer.params.relevant_lateral + 0.001),
+                 (layer.params.max_range + 0.001, 0.0)):
+        t.x, t.y = x, y
+        assert layer.followed_body() == []
+        assert layer.follow_cap(passing=False) == math.inf
 
 
 @pytest.mark.parametrize('offset', [0.0, 0.001, -0.001])
@@ -800,9 +813,10 @@ def test_held_car_cap_rises_with_gap():
     assert caps[1] > caps[0]  # oracle: increasing gap must release a zero cap
 
 
-def test_held_car_release_exact_boundary():
-    # Binary-exact dt makes equality a timing oracle, not floating-point drift.
-    dt, release = 0.125, 2.0
+@pytest.mark.parametrize('dt,release', [(0.125, 2.0), (0.025, 1.0)])
+def test_held_car_release_exact_boundary(dt, release):
+    # Exercise both binary-exact timing and the real 40 Hz scan interval;
+    # roundoff in accumulated dt must not release on the equality tick.
     layer = _confirmed_follow_layer(stopped_release_sec=release)
     t = layer.tracker.tracks[0]
     t.vx = t.vy = 0.0
