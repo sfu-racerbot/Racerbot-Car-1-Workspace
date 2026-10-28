@@ -26,10 +26,18 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+def _validate_controlled_cars(context):
+    value = LaunchConfiguration('controlled_cars').perform(context)
+    if value not in ('1', '2'):
+        raise RuntimeError('controlled_cars must be 1 or 2 in sim_bringup_launch.py')
+    return []
 
 
 def generate_launch_description():
@@ -58,6 +66,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'odom_speed_scale', default_value='1.0',
             description='Odometry scale error, as vesc_to_odom would have. 1.0 is a perfect wheel-speed estimate.'),
+        DeclareLaunchArgument('controlled_cars', default_value='1'),
+        DeclareLaunchArgument('controlled_start_offsets_m', default_value=''),
     ]
 
     gym_bridge = Node(
@@ -69,6 +79,9 @@ def generate_launch_description():
             'track': LaunchConfiguration('track'),
             'seed': LaunchConfiguration('seed'),
             'odom_speed_scale': LaunchConfiguration('odom_speed_scale'),
+            'controlled_cars': ParameterValue(LaunchConfiguration('controlled_cars'), value_type=int),
+            'controlled_start_offsets_m': ParameterValue(
+                LaunchConfiguration('controlled_start_offsets_m'), value_type=str),
             # Forced to str: an empty argument would otherwise YAML-parse to
             # None, and "3,1.0,0" would parse to a list.
             'opponents': ParameterValue(
@@ -99,5 +112,20 @@ def generate_launch_description():
         arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser'],
     )
 
-    return LaunchDescription(arguments + [
-        gym_bridge, sim_joy, ackermann_mux, static_tf])
+    second_car = IfCondition(PythonExpression(["'", LaunchConfiguration('controlled_cars'), "' == '2'"]))
+    car2_joy = Node(
+        package='racerbot_sim', executable='sim_joy_node', name='sim_joy_node',
+        namespace='car2', output='screen', condition=second_car,
+        parameters=[{'joy_topic': '/car2/joy',
+                     'hold_deadman': LaunchConfiguration('hold_deadman'),
+                     'release_after_sec': LaunchConfiguration('release_after_sec')}])
+    car2_mux = Node(package='ackermann_mux', executable='ackermann_mux',
+                    name='ackermann_mux', namespace='car2', parameters=[mux_config],
+                    condition=second_car)
+    car2_tf = Node(package='tf2_ros', executable='static_transform_publisher',
+                   name='static_baselink_to_laser', namespace='car2', condition=second_car,
+                   arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0',
+                              'car2/base_link', 'car2/laser'])
+
+    return LaunchDescription(arguments + [OpaqueFunction(function=_validate_controlled_cars),
+        gym_bridge, sim_joy, ackermann_mux, static_tf, car2_joy, car2_mux, car2_tf])

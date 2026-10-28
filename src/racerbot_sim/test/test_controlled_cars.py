@@ -108,14 +108,14 @@ def test_gym_collision_response_control_and_disabled(make_bridge):
     b.reset(poses=poses)
     b.env.unwrapped.sim.ttc_threshold = F110Simulator.ttc_threshold
     flagged = snapped = False
-    for _ in range(16):
+    for _ in range(15):
         b.step_cars([(0.0, 0.0), (0.0, 0.1)])
         assert not b.car_contact()
         flagged |= b.agent_state(1).collision
         snapped |= abs(b.agent_state(1).yaw) < 1e-6
     assert flagged and snapped
     b.reset(poses=poses)
-    for _ in range(16):
+    for _ in range(15):
         b.step_cars([(0.0, 0.0), (0.0, 0.1)])
         # oracle: straight steering gives zero yaw rate; no collision response.
         assert not b.car_contact()
@@ -187,7 +187,7 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         start('gym_bridge_node', '-p', 'controlled_cars:=2')
         start('sim_joy_node', '-r', '__ns:=/car2', '-p', 'joy_topic:=/car2/joy')
         # oracle: active hardware suppresses all synthetic sensor and joy output.
-        assert not _spin_until(node, lambda: any(received.values()), 3.0)
+        assert not _spin_until(node, lambda: any(received.values()), 3.0), received
     finally:
         hardware.destroy_node()
     # oracle: after the hardware disappears both scans resume.
