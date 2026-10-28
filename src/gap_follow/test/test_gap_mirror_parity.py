@@ -287,6 +287,9 @@ def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
         # oracle: the new geometry and nearest-range plumbing were exercised.
         assert node.opponents.params.length == 0.58
         assert any(t.near_range > 0 for t in node.opponents.tracker.tracks)
+        # oracle: crossing refuses on heading; closing leader permits a pass
+        # in the wide section, so parity exercises both command branches.
+        assert ('follow' if crossing else 'clear') in modes[:45]
         assert 'follow' in modes[45:]
     finally:
         node.destroy_node()

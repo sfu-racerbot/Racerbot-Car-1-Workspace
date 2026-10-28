@@ -883,6 +883,16 @@ def test_held_leader_cap_is_independent_of_passing_a_moving_car():
 
 
 # R4 tests run with the package pytest runner, through rb (see task protocol).
+# R4 step 3, 2026-10-28: runtime mutants were observed failing, then removed
+# by process exit (no broken source was written): no rotation -> visible-face
+# entry at 90/45 deg; no centre shift -> prediction_follows_motion_along_x_too;
+# strict slab inequality -> parallel_beam_margin_boundary[0.0]; no width gate
+# -> narrow_corridor and the published-command test; half margin -> entry.
+# Also killed: no prediction (future-hit assertion), low-speed heading fallback
+# removed (undefined_heading), no width prediction (narrowing_beyond_current_body),
+# 10% wrong gap extent (synthetic_corridor), and a mirror-only width mismatch
+# (crossing_and_overtaking_mirror_parity[False]). Stub swaps covered every new
+# geometry/validation/plumbing test; restored focused suite: 146 passed.
 @pytest.mark.parametrize('heading', [0.0, math.pi / 2, math.pi / 4])
 @pytest.mark.parametrize('laser', [(0.26, 0.0), (0.13, -0.2)])
 def test_rectangle_entry_from_visible_face(heading, laser):
