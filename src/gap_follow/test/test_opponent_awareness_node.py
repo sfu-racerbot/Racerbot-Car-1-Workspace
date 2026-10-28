@@ -253,31 +253,58 @@ def test_known_stopped_car_publishes_zero_then_resumes(aware_node):
     assert speeds[-1] > 0.0
 
 
-def _deadman_with_moving_car(aware_node, state):
+def _deadman_with_moving_car(aware_node, state, start=0, ticks=40):
     node, published = aware_node
-    # A leader at 1 m/s recedes from the stationary ego, confirming a real track.
-    for step in range(40):
-        speed = _follow_tick(node, published, step, 1.5 + step * DT, 0.0, state)
-    return speed
+    # A leader at 1 m/s recedes from the stationary ego.
+    return [_follow_tick(node, published, step, 1.5 + step * DT, 0.0, state)
+            for step in range(start, start + ticks)]
+
+
+def _confirm_moving_car(aware_node):
+    speeds = _deadman_with_moving_car(aware_node, 'held')
+    # oracle: the awareness path really ran before testing a later denial.
+    assert aware_node[0].opponents.moving_body()
+    assert speeds[-1] > 0.0
+    return speeds
 
 
 def test_awareness_deadman_held_publishes_motion(aware_node):
     # R2 step 4: all four new deadman assertions were flipped and failed;
     # the deadman implementation itself was never modified.
     # oracle: LB policy permissive path, open road and a moving car ahead.
-    assert _deadman_with_moving_car(aware_node, 'held') > 0.0
+    assert _confirm_moving_car(aware_node)[-1] > 0.0
 
 
 def test_awareness_deadman_released_publishes_zero(aware_node):
+    _confirm_moving_car(aware_node)
     # oracle: CLAUDE.md safety model; released LB must deny motion.
-    assert _deadman_with_moving_car(aware_node, 'released') == 0.0
+    speeds = _deadman_with_moving_car(aware_node, 'released', start=40, ticks=4)
+    assert all(speed == 0.0 for speed in speeds)
 
 
-def test_awareness_deadman_never_received_publishes_zero(aware_node):
-    # oracle: CLAUDE.md safety model; absent /joy must deny motion.
-    assert _deadman_with_moving_car(aware_node, 'never') == 0.0
+def test_awareness_deadman_never_received_publishes_zero():
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        speeds = _deadman_with_moving_car((node, published), 'never')
+        # oracle: CLAUDE.md safety model; every command without /joy is zero.
+        assert all(speed == 0.0 for speed in speeds)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+    # Fresh node, identical scans, only LB differs: the scenario can drive.
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        assert _confirm_moving_car((node, published))[-1] > 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_awareness_deadman_stale_publishes_zero(aware_node):
+    _confirm_moving_car(aware_node)
+    node, _published = aware_node
+    node.last_joy_time = node.get_clock().now() - Duration(
+        seconds=node.joy_timeout_sec + DT)
     # oracle: CLAUDE.md safety model; expired /joy must deny motion.
-    assert _deadman_with_moving_car(aware_node, 'stale') == 0.0
+    speeds = _deadman_with_moving_car(aware_node, 'never', start=40, ticks=4)
+    assert all(speed == 0.0 for speed in speeds)
