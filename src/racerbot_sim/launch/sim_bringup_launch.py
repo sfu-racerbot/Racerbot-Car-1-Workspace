@@ -77,8 +77,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'odom_speed_scale', default_value='1.0',
             description='Odometry scale error, as vesc_to_odom would have. 1.0 is a perfect wheel-speed estimate.'),
-        DeclareLaunchArgument('controlled_cars', default_value='1'),
-        DeclareLaunchArgument('controlled_start_offsets_m', default_value=''),
+        DeclareLaunchArgument(
+            'controlled_cars', default_value='1',
+            description='Number of ROS-controlled cars: 1 or 2.'),
+        DeclareLaunchArgument(
+            'controlled_start_offsets_m', default_value='',
+            description='Comma-separated starting offsets in metres, one per controlled car; empty uses defaults.'),
     ]
 
     gym_bridge = Node(

@@ -141,7 +141,7 @@ class GymBridgeNode(Node):
         self._previous_xy = None
         self.commands = [dict(speed=0.0, steering=0.0, time=None)
                          for _ in range(self.controlled_cars)]
-        self.car_contact_counts = [0] * self.controlled_cars
+        self.wall_contact_counts = [0] * self.controlled_cars
         self.names = [car_names(i + 1) for i in range(self.controlled_cars)]
         self.names[0].update(scan=str(value('scan_topic')), odom=str(value('odom_topic')),
                              drive=str(value('drive_topic')), odom_frame=self.odom_frame,
@@ -218,7 +218,7 @@ class GymBridgeNode(Node):
             self.car_contact_steps += 1
         for i in range(self.controlled_cars):
             if self.bridge.body_contact(i):
-                self.car_contact_counts[i] += 1
+                self.wall_contact_counts[i] += 1
 
         stamp = self.get_clock().now().to_msg()
         for i in range(self.controlled_cars):
@@ -315,7 +315,7 @@ class GymBridgeNode(Node):
                                             steering=round(command['steering'], 4),
                                             fresh=self._command_is_fresh(i)),
                              wall_contact_now=bool(self.bridge.body_contact(i)),
-                             wall_contact_steps=self.car_contact_counts[i]))
+                             wall_contact_steps=self.wall_contact_counts[i]))
         message.data = json.dumps({
             'track': self.track_name,
             'sim_time_s': round(self.bridge.sim_time, 3),
