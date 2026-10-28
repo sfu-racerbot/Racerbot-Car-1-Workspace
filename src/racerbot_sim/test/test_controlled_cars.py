@@ -180,13 +180,21 @@ def test_gym_collision_response_control_and_disabled(make_bridge):
 
 
 def test_single_car_step_compatibility_and_multi_car_rejection(make_bridge):
-    a = make_bridge(controlled_cars=1)
-    b = make_bridge(controlled_cars=1)
+    plan = sim.OpponentPlan(start_offset_m=8.0, speed=0.6)
+    a = make_bridge(controlled_cars=1, opponents=[plan])
+    b = make_bridge(controlled_cars=1, opponents=[plan])
+    follower = sim.CenterlineFollower(b.centerline, plan)
+    obs = b._obs
     for _ in range(40):
+        state = obs['agent_1']['std_state']
+        steer, speed = follower.command(float(state[0]), float(state[1]), float(state[4]))
+        obs, *_ = b.env.step(np.array([[0.1, 1.0], [steer, speed]], dtype=np.float32))
         a.step(0.1, 1.0)
-        b.step_cars([(0.1, 1.0)])
-        # oracle: both APIs apply identical commands to the same plant.
-        assert vars(a.agent_state(0)) == vars(b.agent_state(0))
+        # oracle: direct Gym stepping bypasses both bridge step APIs, with
+        # the scripted follower computed from agent 1's own state.
+        for i in range(2):
+            np.testing.assert_allclose(a._obs[f'agent_{i}']['std_state'],
+                                       obs[f'agent_{i}']['std_state'], rtol=0, atol=1e-9)  # state units
     two = make_bridge(controlled_cars=2)
     with pytest.raises(ValueError, match='step_cars'):
         two.step(0.0, 1.0)
