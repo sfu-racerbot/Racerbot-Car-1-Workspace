@@ -134,7 +134,7 @@ def generate_launch_description():
         package='racerbot_sim', executable='sim_joy_node', name='sim_joy_node',
         namespace='car2', output='screen', condition=second_car,
         parameters=[{'joy_topic': '/car2/joy',
-'hold_deadman': LaunchConfiguration('car2_hold_deadman'),
+                      'hold_deadman': LaunchConfiguration('car2_hold_deadman'),
                       'release_after_sec': LaunchConfiguration('release_after_sec')}])
     car2_mux = _mux(car2_mux_config, namespace='car2', condition=second_car)
     car2_tf = Node(package='tf2_ros', executable='static_transform_publisher',

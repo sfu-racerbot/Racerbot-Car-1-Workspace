@@ -137,7 +137,7 @@ def _ros_param(node_name, parameter):
 def _parameters(probe, names):
     from rclpy.parameter_client import AsyncParameterClient
     client = AsyncParameterClient(probe, '/car2/gap_follow_node')
-    assert client.wait_for_service(timeout_sec=10)
+    assert client.wait_for_services(timeout_sec=10)
     future = client.get_parameters(names)
     rclpy.spin_until_future_complete(probe, future, timeout_sec=10)
     assert future.done(), 'namespaced node did not answer parameter request'

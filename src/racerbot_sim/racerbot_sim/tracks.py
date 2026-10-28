@@ -244,3 +244,12 @@ def centerline_path(directory, name: str) -> Path:
 def load_centerline(directory, name: str) -> np.ndarray:
     return np.loadtxt(centerline_path(directory, name), delimiter=',',
                       skiprows=1, dtype=np.float64)
+
+
+def centerline_for(name: str, directory) -> np.ndarray:
+    """Read scoring geometry without creating or rewriting any map assets."""
+    if name in LAYOUTS:
+        spec = {key: value for key, value in LAYOUTS[name].items()
+                if key != 'corridor_width'}
+        return rounded_rectangle_centerline(**spec)
+    return load_centerline(directory, name)

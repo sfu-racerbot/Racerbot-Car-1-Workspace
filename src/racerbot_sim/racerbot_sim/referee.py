@@ -110,6 +110,36 @@ def time_gained(changes, cars):
     return gained
 
 
+def json_safe(value):
+    """Use JSON null for undefined or non-finite time metrics (not zero)."""
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def format_table(result):
+    """Printable standings; '-' means unfinished or an undefined time metric."""
+    def seconds(value):
+        return '-' if value is None else f'{value:.3f}'
+
+    lines = ['Place Car Laps Finish_s Overtakes Stalls Wall Car_contact Time_gained_s']
+    for place, car in enumerate(result['finish_order'], 1):
+        i = car - 1
+        contact = result['contacts'][i]
+        lines.append(f"{place} {car} {result['laps'][i]:.3f} "
+                     f"{seconds(result['finish_time_s'][i])} {result['overtakes'][i]} "
+                     f"{result['stalls'][i]} {contact['wall']} {contact['car']} "
+                     f"{seconds(result['time_gained_s'][i])}")
+    winner = result['winner']
+    lines.append(f"winner: {'none' if winner is None else f'car {winner}'}; "
+                 f"sim_time_s: {result['sim_time_s']:.3f}; gap_s: {seconds(result['gap_s'])}")
+    return '\n'.join(lines)
+
+
 class LapCounter:
     """Unwrapped centreline progress measured from the common start line."""
 
@@ -126,7 +156,6 @@ class LapCounter:
             raise ValueError('centerline length must be positive')
         self.sign = -1.0 if reverse else 1.0
         self.index = self._nearest(start_xy)
-        self.previous_index = self.index
         self._position = self.sign * self._wrap(self.arc[self.index], self.total)
 
     def _nearest(self, xy):
@@ -161,14 +190,12 @@ class Referee:
     """Score a race from ground truth and simulator-owned contact flags."""
 
     def __init__(self, centerline_xy, start_xys, laps_required, dt_s, reverse=False):
-        if not start_xys:
+        if len(start_xys) == 0:
             raise ValueError('at least one car is required')
         if not math.isfinite(float(laps_required)) or laps_required <= 0.0:
             raise ValueError('laps_required must be positive and finite')
         if not math.isfinite(float(dt_s)) or dt_s <= 0.0:
             raise ValueError('dt_s must be positive and finite')
-        if len(start_xys) == 0:
-            raise ValueError('at least one car is required')
         self.dt_s = float(dt_s)
         self.laps_required = float(laps_required)
         self.counters = [LapCounter(centerline_xy, xy, reverse) for xy in start_xys]
@@ -177,6 +204,7 @@ class Referee:
         self.times = [None] * len(self.counters)
         self.contacts = [{'wall': False, 'car': False} for _ in self.counters]
         self._sim_time = 0.0
+        self._has_tick = False
         self._finished = False
 
     def tick(self, t_s, xys, speeds, wall_contact, car_contact):
@@ -186,12 +214,16 @@ class Referee:
             raise ValueError('wall contact must match the number of cars')
         for position in xys:
             point = np.asarray(position, dtype=float)
-            if point.shape != (2,):
-                raise ValueError('positions must match the number of cars and contain XY pairs')
+            if point.shape != (2,) or not np.isfinite(point).all():
+                raise ValueError('positions must contain two finite XY values per car')
+        if not all(isinstance(value, (bool, np.bool_)) for value in wall_contact):
+            raise ValueError('wall contact must contain booleans')
         if not isinstance(car_contact, (bool, np.bool_)):
             raise ValueError('car_contact must be a boolean')
         if not math.isfinite(float(t_s)):
             raise ValueError('time must be finite')
+        if self._has_tick and t_s <= self._sim_time:
+            raise ValueError('time must increase with every tick')
         for index, speed in enumerate(speeds):
             try:
                 finite = math.isfinite(float(speed))
@@ -199,14 +231,20 @@ class Referee:
                 raise ValueError(f'car {index}: non-finite speed') from None
             if not finite:
                 raise ValueError(f'car {index}: non-finite speed')
+        # Validate all cars before changing any state: a rejected tick is atomic.
+        contact_now = bool(car_contact or any(wall_contact))
+        for index, speed in enumerate(speeds):
             self.counters[index].update(xys[index])
             self.traces[index].append(self.counters[index].position_m)
             self.speeds[index].append(abs(float(speed)))
-            if self.times[index] is None and self.counters[index].laps >= self.laps_required:
+            # run_multi records progress and contacts, then breaks BEFORE finishes.
+            if (not contact_now and self.times[index] is None
+                    and self.counters[index].laps >= self.laps_required):
                 self.times[index] = float(t_s)
             self.contacts[index]['wall'] |= bool(wall_contact[index])
             self.contacts[index]['car'] |= bool(car_contact)
         self._sim_time = float(t_s)
+        self._has_tick = True
         self._finished = bool(car_contact or any(wall_contact) or all(
             value is not None for value in self.times))
 
@@ -214,7 +252,21 @@ class Referee:
     def finished(self):
         return self._finished
 
+    @property
+    def sim_time_s(self):
+        return self._sim_time
+
+    @property
+    def progress_m(self):
+        """Snapshot of the per-car ground-truth progress traces, in metres."""
+        return [list(trace) for trace in self.traces]
+
     def result(self):
+        """Strict JSON standings. null means unfinished/undefined, never zero.
+
+        finish_order/winner use 1-based car numbers; gap_changes retains
+        eval_gap_multi's 0-based pair/leader/trailer indices.
+        """
         finished = sorted((i for i, value in enumerate(self.times) if value is not None),
                           key=lambda i: (self.times[i], i))
         unfinished = sorted((i for i, value in enumerate(self.times) if value is None),
@@ -224,7 +276,7 @@ class Referee:
         changes = pair_gap_changes(self.traces, self.times, self.dt_s)
         contacts = [dict(value) for value in self.contacts]
         winner = next((i + 1 for i in finished if not any(contacts[i].values())), None)
-        return {
+        return json_safe({
             'finish_order': [i + 1 for i in finished + unfinished],
             'finish_time_s': list(self.times),
             'laps': [counter.laps for counter in self.counters],
@@ -236,4 +288,4 @@ class Referee:
             'contacts': contacts,
             'winner': winner,
             'sim_time_s': self._sim_time,
-        }
+        })

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import os
+import importlib.util
+import json
 from pathlib import Path
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, Shutdown
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, Shutdown
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 from racerbot_sim import tracks
 
@@ -51,12 +54,14 @@ def _setup(context):
     car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom', drive_topic='/car2/drive',
                 joy_topic='/car2/joy', intent_topic='/car2/drive_intent',
                 imu_topic='/car2/imu/data', imu_status_topic='/car2/imu/status')
+    offsets = ('-3.0,0.0' if LaunchConfiguration('swap_starts').perform(context).lower() == 'true'
+               else '0.0,-3.0')
     bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(sim_share, 'launch', 'sim_bringup_launch.py')),
         launch_arguments={
             'track': track, 'track_directory': track_directory,
             'seed': LaunchConfiguration('seed'), 'controlled_cars': '2',
-            'controlled_start_offsets_m': LaunchConfiguration('start_offsets'),
+            'controlled_start_offsets_m': offsets,
             'hold_deadman': 'true', 'car2_hold_deadman': LaunchConfiguration('car2_hold_deadman'),
         }.items())
     car1 = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
@@ -66,26 +71,24 @@ def _setup(context):
     referee = Node(package='racerbot_sim', executable='race_referee_node', name='race_referee_node',
                    parameters=[{'track': track, 'track_directory': track_directory,
                                 'laps': LaunchConfiguration('laps'), 'controlled_cars': 2,
-                                'reverse': LaunchConfiguration('reverse'),
-                                'output_dir': LaunchConfiguration('output_dir')}], output='screen')
-    if LaunchConfiguration('swap_starts').perform(context).lower() == 'true':
-        bringup = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(sim_share, 'launch', 'sim_bringup_launch.py')),
-            launch_arguments={
-                'track': track, 'track_directory': track_directory,
-                'seed': LaunchConfiguration('seed'), 'controlled_cars': '2',
-                'controlled_start_offsets_m': '-3.0,0.0',
-                'hold_deadman': 'true', 'car2_hold_deadman': LaunchConfiguration('car2_hold_deadman'),
-            }.items())
+                                 'reverse': LaunchConfiguration('reverse'),
+                                 'timeout_s': ParameterValue(LaunchConfiguration('timeout_s'), value_type=float),
+                                 'control_parameters_json': ParameterValue(
+                                     json.dumps({'car1': _params(car1_yaml), 'car2': car2}), value_type=str),
+                                 'output_dir': LaunchConfiguration('output_dir')}], output='screen')
     actions = [bringup, car1, car2_node, referee]
     if LaunchConfiguration('record').perform(context).lower() == 'true':
-        topics = ('/scan /odom /slam_pose /drive /ackermann_cmd /teleop /tf /tf_static /map /joy '
-                  '/drive_intent /car2/scan /car2/odom /car2/drive /car2/ackermann_cmd /car2/joy '
+        record_path = os.path.join(get_package_share_directory('race_diagnostics'),
+                                   'launch', 'record_run.py')
+        spec = importlib.util.spec_from_file_location('race_record_run', record_path)
+        record_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(record_module)
+        extra_topics = ('/car2/scan /car2/odom /car2/drive /car2/ackermann_cmd /car2/joy '
                   '/car2/drive_intent /car2/teleop /car2/safety/brake /sim/ground_truth_pose '
-                  '/sim/car2/ground_truth_pose /sim/status /sim/race_result')
+                   '/sim/car2/ground_truth_pose /sim/status /sim/race_result')
+        topics = ' '.join(dict.fromkeys(record_module.DEFAULT_TOPICS + extra_topics.split()))
         recorder = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('race_diagnostics'), 'launch', 'record_run.py')),
+            PythonLaunchDescriptionSource(record_path),
             launch_arguments={'topics': topics, 'run_directory': LaunchConfiguration('record_dir')}.items())
         actions.append(recorder)
     actions.append(RegisterEventHandler(OnProcessExit(target_action=referee, on_exit=[Shutdown()])))
@@ -106,6 +109,6 @@ def generate_launch_description():
         DeclareLaunchArgument('output_dir', default_value=''),
         DeclareLaunchArgument('reverse', default_value='false'),
         DeclareLaunchArgument('car2_hold_deadman', default_value='true'),
-        DeclareLaunchArgument('start_offsets', default_value='0.0,-3.0'),
+        DeclareLaunchArgument('timeout_s', default_value='300.0'),
     ]
     return LaunchDescription(args + [OpaqueFunction(function=_setup)])
