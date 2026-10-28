@@ -24,6 +24,7 @@ from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from sensor_msgs.msg import Joy
 
+from drive_intent import schema
 from gap_follow import opponent_tracking
 from gap_follow.gap_follow_node import GapFollowNode
 
@@ -211,7 +212,8 @@ def test_tracking_uses_the_scan_stamps_not_a_fixed_rate():
 
 @pytest.fixture
 def aware_node():
-    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    node, published = _make('-p', 'enable_opponent_awareness:=true',
+                            '-p', 'intent_rate_hz:=0.0')
     yield node, published
     node.destroy_node()
     rclpy.shutdown()
@@ -239,6 +241,8 @@ def _follow_tick(node, published, step, gap, ego_speed, joy_state='held'):
 
 def test_known_stopped_car_publishes_zero_then_resumes(aware_node):
     node, published = aware_node
+    intents = []
+    node.intent_pub.publish = lambda msg: intents.append(schema.decode(msg.data))
     # Leader and ego roll together at 1 m/s: constant gap, real confirmation.
     for step in range(40):
         _follow_tick(node, published, step, 0.4, 1.0)
@@ -247,6 +251,15 @@ def test_known_stopped_car_publishes_zero_then_resumes(aware_node):
     # oracle: R2 gap-only law at 0.4 < 0.5 m, on the published command.
     assert stopped_speed == 0.0
     assert node.opponents.followed_body()
+    assert node.opponent_mode == 'follow'
+    # oracle: only the follow ceiling binds this zero; clearance, curvature
+    # and acceleration still permit motion in the same published intent.
+    factors = intents[-1]['factors']
+    assert {f['name'] for f in factors if f['binding']} == {'follow cap'}
+    follow = next(f for f in factors if f['name'] == 'follow cap')
+    assert follow['value'] == 0.0
+    assert all(f['value'] > 0.0 for f in factors if f['name'] != 'follow cap')
+    assert intents[-1]['commanded_speed'] == stopped_speed
     speeds = [_follow_tick(node, published, 64 + k, 0.4 + k * DT, 0.0)
               for k in range(1, 13)]
     # oracle: leader moves 0.3 m at 1 m/s; gap now exceeds minimum by 0.2 m.
