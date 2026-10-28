@@ -116,13 +116,15 @@ def test_gym_collision_response_control_and_disabled(make_bridge):
         snapped |= abs(b.agent_state(1).yaw) < 1e-6
     assert flagged and snapped
     b.reset(poses=poses)
+    disabled_flags = []
     for _ in range(15):
         b.step_cars([(0.0, 0.0), (0.0, 0.1)])
         # oracle: straight steering gives zero yaw rate; no collision response.
         assert not b.car_contact()
         for i in range(2):
             assert b.agent_state(i).yaw == pytest.approx(yaw, abs=1e-6)  # rad
-            assert not b.agent_state(i).collision
+            disabled_flags.append(b.agent_state(i).collision)
+    assert not any(disabled_flags)
 
 
 def test_single_car_step_compatibility_and_multi_car_rejection(make_bridge):
