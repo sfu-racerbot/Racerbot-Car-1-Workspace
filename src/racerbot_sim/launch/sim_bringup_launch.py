@@ -23,6 +23,7 @@ real automatic composition on this.
 """
 
 import os
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -49,6 +50,10 @@ def _mux(mux_config, namespace='', condition=None):
 def generate_launch_description():
     mux_config = os.path.join(
         get_package_share_directory('f1tenth_stack'), 'config', 'mux.yaml')
+    # YAML's root node key targets /ackermann_mux, not /car2/ackermann_mux.
+    # Pass the same parameter values directly so launch scopes them to car 2.
+    with open(mux_config, encoding='utf-8') as handle:
+        car2_mux_config = yaml.safe_load(handle)['ackermann_mux']['ros__parameters']
 
     arguments = [
         DeclareLaunchArgument(
@@ -120,7 +125,7 @@ def generate_launch_description():
         parameters=[{'joy_topic': '/car2/joy',
                      'hold_deadman': LaunchConfiguration('hold_deadman'),
                      'release_after_sec': LaunchConfiguration('release_after_sec')}])
-    car2_mux = _mux(mux_config, namespace='car2', condition=second_car)
+    car2_mux = _mux(car2_mux_config, namespace='car2', condition=second_car)
     car2_tf = Node(package='tf2_ros', executable='static_transform_publisher',
                    name='static_baselink_to_laser', namespace='car2', condition=second_car,
                    arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0',

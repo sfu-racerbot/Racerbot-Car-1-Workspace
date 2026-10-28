@@ -304,18 +304,8 @@ class SimBridge:
                             render_mode=None)
         self.env.unwrapped.sim.ttc_threshold = -math.inf
 
-        # Body-vs-wall contact is checked here rather than trusted to the
-        # environment. In this pinned Gym revision the wall check is
-        # `raw_scan - side_distances <= 0.005`, and with the vehicle
-        # parameters this workspace uses (`collision_body_center_x =
-        # wheelbase/2` against the ST model's own -lr offset) the LiDAR
-        # lands 0.04m *outside* the collision rectangle, so
-        # `side_distances` comes out all zeros and the test reduces to
-        # "did a beam return less than 5mm" -- which it cannot, because
-        # range_min is 0.05m. Wall collisions therefore never fire. A
-        # simulator that cannot notice the car driving through a wall is
-        # no use for validating a mapping run, so the padded body is
-        # sampled against the occupancy grid directly below.
+        # Gym's collision flag is not a verdict: the padded body is sampled
+        # against the occupancy grid independently, including off-map cells.
         track = self.env.unwrapped.track
         self._occupancy = np.asarray(track.occupancy_map)
         self._map_resolution = float(track.spec.resolution)

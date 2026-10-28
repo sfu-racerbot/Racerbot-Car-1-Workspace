@@ -188,6 +188,9 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         start('gym_bridge_node', '-p', 'controlled_cars:=2')
         start('sim_joy_node')
         start('sim_joy_node', '-r', '__ns:=/car2', '-p', 'joy_topic:=/car2/joy')
+        # oracle: test the running publishers, not merely slow process startup.
+        assert _spin_until(node, lambda: all(node.count_publishers(topic) > 0
+                                             for topic in received), 20.0)
         # oracle: active hardware suppresses all synthetic sensor and joy output.
         assert not _spin_until(node, lambda: any(received.values()), 3.0), received
     finally:

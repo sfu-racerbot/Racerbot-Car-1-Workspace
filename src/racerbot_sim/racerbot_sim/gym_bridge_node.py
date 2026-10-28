@@ -336,7 +336,7 @@ class GymBridgeNode(Node):
             'ever_contacted': self.ever_contacted,
             'opponent_wall_contact': any(
                 self.bridge.body_contact(i)
-                for i in range(1, self.bridge.num_agents)),
+                for i in range(self.controlled_cars, self.bridge.num_agents)),
             'car_contact_now': bool(self.bridge.car_contact()),
             'car_contact_steps': self.car_contact_steps,
             'nonfinite_commands': self.nonfinite_commands,
