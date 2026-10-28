@@ -302,10 +302,20 @@ class SimBridge:
         )
         self.env = gym.make('f1tenth_gym:f1tenth-v0', config=env_config,
                             render_mode=None)
+        # Gym's response zeros state[3:], including yaw, snapping a car to
+        # heading zero on padded-envelope contact. On 2026-10-20 that sent
+        # two cars lapping backwards. Use our body_contact/car_contact
+        # verdicts instead, as FidelityPlant does in sim_fidelity/plant.py.
         self.env.unwrapped.sim.ttc_threshold = -math.inf
 
-        # Gym's collision flag is not a verdict: the padded body is sampled
-        # against the occupancy grid independently, including off-map cells.
+        # Gym's wall check uses raw_scan - side_distances <= 0.005 m. Under
+        # the old 0.33 m LiDAR offset, the sensor sat outside the centred
+        # collision rectangle and side_distances came out zero; the 0.05 m
+        # minimum range then prevented that check from firing. The measured
+        # 0.26 m offset puts the sensor inside the box and the check does
+        # fire now, but its padded-envelope flag is neither a trusted contact
+        # verdict nor allowed to act on the state. Independently sample the
+        # padded body against the occupancy grid, including off-map cells.
         track = self.env.unwrapped.track
         self._occupancy = np.asarray(track.occupancy_map)
         self._map_resolution = float(track.spec.resolution)
@@ -341,6 +351,8 @@ class SimBridge:
                 for i in range(self.config.controlled_cars))
             poses = [self._pose_on_loop(offset) for offset in offsets]
             poses += [follower.start_pose() for follower in self.followers]
+        # Reassert before every reset: gym's collision response would zero
+        # state[3:], including yaw; body_contact/car_contact are our verdicts.
         self.env.unwrapped.sim.ttc_threshold = -math.inf
         self._obs, _ = self.env.reset(
             options={'poses': np.asarray(poses, dtype=float)})
