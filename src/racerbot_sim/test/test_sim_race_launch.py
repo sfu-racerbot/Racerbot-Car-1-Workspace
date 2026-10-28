@@ -296,17 +296,27 @@ def test_referee_scores_each_new_status_immediately_without_writing_tracks(tmp_p
             assert sorted(p.name for p in tmp_path.iterdir()) == ['results']
             return
         line = tracks.rounded_rectangle_centerline(5.0, 3.2, 1.8)
-        for i in range(2):
-            pose = PoseStamped()
-            pose.pose.position.x, pose.pose.position.y = map(float, line[i * 10])
-            node._pose(pose, i)
+        # Deliver deliberately stale truth on the old separate pose topics.
+        # oracle: review ruling 1, only the atomic status coordinates may be scored.
+        publishers = [node.create_publisher(PoseStamped, topic, 10) for topic in
+                      ('/sim/ground_truth_pose', '/sim/car2/ground_truth_pose')]
+        stale = PoseStamped()
+        stale.pose.position.x, stale.pose.position.y = map(float, line[0])
+        deadline = time.monotonic() + 0.3
+        while time.monotonic() < deadline:
+            for publisher in publishers:
+                publisher.publish(stale)
+            rclpy.spin_once(node, timeout_sec=0.02)
         def offer(t):
             node._status(String(data=json.dumps(dict(
-                sim_time_s=t, cars=[dict(speed=1.0, wall_contact_now=False)] * 2,
+                sim_time_s=t, cars=[dict(x=float(line[i * 10][0]),
+                                        y=float(line[i * 10][1]), speed=1.0,
+                                        wall_contact_now=False) for i in range(2)],
                 car_contact_now=False))))
         offer(0.025)
         # oracle: ruling B, the callback ticks immediately, even faster than wall time.
         assert node.referee.sim_time_s == 0.025
+        assert node.referee.progress_m[1] == pytest.approx([0.5], abs=1e-9)  # metres along straight
         offer(0.05)
         offer(0.05)
         offer(0.025)

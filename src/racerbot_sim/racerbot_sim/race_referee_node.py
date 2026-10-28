@@ -8,14 +8,13 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 
 from racerbot_sim import tracks
 from racerbot_sim.referee import Referee, format_table
-from racerbot_sim.sim_bridge import SimConfig, car_names
+from racerbot_sim.sim_bridge import SimConfig
 
 
 class RaceRefereeNode(Node):
@@ -47,21 +46,14 @@ class RaceRefereeNode(Node):
         if not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
             raise ValueError('timeout_s must be positive and finite')
         self.control_parameters = json.loads(str(value('control_parameters_json')))
-        self.poses = [None] * self.cars
         self.referee = None
         self.done = False
-        for index in range(self.cars):
-            self.create_subscription(PoseStamped, car_names(index + 1)['truth'],
-                                     lambda msg, i=index: self._pose(msg, i), 10)
         latched = QoSProfile(depth=1000, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/sim/status', self._status, latched)
         self.result_pub = self.create_publisher(String, '/sim/race_result', latched)
 
-    def _pose(self, message, index):
-        self.poses[index] = (float(message.pose.position.x), float(message.pose.position.y))
-
     def _status(self, message):
-        if self.done or any(p is None for p in self.poses):
+        if self.done:
             return
         try:
             status = json.loads(message.data)
@@ -71,12 +63,15 @@ class RaceRefereeNode(Node):
             t_s = float(status['sim_time_s'])
             if self.referee is not None and t_s <= self.referee.sim_time_s:
                 return
+            # All fields belong to one simulator step. Separate pose topics
+            # cannot be synchronized by arrival order across ROS subscriptions.
+            xys = [(float(car['x']), float(car['y'])) for car in cars]
             if self.referee is None:
-                self.referee = Referee(self.centerline, self.poses,
+                self.referee = Referee(self.centerline, xys,
                                        self.laps, self.dt_s, self.reverse)
             wall = [car['wall_contact_now'] for car in cars]
             speeds = [float(car['speed']) for car in cars]
-            self.referee.tick(t_s, self.poses, speeds, wall, status['car_contact_now'])
+            self.referee.tick(t_s, xys, speeds, wall, status['car_contact_now'])
         except (KeyError, TypeError, ValueError) as error:
             self.get_logger().error(f'cannot score simulator status: {error}')
             return
