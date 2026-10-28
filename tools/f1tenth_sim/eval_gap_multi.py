@@ -297,7 +297,8 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     last_cmd = [0.0] * cars
     steps = int(math.ceil(duration_s / CONTROL_DT))
     for step in range(steps):
-        # Ground truth as this tick's scans were taken, before the step moves the cars.
+        # Current ground truth, before the step moves the cars. The car-profile
+        # scan for the degraded agent can be delayed by the sensor model.
         truth_now = ([np.array(plant.truth(k), dtype=float) for k in range(cars)]
                      if recognition_on else None)
         commands = []
