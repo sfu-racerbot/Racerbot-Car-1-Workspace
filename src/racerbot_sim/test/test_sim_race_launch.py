@@ -241,16 +241,23 @@ def test_car2_without_lb_stays_still_while_car1_drives(tmp_path, probe):
         assert proc.poll() is not None, 'the race did not end within its time limit'
         assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
 
-    statuses = [s for s in probe.status if len(s.get('cars', [])) == 2]
-    assert statuses, 'no /sim/status with both cars was seen'
+    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    assert race['missed_steps'] == 0
+    # Drain callbacks queued during process shutdown, through the scored final
+    # step. The simulator may publish later steps before launch stops it.
+    assert graph.spin_until(lambda: any(s['steps'] >= race['steps'] for s in probe.status), 5)
+    statuses = [s for s in probe.status if s['steps'] <= race['steps']]
+    # oracle: simulator starts at step 1; exact sequence proves every scored
+    # step was observed, with neither duplicates nor holes hidden by filtering.
+    assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
+    assert race['steps'] > 1
+    assert all(len(s['cars']) == 2 for s in statuses)
     car1_speeds = [s['cars'][0]['speed'] for s in statuses]
     car2_speeds = [s['cars'][1]['speed'] for s in statuses]
     # Car 2 has no LB held, so its deadman refuses every drive command: it never moves.
-    assert max(car2_speeds) < 0.05, f'car 2 moved without LB: peak {max(car2_speeds):.3f} m/s'
+    assert max(abs(speed) for speed in car2_speeds) < 0.05, 'car 2 moved without LB'
     # Car 1 holds LB and drives, so the car 2 result above is not a stalled simulator.
     assert max(car1_speeds) > 0.5, f'car 1 never got above 0.5 m/s: peak {max(car1_speeds):.3f}'
-    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
-    assert race['missed_steps'] == 0
     assert race['finish_time_s'][0] is not None, 'car 1 should have finished 0.2 laps'
     assert race['finish_time_s'][1] is None, 'car 2 cannot finish 0.2 laps while it is stopped'
     assert race['timed_out'] is True
