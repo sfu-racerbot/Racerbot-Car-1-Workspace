@@ -361,6 +361,14 @@ the log line reports every one as `value/limit`:
 | back near the start | `closure_distance` | passes the start but too wide |
 | heading matches start | `closure_heading_deg` | comes back the "wrong way round" |
 
+> **With `close_at_closest_approach: true`, the last two gates are checked at one point.** `auto_map_race.yaml` sets it.
+>
+> A lap does not close on the first tick inside the closure circle. That circle's radius is `closure_distance` until the gate widens after 1.25 laps (`closure_widen_after_revolutions`).
+>
+> It closes at the nearest point the car came to its start, once the car is 0.05 m farther away (`closest_approach_margin_m`) or has left the circle.
+>
+> The heading check is made at that nearest point. If the heading is off there, that point is dropped and the lap goes on. [operations.md](operations.md) shows the log line for a lap that closes this way.
+
 `summarize_run` names the single blocking gate. On 2026-07-27 the car
 drove **114 m without closing a lap** because heading error was 30.2°
 against a 30.0° limit while every other gate had passed long before —

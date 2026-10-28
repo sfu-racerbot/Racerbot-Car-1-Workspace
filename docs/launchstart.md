@@ -91,7 +91,7 @@ ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true
 
 It follows a slower car instead of squeezing past it, and passes only on a straight with room. On a track as narrow as ours it will mostly follow. Do not run two cars at once without it.
 
-**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 3.5 on car 1). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, e.g. `max_speed:=5.0`, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`, so raise those in the YAML too if the car should be faster everywhere. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. Going faster: wheels off the ground first, then open space.
+**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 5.0 on car 1 since 2026-10-27, was 3.5). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, e.g. `max_speed:=5.0`, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`, so raise those in the YAML too if the car should be faster everywhere. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. Going faster: wheels off the ground first, then open space.
 
 ### Car 1 and car 2 together: first run
 
@@ -152,7 +152,7 @@ Options, added to the end of the command:
 | `mapping_max_speed:=1.5` | a course nobody has driven yet |
 | `laps:=4` | a different number of laps (at least 2) |
 | `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
-| `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
+| `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. It also loads `slam_gyro.yaml`: a tighter loop-closure search for good odometry. A loop closure is SLAM noticing it has come back to a place it already mapped. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
 | `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=false` | no IMU side (the BNO085 bridge, `imu_bridge`, `vehicle_state`). Added for you in the simulator |
 
