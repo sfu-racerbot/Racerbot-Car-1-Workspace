@@ -599,6 +599,15 @@ def test_a_car_ahead_is_visible_when_the_scan_reads_its_near_side():
     assert _visible((3.0, 0.0), ranges, valid)
 
 
+def test_side_on_leader_uses_its_width_for_near_side_distance():
+    # oracle: closed form, centre 2.5 m from sensor; side-on half-width is
+    # 0.1 m, so near side is 2.4 m. A 1.85 m wall is 0.55 m away.
+    ranges, valid = _scan(1.85)
+    assert not egm.leader_visible((3.0, 0.0), LIDAR_X, ranges, valid,
+                                  SCAN_MIN, SCAN_INC, MAX_RANGE, HALF,
+                                  leader_half_width=0.1, leader_yaw=math.pi / 2)
+
+
 @pytest.mark.parametrize('offset, visible', [
     (-0.5, True),           # on the tolerance, below the near side
     (0.5, True),            # on the tolerance, beyond the near side

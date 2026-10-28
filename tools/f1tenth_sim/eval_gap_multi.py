@@ -191,7 +191,8 @@ def in_base_link(car, point, rear_offset: float) -> tuple:
 
 def leader_visible(leader_base, lidar_x: float, ranges, valid, angle_min: float,
                    angle_increment: float, max_range: float, leader_half_length: float,
-                   tolerance: float = RECOGNITION_TOLERANCE_M) -> bool:
+                   tolerance: float = RECOGNITION_TOLERANCE_M,
+                   leader_half_width=None, leader_yaw: float = 0.0) -> bool:
     """Whether a follower's scan sees the other car on this tick.
 
     ``leader_base`` is the other car's centre in the follower's base_link.
@@ -205,13 +206,11 @@ def leader_visible(leader_base, lidar_x: float, ranges, valid, angle_min: float,
        same gate moving_body() applies);
     2. the centre's bearing from the sensor is inside the scan's field of view;
     3. the beam nearest that bearing is valid and reads within ``tolerance``
-       of the car's near side, which is the centre's range from the sensor
-       minus ``leader_half_length``. A car behind a wall is then not visible:
-       its beam reads the wall, or something nearer. The near side is exact
-       for a car seen end-on. Seen side-on it is out by (length - width) / 2,
-       0.12 m for the chassis, which is inside the tolerance;
-    4. the near side lies in front of the sensor, that is the centre is farther
-       from the sensor than its own half length.
+       of the near side of a rectangle centred on the truth position, oriented
+       at ``leader_yaw`` relative to base_link. The centre ray intersects the
+       rectangle at distance min(half_length/|cos|, half_width/|sin|) before
+       its centre. If no width is supplied, use a circle of half_length radius;
+    4. the near side lies in front of the sensor.
 
     Returns a bool. An empty scan sees nothing.
     """
@@ -228,7 +227,14 @@ def leader_visible(leader_base, lidar_x: float, ranges, valid, angle_min: float,
     index = round((bearing - angle_min) / angle_increment)
     if not valid[index]:
         return False
-    near_side = math.hypot(qx, qy) - leader_half_length
+    if leader_half_width is None:
+        radius = leader_half_length
+    else:
+        relative = bearing - leader_yaw
+        along, across = abs(math.cos(relative)), abs(math.sin(relative))
+        radius = min(leader_half_length / along if along else math.inf,
+                     leader_half_width / across if across else math.inf)
+    near_side = math.hypot(qx, qy) - radius
     if near_side <= 0.0:
         return False
     return bool(abs(ranges[index] - near_side) <= tolerance)
@@ -285,6 +291,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     rear = float(plant.params.lr)
     lidar_x_base = rear + float(plant.calibration.lidar_offset_x)
     half_length = float(plant.calibration.body_length) / 2.0
+    half_width = float(plant.calibration.body_width) / 2.0
     min_gap = math.inf
     last_cmd = [0.0] * cars
     steps = int(math.ceil(duration_s / CONTROL_DT))
@@ -321,7 +328,8 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
                     ego["scan"], max_range=params_list[k]["max_range"], range_min=lid.range_min)
                 st["visible"].append(leader_visible(
                     leader, lidar_x_base, clean, valid, lid.angle_min, lid.angle_increment,
-                    params_list[k]["opponent_max_range"], half_length))
+                    params_list[k]["opponent_max_range"], half_length,
+                    leader_half_width=half_width, leader_yaw=other[4] - mine[4]))
                 st["recognised"].append(
                     ctrl.opponents is not None
                     and is_recognised(ctrl.opponents.moving_body(), leader))
