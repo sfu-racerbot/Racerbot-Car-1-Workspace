@@ -252,25 +252,37 @@ def _feed_imu(node, state, yaw_rate):
 
 
 def test_mirror_matches_stopped_then_departing_confirmed_car():
-    from test_opponent_awareness_node import _make, _follow_tick
+    from test_opponent_awareness_node import _make
     node, published = _make('-p', 'enable_opponent_awareness:=true')
     try:
         params = gap_mirror.node_params()
         params.update(enable_opponent_awareness=True, command_slew_max_dt=DT)
         mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        # Start equivalently once. Each controller carries its own command,
+        # steering basis and target history through every subsequent scan.
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_commanded_speed = mirror.last_commanded_speed = 0.0
         for step in range(76):
             speed = 1.0 if step < 40 else 0.0
             gap = 0.4 + max(0, step - 63) * DT
             scan = _raycast(_corridor(2.0, 2.0) + _box_ahead(gap + 0.47 - 0.26))
-            mirror.steering_basis = node.steering_basis = 0.0
-            mirror.last_commanded_speed = node.last_commanded_speed
-            mirror.previous_target_idx = node.previous_target_idx
-            mirror.last_command_time = step - 1
-            actual = _follow_tick(node, published, step, gap, speed)
+            ns = round((100.0 + step * DT) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            # Inject the same elapsed command interval, not controller state.
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            actual = published[-1].drive.speed
             steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
             # oracle: integration invariant, identical per-scan commands.
-            assert actual == pytest.approx(expected, abs=TOLERANCE)
-            assert published[-1].drive.steering_angle == pytest.approx(steering, abs=TOLERANCE)
+            assert actual == pytest.approx(expected, abs=TOLERANCE), f'tick {step}: speed'
+            assert published[-1].drive.steering_angle == pytest.approx(
+                steering, abs=TOLERANCE), f'tick {step}: steering'
         # oracle: the sequence exercises the new hold and releases the speed cap.
         assert mirror.opponents.followed_body()
         assert published[63].drive.speed == 0.0
