@@ -69,7 +69,7 @@ def count_stalls(speeds, dt_s):
     return counts
 
 
-def pair_gap_changes(traces, finish_times, dt_s):
+def pair_gap_changes(traces, finish_times, dt_s, elapsed_s=None):
     _validate_traces(traces, 'progress')
     if len(finish_times) != len(traces):
         raise ValueError('finish times and progress traces differ in length')
@@ -84,7 +84,8 @@ def pair_gap_changes(traces, finish_times, dt_s):
             leader = second if trailer == first else first
             start = end = change = None
             if n >= 2:
-                speed = (traces[trailer][-1] - traces[trailer][0]) / ((n - 1) * dt_s)
+                elapsed = (n - 1) * dt_s if elapsed_s is None else elapsed_s
+                speed = (traces[trailer][-1] - traces[trailer][0]) / elapsed
                 if speed <= 0:
                     start = end = change = math.inf
                 else:
@@ -206,8 +207,23 @@ class Referee:
         self._sim_time = 0.0
         self._has_tick = False
         self._finished = False
+        self.steps = 0
+        self.missed_steps = 0
+        self._sample_steps = []
+        self._breaks = []
 
-    def tick(self, t_s, xys, speeds, wall_contact, car_contact):
+    def tick(self, t_s, xys, speeds, wall_contact, car_contact, *, steps=None):
+        """Score one observed step; explicit step numbers expose missing samples.
+
+        Legacy synthetic traces may omit steps to supply consecutive samples.
+        Simulator step 1 is the first permitted sample. Older/duplicate steps
+        are ignored. Missing steps are never filled with invented observations.
+        """
+        next_step = self.steps + 1 if steps is None else steps
+        if type(next_step) is not int or next_step < 1:
+            raise ValueError('steps must be a positive integer')
+        if next_step <= self.steps:
+            return
         if len(xys) != len(self.counters) or len(speeds) != len(self.counters):
             raise ValueError('positions and speeds must match the number of cars')
         if len(wall_contact) != len(self.counters):
@@ -232,6 +248,12 @@ class Referee:
             if not finite:
                 raise ValueError(f'car {index}: non-finite speed')
         # Validate all cars before changing any state: a rejected tick is atomic.
+        missing = next_step - self.steps - 1
+        if missing and self._sample_steps:
+            self._breaks.append(len(self._sample_steps))
+        self.missed_steps += missing
+        self.steps = next_step
+        self._sample_steps.append(next_step)
         contact_now = bool(car_contact or any(wall_contact))
         for index, speed in enumerate(speeds):
             self.counters[index].update(xys[index])
@@ -266,6 +288,9 @@ class Referee:
 
         finish_order/winner use 1-based car numbers; gap_changes retains
         eval_gap_multi's 0-based pair/leader/trailer indices.
+        missed_steps counts absent simulator steps, including startup loss.
+        Persistence counts restart after each gap; pair-gap speed uses the full
+        elapsed step interval, so received samples are not falsely consecutive.
         """
         finished = sorted((i for i, value in enumerate(self.times) if value is not None),
                           key=lambda i: (self.times[i], i))
@@ -273,7 +298,17 @@ class Referee:
                             key=lambda i: (-self.counters[i].laps, i))
         gap = (self.times[finished[1]] - self.times[finished[0]]
                if len(finished) >= 2 else math.inf)
-        changes = pair_gap_changes(self.traces, self.times, self.dt_s)
+        elapsed = ((self._sample_steps[-1] - self._sample_steps[0]) * self.dt_s
+                   if len(self._sample_steps) >= 2 else None)
+        changes = pair_gap_changes(self.traces, self.times, self.dt_s, elapsed)
+        overtakes = [0] * len(self.counters)
+        stalls = [0] * len(self.counters)
+        boundaries = [0, *self._breaks, len(self._sample_steps)]
+        for start, end in zip(boundaries, boundaries[1:]):
+            passes = count_overtakes([trace[start:end] for trace in self.traces], self.dt_s)
+            stops = count_stalls([speed[start:end] for speed in self.speeds], self.dt_s)
+            overtakes = [a + b for a, b in zip(overtakes, passes)]
+            stalls = [a + b for a, b in zip(stalls, stops)]
         contacts = [dict(value) for value in self.contacts]
         winner = next((i + 1 for i in finished if not any(contacts[i].values())), None)
         return json_safe({
@@ -281,11 +316,13 @@ class Referee:
             'finish_time_s': list(self.times),
             'laps': [counter.laps for counter in self.counters],
             'gap_s': gap,
-            'overtakes': count_overtakes(self.traces, self.dt_s),
-            'stalls': count_stalls(self.speeds, self.dt_s),
+            'overtakes': overtakes,
+            'stalls': stalls,
             'gap_changes': changes,
             'time_gained_s': time_gained(changes, len(self.counters)),
             'contacts': contacts,
             'winner': winner,
             'sim_time_s': self._sim_time,
+            'steps': self.steps,
+            'missed_steps': self.missed_steps,
         })

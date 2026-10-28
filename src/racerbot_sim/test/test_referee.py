@@ -301,6 +301,52 @@ def test_ticks_must_advance_in_time():
         referee.tick(2 * DT, [_at(0.4)], [2.0], [False], False)  # a repeat is not a new step
 
 
+def test_missing_steps_advance_elapsed_time_and_duplicates_change_nothing():
+    referee = Referee(LOOP, [_at(0), _at(-3)], 10.0, DT)
+    referee.tick(DT, [_at(0.2), _at(-2.8)], [2, 2], [False, False], False, steps=1)
+    first_time = referee.sim_time_s
+    referee.tick(4 * DT, [_at(0.8), _at(-2.2)], [2, 2], [False, False], False, steps=4)
+    result = referee.result()
+    # oracle: closed form, steps 2 and 3 were lost; elapsed interval is 3 * dt.
+    assert result['missed_steps'] == 2
+    assert result['steps'] == 4
+    assert referee.sim_time_s - first_time == pytest.approx(3 * DT, abs=1e-12)  # seconds
+    # Mean trailer speed uses all 0.3 s, not just one received-sample interval.
+    assert result['gap_changes'][0]['start_gap_s'] == pytest.approx(3 / 2, abs=1e-9)  # seconds
+    referee.tick(5 * DT, [_at(1), _at(-2)], [2, 2], [True, True], True, steps=4)
+    referee.tick(6 * DT, [_at(1), _at(-2)], [2, 2], [True, True], True, steps=3)
+    assert referee.result() == result  # oracle: invariant, duplicate/old step is ignored
+    assert [len(trace) for trace in referee.progress_m] == [2, 2]
+
+
+def test_stall_persistence_does_not_bridge_missing_steps():
+    referee = Referee(LOOP, [_at(0), _at(-3)], 10.0, DT)
+    for step in [*range(1, 7), *range(9, 15)]:
+        referee.tick(step * DT, [_at(0), _at(-3 + step * DT)],
+                     [0, 1], [False, False], False, steps=step)
+    # oracle: spec, two 0.6 s observed runs cannot prove a >1 s continuous stall.
+    assert referee.result()['stalls'] == [0, 0]
+    assert referee.result()['missed_steps'] == 2
+
+
+def test_overtake_persistence_does_not_bridge_missing_steps():
+    referee = Referee(LOOP, [_at(0), _at(-0.2)], 10.0, DT)
+    for step in [*range(1, 6), *range(8, 13)]:
+        trailer = -0.2 if step < 8 else 0.2
+        referee.tick(step * DT, [_at(0), _at(trailer)],
+                     [1, 1], [False, False], False, steps=step)
+    # oracle: invariant, an order change across an unobserved interval is not a scored pass.
+    assert referee.result()['overtakes'] == [0, 0]
+    assert referee.result()['missed_steps'] == 2
+
+
+def test_initial_missing_steps_are_counted_from_first_permitted_step():
+    referee = Referee(LOOP, [_at(0)], 10.0, DT)
+    referee.tick(5 * DT, [_at(0)], [0], [False], False, steps=5)
+    assert referee.result()['missed_steps'] == 4  # oracle: closed form, steps 1..4 absent
+    assert referee.sim_time_s == pytest.approx(5 * DT, abs=1e-12)  # seconds
+
+
 # --- output -----------------------------------------------------------------
 
 def test_result_is_strict_json_even_when_the_trailer_never_moves():

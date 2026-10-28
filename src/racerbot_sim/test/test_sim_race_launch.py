@@ -52,7 +52,9 @@ import harness_procs  # noqa: E402
 SHIPPED_GAP_FOLLOW_YAML = os.path.join(ROOT, 'src', 'gap_follow', 'config', 'gap_follow.yaml')
 # Our own nodes only: a leftover gym bridge or referee on this domain would
 # publish a second /scan, /odom or /sim/status beside the race being run.
-STRAY_PATTERNS = ('gym_bridge_node', 'race_referee_node', 'sim_joy_node')
+STRAY_PATTERNS = tuple(
+    r'^([^ ]*/)?(python[0-9.]* +(-[^ ]+ +)*)?([^ ]*/)?' + name + r'( +|$)'
+    for name in ('gym_bridge_node', 'race_referee_node', 'sim_joy_node'))
 # The referee's graph footprint. Anything else on its publishers is a bug.
 REFEREE_TOPICS = {'/sim/race_result', '/rosout', '/parameter_events'}
 STATUS_QOS = QoSProfile(depth=5000, reliability=QoSReliabilityPolicy.RELIABLE,
@@ -71,6 +73,18 @@ def _refuse_strays():
         harness_procs.refuse_if_strays(STRAY_PATTERNS)
     except SystemExit as refusal:
         pytest.fail(str(refusal))
+
+
+def test_stray_patterns_match_node_executables_not_quoted_briefs():
+    for name in ('gym_bridge_node', 'race_referee_node', 'sim_joy_node'):
+        # oracle: process-boundary invariant: an installed node is refused,
+        # but a parent shell merely quoting its name is not a running ROS node.
+        for command in (name, f'/ws/install/racerbot_sim/lib/racerbot_sim/{name}',
+                        f'/usr/bin/python3 /ws/install/racerbot_sim/lib/racerbot_sim/{name} --ros-args',
+                        f'python3 -u /ws/{name} --ros-args'):
+            assert any(re.search(pattern, command) for pattern in STRAY_PATTERNS), command
+        assert not any(re.search(pattern, f'/bin/bash -c "review {name} now"')
+                       for pattern in STRAY_PATTERNS)
 
 
 def _tail(path, lines=60):
@@ -214,6 +228,7 @@ def test_short_race_keeps_each_car_in_its_own_namespace_and_finishes(tmp_path, p
     assert all(isinstance(lap, float) and math.isfinite(lap) for lap in race['laps'])
     assert sorted(race['finish_order']) == [1, 2]
     assert all(t is not None for t in race['finish_time_s']), race['finish_time_s']
+    assert race['missed_steps'] == 0  # oracle: invariant, every simulator step was scored
 
 
 def test_car2_without_lb_stays_still_while_car1_drives(tmp_path, probe):
@@ -235,6 +250,7 @@ def test_car2_without_lb_stays_still_while_car1_drives(tmp_path, probe):
     # Car 1 holds LB and drives, so the car 2 result above is not a stalled simulator.
     assert max(car1_speeds) > 0.5, f'car 1 never got above 0.5 m/s: peak {max(car1_speeds):.3f}'
     race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    assert race['missed_steps'] == 0
     assert race['finish_time_s'][0] is not None, 'car 1 should have finished 0.2 laps'
     assert race['finish_time_s'][1] is None, 'car 2 cannot finish 0.2 laps while it is stopped'
     assert race['timed_out'] is True
@@ -250,6 +266,7 @@ def test_integer_lap_argument_preserves_numeric_race_requirement(tmp_path):
     assert race['race_laps'] == 3.0
     assert race['timed_out'] is True
     assert race['sim_time_s'] == pytest.approx(1.0, abs=0.025)  # one simulator control step, seconds
+    assert race['missed_steps'] == 0
 
 
 @pytest.mark.parametrize('argument, expected', [
@@ -279,7 +296,7 @@ def test_referee_creates_only_the_result_publisher():
         assert forbidden not in source
 
 
-@pytest.mark.parametrize('check', ['no_writes', 'status_clock'])
+@pytest.mark.parametrize('check', ['no_writes', 'status_clock', 'status_qos'])
 def test_referee_scores_each_new_status_immediately_without_writing_tracks(tmp_path, check):
     from geometry_msgs.msg import PoseStamped
     from racerbot_sim.race_referee_node import RaceRefereeNode
@@ -295,6 +312,14 @@ def test_referee_scores_each_new_status_immediately_without_writing_tracks(tmp_p
         if check == 'no_writes':
             assert sorted(p.name for p in tmp_path.iterdir()) == ['results']
             return
+        if check == 'status_qos':
+            subscriptions = list(node.subscriptions)
+            # oracle: review ruling 2, reliable backlog of at least 200 samples.
+            assert [sub.topic_name for sub in subscriptions] == ['/sim/status']
+            qos = subscriptions[0].qos_profile
+            assert qos.reliability == QoSReliabilityPolicy.RELIABLE
+            assert qos.depth >= 200
+            return
         line = tracks.rounded_rectangle_centerline(5.0, 3.2, 1.8)
         # Deliver deliberately stale truth on the old separate pose topics.
         # oracle: review ruling 1, only the atomic status coordinates may be scored.
@@ -307,25 +332,28 @@ def test_referee_scores_each_new_status_immediately_without_writing_tracks(tmp_p
             for publisher in publishers:
                 publisher.publish(stale)
             rclpy.spin_once(node, timeout_sec=0.02)
-        def offer(t):
+        def offer(t, steps):
             node._status(String(data=json.dumps(dict(
-                sim_time_s=t, cars=[dict(x=float(line[i * 10][0]),
+                sim_time_s=t, steps=steps, cars=[dict(x=float(line[i * 10][0]),
                                         y=float(line[i * 10][1]), speed=1.0,
                                         wall_contact_now=False) for i in range(2)],
                 car_contact_now=False))))
-        offer(0.025)
+        offer(0.025, 1)
         # oracle: ruling B, the callback ticks immediately, even faster than wall time.
         assert node.referee.sim_time_s == 0.025
         assert node.referee.progress_m[1] == pytest.approx([0.5], abs=1e-9)  # metres along straight
-        offer(0.05)
-        offer(0.05)
-        offer(0.025)
+        offer(0.05, 2)
+        offer(0.075, 2)  # newer time cannot make a duplicate step a new sample
+        offer(0.1, 1)
         assert node.referee.sim_time_s == 0.05
         assert [len(t) for t in node.referee.progress_m] == [2, 2]
+        offer(0.125, 5)
+        assert node.referee.result()['missed_steps'] == 2
+        assert node.referee.sim_time_s == 0.125
         deadline = time.monotonic() + 0.15
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.02)
-        assert [len(t) for t in node.referee.progress_m] == [2, 2]
+        assert [len(t) for t in node.referee.progress_m] == [3, 3]
     finally:
         if node is not None:
             node.destroy_node()

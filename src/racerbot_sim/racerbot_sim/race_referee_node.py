@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
 from racerbot_sim import tracks
@@ -48,7 +48,8 @@ class RaceRefereeNode(Node):
         self.control_parameters = json.loads(str(value('control_parameters_json')))
         self.referee = None
         self.done = False
-        latched = QoSProfile(depth=1000, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        latched = QoSProfile(depth=1000, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                             reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(String, '/sim/status', self._status, latched)
         self.result_pub = self.create_publisher(String, '/sim/race_result', latched)
 
@@ -61,7 +62,10 @@ class RaceRefereeNode(Node):
             if len(cars) != self.cars:
                 return
             t_s = float(status['sim_time_s'])
-            if self.referee is not None and t_s <= self.referee.sim_time_s:
+            steps = status['steps']
+            if type(steps) is not int or steps < 1:
+                raise ValueError('steps must be a positive integer')
+            if self.referee is not None and steps <= self.referee.steps:
                 return
             # All fields belong to one simulator step. Separate pose topics
             # cannot be synchronized by arrival order across ROS subscriptions.
@@ -71,7 +75,7 @@ class RaceRefereeNode(Node):
                                        self.laps, self.dt_s, self.reverse)
             wall = [car['wall_contact_now'] for car in cars]
             speeds = [float(car['speed']) for car in cars]
-            self.referee.tick(t_s, xys, speeds, wall, status['car_contact_now'])
+            self.referee.tick(t_s, xys, speeds, wall, status['car_contact_now'], steps=steps)
         except (KeyError, TypeError, ValueError) as error:
             self.get_logger().error(f'cannot score simulator status: {error}')
             return
