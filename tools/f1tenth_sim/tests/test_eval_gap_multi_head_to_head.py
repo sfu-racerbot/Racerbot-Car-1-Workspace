@@ -29,9 +29,10 @@ BASE = {'max_speed': 3.5, 'min_speed': 1.0, 'corner_speed': 1.5, 'corner_speed_w
         'max_lateral_accel': 2.5}
 
 
-def _car(finish=None, laps=0.0, car_contact=False, wall_contact=False, progress=()):
+def _car(finish=None, laps=0.0, car_contact=False, wall_contact=False, progress=(), speed=None):
     return {'finish_time_s': finish, 'laps': laps, 'car_contact': car_contact,
-            'wall_contact': wall_contact, 'progress_m': list(progress)}
+            'wall_contact': wall_contact, 'progress_m': list(progress),
+            'speed_mps': list(speed) if speed is not None else [1.0] * len(progress)}
 
 
 def _run(*cars):
@@ -431,3 +432,137 @@ def test_the_mean_gap_is_none_when_no_run_had_two_finishers():
     # oracle: closed form, no finite gap means no mean
     assert agg['mean_gap_s'] is None
     assert agg['wins'] == [1, 0]
+
+
+def test_stall_while_other_car_moves():
+    # oracle: closed form, 80 ticks * 0.025 s = 2 s, one qualifying run.
+    assert egm.count_stalls([[0.0] * 80, [1.0] * 80], TICK) == [1, 0]
+
+
+def test_both_stopped_is_not_a_stall():
+    # oracle: invariant, neither car has a moving opponent.
+    assert egm.count_stalls([[0.0] * 80, [0.0] * 80], TICK) == [0, 0]
+
+
+def test_stall_duration_is_strictly_longer_than_one_second():
+    # oracle: closed form, 40 * 0.025 = 1 s; 41 * 0.025 > 1 s.
+    assert egm.count_stalls([[0.0] * 40, [1.0] * 40], TICK) == [0, 0]
+    assert egm.count_stalls([[0.0] * 41, [1.0] * 41], TICK) == [1, 0]
+
+
+def test_separate_stalls_and_open_final_stall():
+    speeds = _seq((0.0, 80), (1.0, 1), (0.0, 80))
+    # oracle: closed form, two 2 s runs separated by a moving tick, last open.
+    assert egm.count_stalls([speeds, [1.0] * len(speeds)], TICK) == [2, 0]
+
+
+def test_other_car_stopping_breaks_a_stall():
+    other = _seq((1.0, 20), (0.0, 40), (1.0, 60))
+    # oracle: closed form, runs of 0.5 s and 1.5 s; only the latter exceeds 1 s.
+    assert egm.count_stalls([[0.0] * 120, other], TICK) == [1, 0]
+
+
+def test_single_car_and_empty_speed_traces():
+    # oracle: invariant, a moving other car is absent in both cases.
+    assert egm.count_stalls([[0.0] * 200], TICK) == [0]
+    assert egm.count_stalls([[], []], TICK) == [0, 0]
+
+
+def test_stall_speed_boundary_and_absolute_speed():
+    # oracle: spec, |0.05| is moving and |0.0499| is stopped for 2 s.
+    assert egm.count_stalls([[-0.0499] * 80, [-0.05] * 80], TICK) == [1, 0]
+
+
+def test_invalid_speed_traces_are_refused():
+    # oracle: spec, unequal lengths and non-finite samples are invalid.
+    with pytest.raises(ValueError, match='differ in length'):
+        egm.count_stalls([[0.0], []], TICK)
+    with pytest.raises(ValueError, match='non-finite'):
+        egm.count_stalls([[math.nan], [1.0]], TICK)
+
+
+def _linear(start, speed, ticks=1201):
+    return [start + speed * i * TICK for i in range(ticks)]
+
+
+@pytest.mark.parametrize('finished', [False, True])
+def test_equal_pace_has_no_gap_change(finished):
+    times = [60.0 / 2.0, 63.0 / 2.0] if finished else [None, None]
+    change = egm.pair_gap_changes([_linear(0.0, 2.0), _linear(-3.0, 2.0)], times, TICK)[0]
+    # oracle: closed form, both start and end deficits are 3 / 2 seconds.
+    assert change['start_gap_s'] == pytest.approx(3.0 / 2.0, abs=1e-9)  # s
+    assert change['end_gap_s'] == pytest.approx(3.0 / 2.0, abs=1e-9)  # s
+    assert change['gap_change_s'] == pytest.approx(0.0, abs=1e-9)  # s
+
+
+def test_faster_trailer_gap_change_and_time_gained():
+    changes = egm.pair_gap_changes([_linear(0.0, 2.0), _linear(-3.0, 2.2)],
+                                   [60.0 / 2.0, 63.0 / 2.2], TICK)
+    start = 3.0 / 2.2  # oracle: closed form, initial deficit / trailer speed, s
+    end = 63.0 / 2.2 - 60.0 / 2.0  # oracle: closed form, finish time difference, s
+    change = end - start  # oracle: closed form, change in deficit, s
+    assert changes[0]['pair'] == (0, 1)  # oracle: spec, pair indices
+    assert changes[0]['leader'] == 0  # oracle: input starts at 0 m
+    assert changes[0]['trailer'] == 1  # oracle: input starts at -3 m
+    assert changes[0]['start_gap_s'] == pytest.approx(start, abs=1e-9)  # s
+    assert changes[0]['end_gap_s'] == pytest.approx(end, abs=1e-9)  # s
+    assert changes[0]['gap_change_s'] == pytest.approx(change, abs=1e-9)  # s
+    gained = egm.time_gained(changes, 2)
+    assert gained == pytest.approx([change, -change], abs=1e-9)  # s; oracle: pair allocation
+    assert sum(gained) == pytest.approx(0.0, abs=1e-9)  # s; oracle: zero-sum invariant
+
+
+def test_swapped_start_selects_car_zero_as_trailer():
+    change = egm.pair_gap_changes([_linear(-3.0, 2.2), _linear(0.0, 2.0)],
+                                  [63.0 / 2.2, 60.0 / 2.0], TICK)[0]
+    # oracle: spec, lower starting position trails regardless of index.
+    assert change['leader'] == 1
+    assert change['trailer'] == 0
+    assert change['gap_change_s'] == pytest.approx(63.0 / 2.2 - 30.0 - 3.0 / 2.2, abs=1e-9)  # s
+
+
+def test_gap_edge_cases_and_none_gain():
+    stopped = egm.pair_gap_changes([[0.0, 1.0], [-3.0, -3.0]], [None, None], TICK)[0]
+    # oracle: spec, zero trailer progress yields positive infinity for all gaps.
+    assert stopped['start_gap_s'] == math.inf
+    assert stopped['end_gap_s'] == math.inf
+    assert stopped['gap_change_s'] == math.inf
+    single = egm.pair_gap_changes([[0.0], [0.0]], [None, None], TICK)[0]
+    # oracle: spec, ties choose higher index and fewer than two samples are undefined.
+    assert single['trailer'] == 1
+    assert single['start_gap_s'] is None
+    assert single['end_gap_s'] is None
+    assert single['gap_change_s'] is None
+    assert egm.time_gained([single], 2) == [0, 0]  # oracle: undefined pair contributes zero
+
+
+def test_invalid_progress_traces_for_gap_are_refused():
+    # oracle: spec, unequal lengths and non-finite samples are invalid.
+    with pytest.raises(ValueError, match='differ in length'):
+        egm.pair_gap_changes([[0.0], []], [None, None], TICK)
+    with pytest.raises(ValueError, match='non-finite'):
+        egm.pair_gap_changes([[0.0], [math.nan]], [None, None], TICK)
+
+
+def test_head_to_head_reports_gap_gain_and_stalls():
+    out = egm.head_to_head(_run(_car(progress=_linear(0.0, 2.0), speed=[1.0] * 1201),
+                                _car(progress=_linear(-3.0, 2.2), speed=[0.0] * 1201)))
+    # oracle: closed form, 30 s elapsed and deficit closes by 0.2 * 30 m.
+    change = ((3.0 - 0.2 * 1200 * TICK) / 2.2) - 3.0 / 2.2
+    assert out['gap_changes'][0]['gap_change_s'] == pytest.approx(change, abs=1e-9)  # s
+    assert out['time_gained_s'] == pytest.approx([change, -change], abs=1e-9)  # s; pair allocation
+    assert out['stalls'] == [0, 1]  # oracle: one >1 s stopped run while car 0 moves
+
+
+def test_aggregate_stalls_and_finite_gains():
+    outcomes = [dict(winner=None, gap_s=math.inf, overtakes=[0, 0], contacts=[False, False],
+                     stalls=[1, 2], time_gained_s=[2.0, -2.0]),
+                dict(winner=None, gap_s=math.inf, overtakes=[0, 0], contacts=[False, False],
+                     stalls=[3, 0], time_gained_s=[4.0, -4.0]),
+                dict(winner=None, gap_s=math.inf, overtakes=[0, 0], contacts=[False, False],
+                     stalls=[0, 1], time_gained_s=[math.inf, -math.inf])]
+    agg = egm.aggregate_head_to_head(outcomes)
+    # oracle: closed form, per-car sums and means of the two finite runs only.
+    assert agg['stalls'] == [1 + 3 + 0, 2 + 0 + 1]
+    assert agg['time_gained_runs'] == 2
+    assert agg['mean_time_gained_s'] == pytest.approx([(2.0 + 4.0) / 2, (-2.0 - 4.0) / 2], abs=1e-9)  # s
