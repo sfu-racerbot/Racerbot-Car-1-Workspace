@@ -224,6 +224,19 @@ def build(name: str, directory) -> Path:
     return write_track(directory, name, centerline, corridor_width)
 
 
+def resolve(name: str, directory) -> Path:
+    """Return a generated or already-imported track path without overwriting imports."""
+    if name in LAYOUTS:
+        return build(name, directory)
+    directory = Path(directory)
+    map_path = directory / f'{name}_map.yaml'
+    centerline = directory / f'{name}_centerline.csv'
+    if map_path.is_file() and centerline.is_file():
+        return directory / name
+    raise KeyError(
+        f"unknown track '{name}'; have layouts {sorted(LAYOUTS)} and searched {directory}")
+
+
 def centerline_path(directory, name: str) -> Path:
     return Path(directory) / f'{name}_centerline.csv'
 

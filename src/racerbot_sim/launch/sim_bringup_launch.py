@@ -62,6 +62,9 @@ def generate_launch_description():
                 'Generated closed-loop layout: indoor_oval, indoor_tight, '
                 'indoor_wide, asb_10000.')),
         DeclareLaunchArgument(
+            'track_directory', default_value='~/.ros/racerbot_sim/tracks',
+            description='Directory containing generated or imported simulator tracks.'),
+        DeclareLaunchArgument(
             'opponents', default_value='',
             description=(
                 'Semicolon-separated opponent list, each "offset_m,speed_mps,lateral_m". '
@@ -71,6 +74,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'hold_deadman', default_value='true',
             description='Whether the synthetic controller holds LB. False proves the car stays stopped.'),
+        DeclareLaunchArgument(
+            'car2_hold_deadman', default_value='true',
+            description='Whether car 2 synthetic controller holds LB.'),
         DeclareLaunchArgument(
             'release_after_sec', default_value='-1.0',
             description='Release the synthetic LB this many seconds in (-1 = never).'),
@@ -92,6 +98,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'track': LaunchConfiguration('track'),
+            'track_directory': LaunchConfiguration('track_directory'),
             'seed': LaunchConfiguration('seed'),
             'odom_speed_scale': LaunchConfiguration('odom_speed_scale'),
             'controlled_cars': ParameterValue(LaunchConfiguration('controlled_cars'), value_type=int),
@@ -127,8 +134,8 @@ def generate_launch_description():
         package='racerbot_sim', executable='sim_joy_node', name='sim_joy_node',
         namespace='car2', output='screen', condition=second_car,
         parameters=[{'joy_topic': '/car2/joy',
-                     'hold_deadman': LaunchConfiguration('hold_deadman'),
-                     'release_after_sec': LaunchConfiguration('release_after_sec')}])
+'hold_deadman': LaunchConfiguration('car2_hold_deadman'),
+                      'release_after_sec': LaunchConfiguration('release_after_sec')}])
     car2_mux = _mux(car2_mux_config, namespace='car2', condition=second_car)
     car2_tf = Node(package='tf2_ros', executable='static_transform_publisher',
                    name='static_baselink_to_laser', namespace='car2', condition=second_car,

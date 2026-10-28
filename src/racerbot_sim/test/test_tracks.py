@@ -8,6 +8,7 @@ No ROS and no F1TENTH Gym, so:
 import math
 import sys
 import os
+import shutil
 
 import numpy as np
 import pytest
@@ -162,6 +163,24 @@ def _car_width():
     return params['car_width']
 
 
+def test_resolve_generated_layout_builds_the_track(tmp_path):
+    path = tracks.resolve('indoor_oval', tmp_path)
+    assert path == tmp_path / 'indoor_oval.yaml'
+    assert (tmp_path / 'indoor_oval_map.yaml').exists()
+
+
+def test_resolve_imported_map_returns_stem_without_writing(tmp_path):
+    source = os.path.join(os.path.dirname(__file__), '..', '..', '..',
+                          'tools', 'f1tenth_sim', 'maps')
+    name = 'car1_course_2026_10_26'
+    for suffix in ('_map.yaml', '_centerline.csv'):
+        shutil.copy2(os.path.join(source, name + suffix), tmp_path / (name + suffix))
+    os.link(os.path.join(source, name + '.png'), tmp_path / (name + '.png'))
+    before = sorted(item.name for item in tmp_path.iterdir())
+    assert tracks.resolve(name, tmp_path) == tmp_path / name
+    assert sorted(item.name for item in tmp_path.iterdir()) == before
+
+
 def test_unknown_layout_is_refused():
-    with pytest.raises(KeyError):
-        tracks.build('no_such_track', '/tmp')
+    with pytest.raises(KeyError, match='no_such_track'):
+        tracks.resolve('no_such_track', '/tmp')

@@ -96,7 +96,7 @@ class GymBridgeNode(Node):
 
         import os
         track_directory = os.path.expanduser(str(value('track_directory')))
-        track_path = tracks.build(self.track_name, track_directory)
+        track_path = tracks.resolve(self.track_name, track_directory)
         centerline = tracks.load_centerline(track_directory, self.track_name)
 
         opponents = []

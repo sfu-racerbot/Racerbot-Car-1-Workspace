@@ -1,0 +1,239 @@
+"""ROS-free race scoring from simulator ground truth."""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+
+PERSIST_S = 0.5
+STALL_SPEED_MPS = 0.05
+STALL_MIN_S = 1.0
+
+
+def _validate_traces(values, name):
+    lengths = {len(value) for value in values}
+    if len(lengths) > 1:
+        raise ValueError(f'{name} traces differ in length: {sorted(lengths)}')
+    for index, value in enumerate(values):
+        if not all(math.isfinite(float(item)) for item in value):
+            raise ValueError(f'car {index}: non-finite {name}')
+
+
+def _solid_signs(gap, need):
+    runs = []
+    for value in gap:
+        sign = 1 if value > 0 else (-1 if value < 0 else 0)
+        if sign == 0:
+            if runs:
+                runs[-1][1] += 1
+        elif runs and runs[-1][0] == sign:
+            runs[-1][1] += 1
+        else:
+            runs.append([sign, 1])
+    solid = []
+    for sign, ticks in runs:
+        if ticks >= need and (not solid or solid[-1] != sign):
+            solid.append(sign)
+    return solid
+
+
+def count_overtakes(traces, dt_s, persist_s=PERSIST_S):
+    _validate_traces(traces, 'progress')
+    need = max(1, math.ceil(persist_s / dt_s - 1e-9))
+    counts = [0] * len(traces)
+    for first in range(len(traces)):
+        for second in range(first + 1, len(traces)):
+            gap = [b - a for a, b in zip(traces[first], traces[second])]
+            signs = _solid_signs(gap, need)
+            for after in signs[1:]:
+                counts[second if after > 0 else first] += 1
+    return counts
+
+
+def count_stalls(speeds, dt_s):
+    _validate_traces(speeds, 'speed')
+    need = math.floor(STALL_MIN_S / dt_s + 1e-9) + 1
+    counts = [0] * len(speeds)
+    runs = [0] * len(speeds)
+    for tick in zip(*speeds):
+        moving = [abs(value) >= STALL_SPEED_MPS for value in tick]
+        for index in range(len(speeds)):
+            if not moving[index] and any(moving):
+                runs[index] += 1
+                if runs[index] == need:
+                    counts[index] += 1
+            else:
+                runs[index] = 0
+    return counts
+
+
+def pair_gap_changes(traces, finish_times, dt_s):
+    _validate_traces(traces, 'progress')
+    if len(finish_times) != len(traces):
+        raise ValueError('finish times and progress traces differ in length')
+    for index, value in enumerate(finish_times):
+        if value is not None and not math.isfinite(float(value)):
+            raise ValueError(f'car {index}: non-finite finish time')
+    changes = []
+    for first in range(len(traces)):
+        for second in range(first + 1, len(traces)):
+            n = len(traces[first])
+            trailer = first if n and traces[first][0] < traces[second][0] else second
+            leader = second if trailer == first else first
+            start = end = change = None
+            if n >= 2:
+                speed = (traces[trailer][-1] - traces[trailer][0]) / ((n - 1) * dt_s)
+                if speed <= 0:
+                    start = end = change = math.inf
+                else:
+                    start = (traces[leader][0] - traces[trailer][0]) / speed
+                    if finish_times[trailer] is not None and finish_times[leader] is not None:
+                        end = finish_times[trailer] - finish_times[leader]
+                    else:
+                        end = (traces[leader][-1] - traces[trailer][-1]) / speed
+                    change = end - start
+            changes.append(dict(pair=(first, second), leader=leader,
+                                trailer=trailer, start_gap_s=start,
+                                end_gap_s=end, gap_change_s=change))
+    return changes
+
+
+def time_gained(changes, cars):
+    gained = [0.0] * cars
+    for pair in changes:
+        change = pair['gap_change_s']
+        if change is not None:
+            gained[pair['leader']] += change
+            gained[pair['trailer']] -= change
+    return gained
+
+
+class LapCounter:
+    """Unwrapped centreline progress measured from the common start line."""
+
+    def __init__(self, centerline_xy, start_xy, reverse=False):
+        self.reference = np.asarray(centerline_xy, dtype=float)
+        if self.reference.ndim != 2 or self.reference.shape[1] != 2 or len(self.reference) < 2:
+            raise ValueError('centerline must contain at least two XY points')
+        if not np.isfinite(self.reference).all():
+            raise ValueError('centerline must be finite')
+        self.segment = np.hypot(*np.diff(np.vstack((self.reference, self.reference[:1])), axis=0).T)
+        self.arc = np.concatenate(([0.0], np.cumsum(self.segment)[:-1]))
+        self.total = float(self.segment.sum())
+        if self.total <= 0.0:
+            raise ValueError('centerline length must be positive')
+        self.sign = -1.0 if reverse else 1.0
+        self.index = self._nearest(start_xy)
+        self.previous_index = self.index
+        self._position = self.sign * self._wrap(self.arc[self.index], self.total)
+
+    def _nearest(self, xy):
+        point = np.asarray(xy, dtype=float)
+        if point.shape != (2,) or not np.isfinite(point).all():
+            raise ValueError('XY position must contain two finite values')
+        return int(np.argmin(np.hypot(self.reference[:, 0] - point[0],
+                                        self.reference[:, 1] - point[1])))
+
+    @staticmethod
+    def _wrap(value, total):
+        return (value + total / 2.0) % total - total / 2.0
+
+    def update(self, xy):
+        new = self._nearest(xy)
+        delta = self.arc[new] - self.arc[self.index]
+        delta = self._wrap(delta, self.total)
+        self._position += self.sign * delta
+        self.index = new
+        return self.laps
+
+    @property
+    def position_m(self):
+        return self._position
+
+    @property
+    def laps(self):
+        return self._position / self.total
+
+
+class Referee:
+    """Score a race from ground truth and simulator-owned contact flags."""
+
+    def __init__(self, centerline_xy, start_xys, laps_required, dt_s, reverse=False):
+        if not start_xys:
+            raise ValueError('at least one car is required')
+        if not math.isfinite(float(laps_required)) or laps_required <= 0.0:
+            raise ValueError('laps_required must be positive and finite')
+        if not math.isfinite(float(dt_s)) or dt_s <= 0.0:
+            raise ValueError('dt_s must be positive and finite')
+        if len(start_xys) == 0:
+            raise ValueError('at least one car is required')
+        self.dt_s = float(dt_s)
+        self.laps_required = float(laps_required)
+        self.counters = [LapCounter(centerline_xy, xy, reverse) for xy in start_xys]
+        self.traces = [[] for _ in self.counters]
+        self.speeds = [[] for _ in self.counters]
+        self.times = [None] * len(self.counters)
+        self.contacts = [{'wall': False, 'car': False} for _ in self.counters]
+        self._sim_time = 0.0
+        self._finished = False
+
+    def tick(self, t_s, xys, speeds, wall_contact, car_contact):
+        if len(xys) != len(self.counters) or len(speeds) != len(self.counters):
+            raise ValueError('positions and speeds must match the number of cars')
+        if len(wall_contact) != len(self.counters):
+            raise ValueError('wall contact must match the number of cars')
+        for position in xys:
+            point = np.asarray(position, dtype=float)
+            if point.shape != (2,):
+                raise ValueError('positions must match the number of cars and contain XY pairs')
+        if not isinstance(car_contact, (bool, np.bool_)):
+            raise ValueError('car_contact must be a boolean')
+        if not math.isfinite(float(t_s)):
+            raise ValueError('time must be finite')
+        for index, speed in enumerate(speeds):
+            try:
+                finite = math.isfinite(float(speed))
+            except (TypeError, ValueError):
+                raise ValueError(f'car {index}: non-finite speed') from None
+            if not finite:
+                raise ValueError(f'car {index}: non-finite speed')
+            self.counters[index].update(xys[index])
+            self.traces[index].append(self.counters[index].position_m)
+            self.speeds[index].append(abs(float(speed)))
+            if self.times[index] is None and self.counters[index].laps >= self.laps_required:
+                self.times[index] = float(t_s)
+            self.contacts[index]['wall'] |= bool(wall_contact[index])
+            self.contacts[index]['car'] |= bool(car_contact)
+        self._sim_time = float(t_s)
+        self._finished = bool(car_contact or any(wall_contact) or all(
+            value is not None for value in self.times))
+
+    @property
+    def finished(self):
+        return self._finished
+
+    def result(self):
+        finished = sorted((i for i, value in enumerate(self.times) if value is not None),
+                          key=lambda i: (self.times[i], i))
+        unfinished = sorted((i for i, value in enumerate(self.times) if value is None),
+                            key=lambda i: (-self.counters[i].laps, i))
+        gap = (self.times[finished[1]] - self.times[finished[0]]
+               if len(finished) >= 2 else math.inf)
+        changes = pair_gap_changes(self.traces, self.times, self.dt_s)
+        contacts = [dict(value) for value in self.contacts]
+        winner = next((i + 1 for i in finished if not any(contacts[i].values())), None)
+        return {
+            'finish_order': [i + 1 for i in finished + unfinished],
+            'finish_time_s': list(self.times),
+            'laps': [counter.laps for counter in self.counters],
+            'gap_s': gap,
+            'overtakes': count_overtakes(self.traces, self.dt_s),
+            'stalls': count_stalls(self.speeds, self.dt_s),
+            'gap_changes': changes,
+            'time_gained_s': time_gained(changes, len(self.counters)),
+            'contacts': contacts,
+            'winner': winner,
+            'sim_time_s': self._sim_time,
+        }
