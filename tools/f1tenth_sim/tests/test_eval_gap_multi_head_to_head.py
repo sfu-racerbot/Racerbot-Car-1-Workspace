@@ -793,6 +793,16 @@ def test_the_aggregate_pools_recognition_episodes_and_ticks_across_runs():
     assert car1['fraction'] == pytest.approx(0.5, abs=1e-12)
 
 
+def test_aggregate_report_includes_each_pooled_episode_delay(capsys):
+    car = dict(_car(progress=[0.0, 0.0]), visible=[True, True],
+               recognised=[False, True])
+    run = dict(_run(car, _car(progress=[0.0, 0.0])), seed=1, slots=[0, 1])
+    egm._report_head_to_head('test', [run], [BASE, BASE])
+    aggregate = capsys.readouterr().out.split('recognition, pooled over 1 runs:')[1]
+    # oracle: closed form, recognition arrives one 25 ms tick after visibility.
+    assert 'delays 0.03s' in aggregate
+
+
 def test_outcomes_without_recognition_data_contribute_no_episodes():
     # oracle: spec, an outcome from before recognition was measured adds no visible ticks
     agg = egm.aggregate_head_to_head([dict(winner=0, gap_s=1.0, overtakes=[0, 0],

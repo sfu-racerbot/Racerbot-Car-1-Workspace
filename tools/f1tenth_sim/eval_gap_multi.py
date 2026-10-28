@@ -764,7 +764,7 @@ def _report_head_to_head(track: str, runs: list, params_list: list) -> None:
     print(f"  stalls: {stalls}; mean time gained: {gained} over {agg['time_gained_runs']} of {agg['runs']} runs",
           flush=True)
     print(f"  recognition, pooled over {agg['runs']} runs: " + "; ".join(
-        f"car {k} {_recognition_text(entry, show_delays=False)}"
+        f"car {k} {_recognition_text(entry, show_delays=True)}"
         for k, entry in enumerate(agg["recognition"])), flush=True)
 
 

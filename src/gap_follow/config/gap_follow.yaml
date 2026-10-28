@@ -499,6 +499,12 @@ gap_follow_node:
     opponent_gate: 0.5               # m, scan-to-scan association radius (+ v*dt)
     opponent_alpha: 0.5              # position filter gain
     opponent_beta: 0.15              # velocity filter gain
+    # R3 simulator sweep 2026-10-28: 5 solo tracks and 2 race tracks, both
+    # directions, 2 seeds and swapped race starts. All pooled delay medians
+    # were infinite; (8, 0.6) won the recognised-tick fraction tie at 48.92%
+    # over the only other eligible pair (6, 0.6) at 48.85%. Each had 9 false
+    # mover ticks on car1_course, 0 on the other tracks, no contacts or race
+    # stalls, and no added solo stops. Awareness remains off until car-tested.
     opponent_min_hits: 8             # scans (0.2 s) before a track may count as moving
     opponent_max_misses: 6           # scans unseen before a track is dropped
     opponent_moving_speed: 0.6       # m/s over the ground; odometry error makes walls drift ~0.2-0.4
