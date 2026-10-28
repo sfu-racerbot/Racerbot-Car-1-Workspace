@@ -242,6 +242,50 @@ def test_mirror_matches_the_node_with_opponent_awareness_on():
         rclpy.shutdown()
 
 
+@pytest.mark.parametrize('crossing', [False, True])
+def test_rectangle_crossing_and_overtaking_mirror_parity(crossing):
+    from test_opponent_awareness_node import _make
+    from test_opponent_tracking import _box
+    node, published = _make('-p', 'enable_opponent_awareness:=true',
+                            '-p', 'opponent_passing_margin:=0.05',
+                            '-p', 'opponent_pass_max_steering:=0.33')
+    try:
+        params = gap_mirror.node_params()
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT,
+                      opponent_passing_margin=0.05, opponent_pass_max_steering=0.33)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        modes = []
+        for step in range(60):
+            t = step * DT
+            # Stationary ego: real 1 m/s target motion establishes heading.
+            x, y = (2.5, -0.5 + t) if crossing else (2.0 + t, 0.0)
+            width = 1.52 if step < 45 else 1.06
+            box = _box(x, y, yaw=math.pi / 2 if crossing else 0.0)
+            scan = _raycast(_corridor(width / 2, width / 2) +
+                            [((a[0] - 0.26, a[1]), (b[0] - 0.26, b[1])) for a, b in box])
+            ns = round((100.0 + t) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            node.odom_callback(Odometry())
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            steering, speed = mirror.command(np.asarray(scan.ranges), 0.0, step)
+            # oracle: integration invariant, independent controller histories.
+            assert published[-1].drive.speed == pytest.approx(speed, abs=TOLERANCE)
+            assert published[-1].drive.steering_angle == pytest.approx(steering, abs=TOLERANCE)
+            assert node.opponent_mode == mirror.opponent_mode
+            modes.append(node.opponent_mode)
+        # oracle: the new geometry and nearest-range plumbing were exercised.
+        assert node.opponents.params.length == 0.58
+        assert any(t.near_range > 0 for t in node.opponents.tracker.tracks)
+        assert 'follow' in modes[45:]
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def _feed_imu(node, state, yaw_rate):
     """What imu_bridge publishes for one tick: its verdict, then one sample."""
     node.imu_status_callback(String(data=json.dumps(

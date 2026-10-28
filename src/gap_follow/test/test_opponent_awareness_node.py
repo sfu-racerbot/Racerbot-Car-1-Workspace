@@ -62,7 +62,7 @@ def _box(rear_x, y=0.0, length=0.58, width=0.30):
 
 
 def _drive(node, published, ticks=40, rear_x0=2.2, lb=True, stamped=True,
-           y0=0.0, vy=0.0, dt=DT):
+           y0=0.0, vy=0.0, dt=DT, corridor_width=2.0):
     """Feed a 2 m corridor with a car ahead closing at EGO - OPP m/s.
 
     Odometry is held at EGO_SPEED and the rack at straight, so the ego motion
@@ -76,7 +76,7 @@ def _drive(node, published, ticks=40, rear_x0=2.2, lb=True, stamped=True,
     for k in range(ticks):
         rear_x = rear_x0 + (OPP_SPEED - EGO_SPEED) * k * dt
         y = y0 + vy * k * dt
-        scan = _raycast(_corridor(1.0, 1.0) + _box(rear_x, y))
+        scan = _raycast(_corridor(corridor_width / 2, corridor_width / 2) + _box(rear_x, y))
         if stamped:
             t = 100.0 + k * dt
             scan.header.stamp.sec = int(t)
@@ -322,3 +322,21 @@ def test_awareness_deadman_stale_publishes_zero(aware_node):
     # oracle: CLAUDE.md safety model; expired /joy must deny motion.
     speeds = _deadman_with_moving_car(aware_node, 'never', start=40, ticks=4)
     assert all(speed == 0.0 for speed in speeds)
+
+
+def test_rectangle_narrow_corridor_publishes_follow_cap():
+    node, published = _make('-p', 'enable_opponent_awareness:=true',
+                            '-p', 'opponent_passing_margin:=0.05',
+                            '-p', 'opponent_pass_max_steering:=0.33')
+    try:
+        sequence = _drive(node, published, corridor_width=1.06, rear_x0=2.0)
+        # oracle: R4 1.06 m corridor cannot fit the inflated opponent and ego.
+        assert node.opponent_mode == 'follow'
+        assert node.opponents.params.width == 0.31
+        assert node.opponents.moving_body()
+        for rear_x, _y, speed in sequence[25:]:
+            # oracle: closed form follow law; 1 cm/s covers filter residual.
+            assert speed <= _closed_form_cap(rear_x) + 0.01
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

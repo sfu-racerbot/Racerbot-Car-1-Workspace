@@ -865,3 +865,148 @@ def test_held_leader_cap_is_independent_of_passing_a_moving_car():
     # oracle: closed form; 0.45 < |y|=0.75 < 1.0 must not discard a held leader.
     expected = (1.5 - layer.params.follow_min_gap) / layer.params.follow_time_gap
     assert layer.follow_cap(passing=True) == pytest.approx(expected, abs=1e-12)
+
+
+# R4 tests run with the package pytest runner, through rb (see task protocol).
+@pytest.mark.parametrize('heading', [0.0, math.pi / 2, math.pi / 4])
+@pytest.mark.parametrize('laser', [(0.26, 0.0), (0.13, -0.2)])
+def test_rectangle_entry_from_visible_face(heading, laser):
+    p = ot.OpponentParams(length=0.58, width=0.31, passing_margin=0.05,
+                          prediction_horizon=0.0)
+    near = 2.0
+    h = (math.cos(heading), math.sin(heading))
+    support = p.length / 2 * abs(h[0]) + p.width / 2 * abs(h[1])
+    centre_x = near + support
+    # oracle: closed form slab intersection on the x axis. At 45 degrees
+    # the narrower transverse slab determines entry, not the support plane.
+    half_l = p.length / 2 + p.passing_margin
+    half_w = p.width / 2 + p.passing_margin
+    reach = min(half_l / abs(h[0]) if abs(h[0]) > 1e-12 else math.inf,
+                half_w / abs(h[1]) if abs(h[1]) > 1e-12 else math.inf)
+    expected = centre_x - reach
+    out = ot.inflate_predicted([10.0], [0.0],
+                               [(laser[0] + near, laser[1], *h, near)],
+                               *laser, p)
+    assert out[0] == pytest.approx(expected, abs=1e-12)  # metre tolerance
+    if heading in (0.0, math.pi / 2):
+        assert out[0] == pytest.approx(near - p.passing_margin, abs=1e-12)
+
+
+@pytest.mark.parametrize('offset', [-0.001, 0.0, 0.001])
+def test_rectangle_parallel_beam_margin_boundary(offset):
+    p = ot.OpponentParams(length=0.58, width=0.31, passing_margin=0.05,
+                          prediction_horizon=0.0)
+    y = p.width / 2 + p.passing_margin + offset
+    near = 2.0
+    # oracle: closed form: at the near corner tan(b) * front_x = half-width.
+    # Higher bearings miss; lower bearings enter the rectangle's rear face.
+    front_x = near - p.passing_margin
+    angle = math.atan2(y, front_x)
+    out = ot.inflate_predicted([10.0], [angle], [(LASER_X + near, 0.0, 1.0, 0.0, near)],
+                               LASER_X, 0.0, p)
+    # At the near corner, a tangent ray has entry == exit and must be retained.
+    if offset <= 0:
+        entry = (near - p.passing_margin) / math.cos(angle)
+        assert out[0] == pytest.approx(entry, abs=1e-12)
+    else:
+        assert out[0] == 10.0
+
+
+@pytest.mark.parametrize('near', [0.0, 0.05, 0.10])
+def test_rectangle_floor_and_nan(near):
+    p = ot.OpponentParams(length=0.58, width=0.31, passing_margin=0.05,
+                          prediction_horizon=0.0)
+    out = ot.inflate_predicted([10.0, math.nan, 0.01], [0.0, 0.0, 0.0],
+                               [(LASER_X + near, 0.0, 1.0, 0.0, near)],
+                               LASER_X, 0.0, p, floor=0.05)
+    # oracle: floor clamp, NaN preservation and never-lengthen invariants.
+    assert out[0] == pytest.approx(max(0.05, near - p.passing_margin), abs=1e-12)
+    assert math.isnan(out[1])
+    assert out[2] == 0.01
+
+
+@pytest.mark.parametrize('name', ['length', 'width'])
+@pytest.mark.parametrize('value', [0.0, -0.1, math.nan, math.inf, -math.inf])
+def test_rectangle_dimensions_positive_finite(name, value):
+    # oracle: R4 interface contract, physical extents must be positive finite.
+    with pytest.raises(ValueError, match=f'opponent_{name} must be positive and finite'):
+        ot.OpponentParams(**{name: value}).validate()
+
+
+def test_visible_nearest_range_is_carried_without_changing_follow_offset():
+    layer = _run_scene(ego_speed=1.0, opp_speed=1.0)
+    d = layer.detections[0]
+    ranges, valid = _scan(_box(3.0, 0.0))
+    # oracle: nearest beam range is measured from the LiDAR, not base_link.
+    assert d.near_range == pytest.approx(float(np.min(ranges[valid])), abs=1e-12)
+    mover = layer.moving_body()[0]
+    assert mover[5] == pytest.approx(d.near_range, abs=1e-12)
+    assert mover[4] == pytest.approx(d.near_x, abs=0.001)  # 1 mm filter residual
+
+
+def test_rectangle_horizon_blocks_an_additional_beam():
+    near, horizon, velocity = 2.0, 0.8, 2.0
+    p = ot.OpponentParams(length=0.58, width=0.31, passing_margin=0.05,
+                          prediction_horizon=horizon, prediction_step=horizon)
+    # oracle: side-on centre starts at x=near+W/2, and translates v*T in y.
+    cx = near + p.width / 2
+    angle = math.atan2(velocity * horizon, cx)
+    opp = [(LASER_X + near, 0.0, 0.0, velocity, near)]
+    future = ot.inflate_predicted([10.0], [angle], opp, LASER_X, 0.0, p)
+    p.prediction_horizon = 0.0
+    now = ot.inflate_predicted([10.0], [angle], opp, LASER_X, 0.0, p)
+    # At the future rectangle, the x slab gives the entry distance.
+    assert future[0] == pytest.approx((near - p.passing_margin) / math.cos(angle),
+                                       abs=1e-12)
+    assert now[0] == 10.0
+
+
+@pytest.mark.parametrize('width', [1.06, 1.52])
+@pytest.mark.parametrize('margin', [0.05, 0.10, 0.15])
+def test_narrow_corridor_refuses_pass_at_required_physical_width(width, margin):
+    p = ot.OpponentParams(length=0.58, width=0.31, passing_margin=margin)
+    # oracle: closed form, centred rectangle leaves half the corridor minus
+    # half the opponent and one margin. Ego needs its width plus TWO margins.
+    available = (width - p.width) / 2 - margin
+    required = 0.31 + 2 * margin
+    expected = available >= required
+    assert ot.avoidance_usable((10, 40, False), (5, 60, False),
+                               gap_width=available, required_width=required) == expected
+
+
+def test_passing_width_exact_boundary_and_next_tick_abort():
+    required = 0.31 + 2 * 0.05
+    # oracle: inclusive physical-width gate, reevaluated without a pass latch.
+    for available, expected in ((required, True), (required - 0.001, False),
+                                ((1.52 - 0.31) / 2 - 0.05, True),
+                                ((1.06 - 0.31) / 2 - 0.05, False)):
+        assert ot.avoidance_usable((10, 40, False), (5, 60, False),
+                                   gap_width=available, required_width=required) == expected
+
+
+def test_rectangle_synthetic_corridor_aborts_on_first_narrow_tick():
+    layer = ot.OpponentAwareness(ot.OpponentParams(passing_margin=0.05),
+                                 WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+    layer.tracker.tracks = [ot.Track(LASER_X + 2.0, 0.0, vx=1.0, moving=True,
+                                     near_range=2.0)]
+    side = (int(np.searchsorted(ANGLES, 0.15)), int(np.searchsorted(ANGLES, 0.25)), False)
+    plain = (int(np.searchsorted(ANGLES, -0.4)), int(np.searchsorted(ANGLES, 0.4)), False)
+    modes = []
+    for width in (1.52, 1.06):
+        walls = [((-1.0, sign * width / 2), (8.0, sign * width / 2))
+                 for sign in (-1, 1)]
+        window, _valid = _scan(walls + _box(LASER_X + 2.0 + CAR_LENGTH / 2, 0.0))
+        room = layer.passing_gap_width(window, ANGLES, side)
+        # oracle: physical gap between a straight wall and inflated car edge.
+        expected_room = width / 2 - layer.params.width / 2 - layer.params.passing_margin
+        assert room == pytest.approx(expected_room, abs=1e-12)
+        passing = layer.may_pass(0.0) and ot.avoidance_usable(
+            side, plain, gap_width=room,
+            required_width=0.31 + 2 * layer.params.passing_margin)
+        modes.append('pass' if passing else 'follow')
+        if not passing:
+            # oracle: unchanged R2 follow cap, nearest face 2 m from laser.
+            assert layer.follow_cap(False) == pytest.approx(
+                (LASER_X + 2.0 - FRONT - layer.params.follow_min_gap) /
+                layer.params.follow_time_gap, abs=1e-12)
+    assert modes == ['pass', 'follow']  # oracle: no tick of latched passing
