@@ -57,6 +57,8 @@ from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  #
 CONTROL_DT = eval_gap.CONTROL_DT
 # An overtake is a change of the gap's sign that holds at least this long.
 PERSIST_S = 0.5
+STALL_SPEED_MPS = 0.05
+STALL_MIN_S = 1.0
 _TRUE_WORDS = ("1", "true", "yes", "on")
 _FALSE_WORDS = ("0", "false", "no", "off")
 
@@ -159,7 +161,8 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
               slots=None) -> dict:
     """One run of every car. The result's ``cars`` entries carry each car's
     stats, ``progress_m`` (its position along the centreline every tick, see
-    _Progress.position) and the contact flags; ``slots`` is the line-up the
+    _Progress.position), ``speed_mps`` (ground-truth speed magnitude in m/s)
+    and the contact flags; ``slots`` is the line-up the
     cars started in and ``dt_s`` the tick, for head_to_head."""
     cars = len(params_list)
     slots = tuple(range(cars)) if slots is None else tuple(slots)
@@ -178,7 +181,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     progress = line_up_progress(reference, poses, reverse)
     stats = [dict(stop_ticks=0, ttc_ticks=0, speed_sum=0.0, ticks=0, braking_ticks=0,
                   wall_contact=False, car_contact=False, laps=0.0, finish_time_s=None,
-                  opponent_ticks=0, follow_ticks=0, progress_m=[])
+                  opponent_ticks=0, follow_ticks=0, progress_m=[], speed_mps=[])
              for _ in range(cars)]
     min_gap = math.inf
     last_cmd = [0.0] * cars
@@ -216,6 +219,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
             laps_now.append(progress[k].update(truth[k][:2]))
             stats[k]["laps"] = round(laps_now[k], 3)
             stats[k]["progress_m"].append(float(progress[k].position))
+            stats[k]["speed_mps"].append(abs(float(truth[k][3])))
         # Contact is sim_fidelity's own real-chassis check, run on every tick.
         # gym's collision flag is not read.
         pair = plant._chassis_contact()
@@ -292,6 +296,94 @@ def count_overtakes(traces, dt_s: float, persist_s: float = PERSIST_S) -> list:
     return counts
 
 
+def count_stalls(speeds, dt_s: float, stop_speed: float = STALL_SPEED_MPS,
+                 min_s: float = STALL_MIN_S) -> list:
+    """Count per-car stalls in speed traces (m/s), sampled every ``dt_s`` seconds.
+
+    A stall is a maximal run longer than ``min_s`` seconds with absolute speed
+    below ``stop_speed`` while another car is at or above that speed. Either
+    condition breaking ends the run; an open final run counts. Empty traces
+    and a single car have no stalls. Unequal or non-finite traces raise ValueError.
+    """
+    lengths = {len(trace) for trace in speeds}
+    if len(lengths) > 1:
+        raise ValueError(f"speed traces differ in length: {sorted(lengths)}")
+    for car, trace in enumerate(speeds):
+        if not all(math.isfinite(x) for x in trace):
+            raise ValueError(f"car {car}: non-finite speed")
+    need = math.floor(min_s / dt_s + 1e-9) + 1
+    counts = [0] * len(speeds)
+    runs = [0] * len(speeds)
+    for tick in zip(*speeds):
+        moving = [abs(v) >= stop_speed for v in tick]
+        for k in range(len(speeds)):
+            if not moving[k] and any(moving):
+                runs[k] += 1
+                if runs[k] == need:
+                    counts[k] += 1
+            else:
+                runs[k] = 0
+    return counts
+
+
+def pair_gap_changes(traces, finish_times, dt_s: float) -> list:
+    """Return each pair's change in the initial trailer's time deficit, in seconds.
+
+    ``traces[k]`` is unwrapped centreline progress in metres, one value per
+    ``dt_s`` seconds; ``finish_times[k]`` is seconds or None if unfinished.
+    The smaller initial position is the trailer (higher index on a tie). Its
+    mean speed v is (last - first) / ((n - 1) * dt_s). The start gap is the
+    initial distance deficit / v. The end gap is trailer finish time minus
+    leader finish time if both finished, otherwise final distance deficit / v.
+    Gap change is end minus start; negative means the trailer closed in.
+    Pairs are ordered by indices a < b. Fewer than two ticks gives None gaps;
+    nonpositive trailer speed gives infinite gaps. Unequal or non-finite traces
+    raise ValueError.
+    """
+    lengths = {len(trace) for trace in traces}
+    if len(lengths) > 1:
+        raise ValueError(f"progress traces differ in length: {sorted(lengths)}")
+    for car, trace in enumerate(traces):
+        if not all(math.isfinite(x) for x in trace):
+            raise ValueError(f"car {car}: non-finite progress along the centreline")
+    changes = []
+    for a in range(len(traces)):
+        for b in range(a + 1, len(traces)):
+            n = len(traces[a])
+            trailer = a if n and traces[a][0] < traces[b][0] else b
+            leader = b if trailer == a else a
+            start = end = change = None
+            if n >= 2:
+                speed = (traces[trailer][-1] - traces[trailer][0]) / ((n - 1) * dt_s)
+                if speed <= 0:
+                    start = end = change = math.inf
+                else:
+                    start = (traces[leader][0] - traces[trailer][0]) / speed
+                    if finish_times[trailer] is not None and finish_times[leader] is not None:
+                        end = finish_times[trailer] - finish_times[leader]
+                    else:
+                        end = (traces[leader][-1] - traces[trailer][-1]) / speed
+                    change = end - start
+            changes.append(dict(pair=(a, b), leader=leader, trailer=trailer,
+                                start_gap_s=start, end_gap_s=end, gap_change_s=change))
+    return changes
+
+
+def time_gained(pair_changes, cars: int) -> list:
+    """Per-car seconds gained: trailer gets minus the gap change, leader plus it.
+
+    Undefined (None) pair changes contribute nothing; infinite changes retain
+    their sign. A car's score sums its contributions against every other car.
+    """
+    gained = [0.0] * cars
+    for pair in pair_changes:
+        change = pair["gap_change_s"]
+        if change is not None:
+            gained[pair["leader"]] += change
+            gained[pair["trailer"]] -= change
+    return gained
+
+
 def head_to_head(run_result: dict) -> dict:
     """The verdict of one run, from run_multi's result, for any number of cars.
 
@@ -301,7 +393,9 @@ def head_to_head(run_result: dict) -> dict:
     than two. ``overtakes``: per car, how many times it moved from behind to
     ahead of another car (count_overtakes). ``contacts``: per car, whether
     sim_fidelity's chassis check found it touching a wall or another car.
-    ``winner``: the first finisher with no contact, or None.
+    ``winner``: the first finisher with no contact, or None. ``gap_changes``:
+    pairwise deficit changes in seconds; ``time_gained_s``: per-car seconds
+    gained; ``stalls``: per-car counts from the ground-truth speed traces.
     """
     cars = run_result["cars"]
     times = [c["finish_time_s"] for c in cars]
@@ -312,10 +406,14 @@ def head_to_head(run_result: dict) -> dict:
     contacts = [bool(c["car_contact"] or c["wall_contact"]) for c in cars]
     winner = next((k for k in finished if not contacts[k]), None)
     gap_s = times[finished[1]] - times[finished[0]] if len(finished) >= 2 else math.inf
+    gap_changes = pair_gap_changes([c["progress_m"] for c in cars], times, run_result["dt_s"])
     return dict(
         finish_order=finished + unfinished,
         gap_s=gap_s,
         overtakes=count_overtakes([c["progress_m"] for c in cars], run_result["dt_s"]),
+        gap_changes=gap_changes,
+        time_gained_s=time_gained(gap_changes, len(cars)),
+        stalls=count_stalls([c["speed_mps"] for c in cars], run_result["dt_s"]),
         contacts=contacts,
         winner=winner,
     )
@@ -323,11 +421,14 @@ def head_to_head(run_result: dict) -> dict:
 
 def aggregate_head_to_head(outcomes: list) -> dict:
     """Wins, the mean gap, overtakes and contacts over head_to_head() results.
-    The mean gap leaves out runs with fewer than two finishers."""
+    The mean gap leaves out runs with fewer than two finishers. Mean time gained
+    uses only runs where every car's gain is finite, or None if there are none.
+    Older outcomes without the new fields contribute no stalls or gain runs."""
     n = len(outcomes[0]["contacts"]) if outcomes else 0
     agg = dict(runs=len(outcomes), wins=[0] * n, no_winner=0,
-               overtakes=[0] * n, contact_runs=[0] * n)
+               overtakes=[0] * n, contact_runs=[0] * n, stalls=[0] * n)
     gaps = []
+    gains = []
     for out in outcomes:
         if out["winner"] is None:
             agg["no_winner"] += 1
@@ -335,11 +436,17 @@ def aggregate_head_to_head(outcomes: list) -> dict:
             agg["wins"][out["winner"]] += 1
         if math.isfinite(out["gap_s"]):
             gaps.append(out["gap_s"])
+        if "time_gained_s" in out and all(math.isfinite(x) for x in out["time_gained_s"]):
+            gains.append(out["time_gained_s"])
         for k in range(n):
             agg["overtakes"][k] += out["overtakes"][k]
             agg["contact_runs"][k] += int(out["contacts"][k])
+            agg["stalls"][k] += out.get("stalls", [0] * n)[k]
     agg["gap_runs"] = len(gaps)
     agg["mean_gap_s"] = sum(gaps) / len(gaps) if gaps else None
+    agg["time_gained_runs"] = len(gains)
+    agg["mean_time_gained_s"] = [sum(g[k] for g in gains) / len(gains) if gains else None
+                                 for k in range(n)]
     return agg
 
 
@@ -439,7 +546,7 @@ def _report_head_to_head(track: str, runs: list, params_list: list) -> None:
         f"car {k}: " + " ".join(f"{key}={p[key]}" for key in differ)
         for k, p in enumerate(params_list)), flush=True)
     print(f"  {'seed':>6}  {'starts':<6}  {'finish order':<44}  {'gap':>6}  {'overtakes':>9}  "
-          f"{'contact':<18}  {'winner':<6}", flush=True)
+          f"{'contact':<18}  {'winner':<6}  {'stalls':>9}  {'gained':>8}", flush=True)
     outcomes = []
     for run in runs:
         out = head_to_head(run)
@@ -458,8 +565,11 @@ def _report_head_to_head(track: str, runs: list, params_list: list) -> None:
                 touched.append(f"car {k} ({'+'.join(kinds)})")
         contact = ", ".join(touched) or "none"
         winner = f"car {out['winner']}" if out["winner"] is not None else "none"
+        gain = out["time_gained_s"][0]
+        gained = f"{gain:+.2f}s" if math.isfinite(gain) else ("inf" if math.isinf(gain) else "n/a")
         print(f"  {run['seed']:>6}  car {run['slots'].index(0):<2}  {finish:<44}  {gap:>6}  "
-              f"{' / '.join(str(x) for x in out['overtakes']):>9}  {contact:<18}  {winner:<6}", flush=True)
+              f"{' / '.join(str(x) for x in out['overtakes']):>9}  {contact:<18}  {winner:<6}  "
+              f"{' / '.join(str(x) for x in out['stalls']):>9}  {gained:>8}", flush=True)
     agg = aggregate_head_to_head(outcomes)
     n = len(params_list)
     wins = ", ".join(f"car {k} {agg['wins'][k]}" for k in range(n))
@@ -470,6 +580,11 @@ def _report_head_to_head(track: str, runs: list, params_list: list) -> None:
     print(f"  aggregate, {agg['runs']} runs: wins {wins}; no winner {agg['no_winner']}", flush=True)
     print(f"  mean gap {mean}", flush=True)
     print(f"  runs with contact: {contacts}; overtakes: {overtakes}", flush=True)
+    stalls = ", ".join(f"car {k} {agg['stalls'][k]}" for k in range(n))
+    gained = ", ".join(f"car {k} {v:+.2f}s" if v is not None else f"car {k} n/a"
+                       for k, v in enumerate(agg["mean_time_gained_s"]))
+    print(f"  stalls: {stalls}; mean time gained: {gained} over {agg['time_gained_runs']} of {agg['runs']} runs",
+          flush=True)
 
 
 def main(argv=None) -> int:
