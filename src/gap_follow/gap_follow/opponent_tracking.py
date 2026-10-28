@@ -63,6 +63,7 @@ class OpponentParams:
     min_hits: int = 8                # scans before a track can be "moving"
     max_misses: int = 6              # scans unseen before a track is dropped
     moving_speed: float = 0.6        # m/s, world-frame speed to count as moving
+    stopped_release_sec: float = 2.0  # s, follow-only hold after moving releases
     radius: float = 0.30             # m, opponent footprint around its centroid
     passing_margin: float = 0.15     # m, extra room demanded beside it
     prediction_horizon: float = 0.8  # s, how far ahead its path is blocked
@@ -98,7 +99,7 @@ class OpponentParams:
                     'gate', 'moving_speed', 'radius', 'prediction_step',
                     'follow_time_gap', 'follow_lateral', 'relevant_lateral',
                     'pass_max_steering', 'pass_max_heading_deg', 'max_track_speed',
-                    'steer_gain', 'steer_rate_max')
+                    'steer_gain', 'steer_rate_max', 'stopped_release_sec')
         for name in positive:
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0.0):
@@ -270,6 +271,8 @@ class Track:
     moving: bool = False
     near_dx: float = 0.0   # body-frame x of the nearest point minus centroid x
     track_id: int = 0
+    confirmed_car: bool = False  # only latched by the existing moving rule
+    stopped_sec: float = 0.0     # time since moving was last true
 
     @property
     def speed(self) -> float:
@@ -351,6 +354,11 @@ class OpponentTracker:
                 t.moving = t.speed >= 0.5 * p.moving_speed
             else:
                 t.moving = t.streak >= p.min_hits and t.speed >= p.moving_speed
+            if t.moving:
+                t.confirmed_car = True
+                t.stopped_sec = 0.0
+            elif t.confirmed_car:
+                t.stopped_sec += dt
 
 
 def inflate_predicted(window, beam_angles, opponents_body, laser_x, laser_y,
@@ -546,6 +554,26 @@ class OpponentAwareness:
             window, beam_angles, [m[:4] for m in movers],
             self.laser_x, self.laser_y, self.params)
 
+    def followed_body(self):
+        """Moving cars plus recently stopped confirmed cars, for speed only.
+
+        Held tracks never feed inflation or passing. At low speed velocity
+        noise cannot establish heading, so only the spatial relevance gates
+        apply. A never-moving cluster cannot acquire this follow-only hold.
+        """
+        out = self.moving_body()
+        p = self.params
+        for t in self.tracker.tracks:
+            if t.moving or not t.confirmed_car or t.stopped_sec > p.stopped_release_sec:
+                continue
+            bx, by = self.ego.to_body(t.x, t.y)
+            if (bx <= -p.radius or abs(by) > p.relevant_lateral
+                    or math.hypot(bx, by) > p.max_range):
+                continue
+            bvx, bvy = self.ego.vector_to_body(t.vx, t.vy)
+            out.append((bx, by, bvx, bvy, bx + t.near_dx))
+        return out
+
     def may_pass(self, steering: float) -> bool:
         return pass_allowed(self.moving_body(), steering, self.params)
 
@@ -553,5 +581,5 @@ class OpponentAwareness:
         """Follow cap for cars directly ahead when passing is allowed, and for
         every relevant car ahead when it is not."""
         return follow_speed_cap(
-            [(m[4], m[1]) for m in self.moving_body()], self.front_x, self.params,
+            [(m[4], m[1]) for m in self.followed_body()], self.front_x, self.params,
             lateral=None if passing else self.params.relevant_lateral)

@@ -1275,6 +1275,11 @@ class GapFollowNode(Node):
              target_idx_in_window, near_bearing) = self._select_gap(
                 window, window_valid, scan.angle_increment, beam_angles)
 
+        if (self.opponents is not None and self.opponent_mode is None
+                and self.opponents.followed_body()):
+            self.opponent_mode = 'follow'
+            follow_cap = self.opponents.follow_cap(passing=False)
+
         if gap_start is None:
             if emergency_tripped or ttc_tripped:
                 # Tripped, directional, and genuinely boxed in: an escape

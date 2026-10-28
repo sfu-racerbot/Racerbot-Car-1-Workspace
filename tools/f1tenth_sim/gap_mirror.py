@@ -153,6 +153,7 @@ REQUIRED_PARAMS = frozenset((
     "opponent_min_hits",
     "opponent_max_misses",
     "opponent_moving_speed",
+    "opponent_stopped_release_sec",
     "opponent_radius",
     "opponent_passing_margin",
     "opponent_prediction_horizon",
@@ -406,6 +407,12 @@ class GapController:
             tel["follow_cap"] = follow_cap
         else:
             processed, gap_start, gap_end, used_fallback = select(window)
+
+        if (self.opponents is not None and self.opponent_mode is None
+                and self.opponents.followed_body()):
+            self.opponent_mode = "follow"
+            follow_cap = self.opponents.follow_cap(passing=False)
+            tel["follow_cap"] = follow_cap
 
         if gap_start is None:
             return self._stop(step, "no_safe_gap")
