@@ -251,6 +251,48 @@ def _feed_imu(node, state, yaw_rate):
     node.imu_callback(msg)
 
 
+def test_mirror_matches_stopped_then_departing_confirmed_car():
+    from test_opponent_awareness_node import _make
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        params = gap_mirror.node_params()
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        # Start equivalently once. Each controller carries its own command,
+        # steering basis and target history through every subsequent scan.
+        # Review mutation: discarding the mirror's carried rack fails at tick 1.
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_commanded_speed = mirror.last_commanded_speed = 0.0
+        for step in range(76):
+            speed = 1.0 if step < 40 else 0.0
+            gap = 0.4 + max(0, step - 63) * DT
+            scan = _raycast(_corridor(2.0, 2.0) + _box_ahead(gap + 0.47 - 0.26))
+            ns = round((100.0 + step * DT) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            # Inject the same elapsed command interval, not controller state.
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            actual = published[-1].drive.speed
+            steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
+            # oracle: integration invariant, identical per-scan commands.
+            assert actual == pytest.approx(expected, abs=TOLERANCE), f'tick {step}: speed'
+            assert published[-1].drive.steering_angle == pytest.approx(
+                steering, abs=TOLERANCE), f'tick {step}: steering'
+        # oracle: the sequence exercises the new hold and releases the speed cap.
+        assert mirror.opponents.followed_body()
+        assert published[63].drive.speed == 0.0
+        assert published[-1].drive.speed > 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def test_mirror_matches_the_node_with_steering_damping_on():
     """The same comparison with steering damping on at the shipped gain, a yaw
     rate that swings both ways, and a faulty IMU for the last third of the

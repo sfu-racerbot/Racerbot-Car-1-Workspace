@@ -24,6 +24,7 @@ from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from sensor_msgs.msg import Joy
 
+from drive_intent import schema
 from gap_follow import opponent_tracking
 from gap_follow.gap_follow_node import GapFollowNode
 
@@ -207,3 +208,117 @@ def test_tracking_uses_the_scan_stamps_not_a_fixed_rate():
     finally:
         OPP_SPEED = saved
     assert mode is None
+
+
+@pytest.fixture
+def aware_node():
+    node, published = _make('-p', 'enable_opponent_awareness:=true',
+                            '-p', 'intent_rate_hz:=0.0')
+    yield node, published
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+def _follow_tick(node, published, step, gap, ego_speed, joy_state='held'):
+    scan = _raycast(_corridor(2.0, 2.0) + _box(gap + FRONT - LASER_X))
+    ns = round((100.0 + step * DT) * 1e9)
+    scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+    if joy_state in ('held', 'released', 'stale'):
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, int(joy_state != 'released')]
+        node.joy_callback(joy)
+        if joy_state == 'stale':
+            node.last_joy_time = node.get_clock().now() - Duration(
+                seconds=node.joy_timeout_sec + DT)
+    odom = Odometry()
+    odom.twist.twist.linear.x = float(ego_speed)
+    node.odom_callback(odom)
+    node.steering_basis = 0.0
+    node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+    node.scan_callback(scan)
+    return published[-1].drive.speed
+
+
+def test_known_stopped_car_publishes_zero_then_resumes(aware_node):
+    node, published = aware_node
+    intents = []
+    node.intent_pub.publish = lambda msg: intents.append(schema.decode(msg.data))
+    # Leader and ego roll together at 1 m/s: constant gap, real confirmation.
+    for step in range(40):
+        _follow_tick(node, published, step, 0.4, 1.0)
+    for step in range(40, 64):
+        stopped_speed = _follow_tick(node, published, step, 0.4, 0.0)
+    # oracle: R2 gap-only law at 0.4 < 0.5 m, on the published command.
+    assert stopped_speed == 0.0
+    assert node.opponents.followed_body()
+    assert node.opponent_mode == 'follow'
+    # oracle: only the follow ceiling binds this zero; clearance, curvature
+    # and acceleration still permit motion in the same published intent.
+    factors = intents[-1]['factors']
+    assert {f['name'] for f in factors if f['binding']} == {'follow cap'}
+    follow = next(f for f in factors if f['name'] == 'follow cap')
+    assert follow['value'] == 0.0
+    assert all(f['value'] > 0.0 for f in factors if f['name'] != 'follow cap')
+    assert intents[-1]['commanded_speed'] == stopped_speed
+    speeds = [_follow_tick(node, published, 64 + k, 0.4 + k * DT, 0.0)
+              for k in range(1, 13)]
+    # oracle: leader moves 0.3 m at 1 m/s; gap now exceeds minimum by 0.2 m.
+    assert speeds[-1] > 0.0
+
+
+def _deadman_with_moving_car(aware_node, state, start=0, ticks=40):
+    node, published = aware_node
+    # A leader at 1 m/s recedes from the stationary ego.
+    return [_follow_tick(node, published, step, 1.5 + step * DT, 0.0, state)
+            for step in range(start, start + ticks)]
+
+
+def _confirm_moving_car(aware_node):
+    speeds = _deadman_with_moving_car(aware_node, 'held')
+    # oracle: the awareness path really ran before testing a later denial.
+    assert aware_node[0].opponents.moving_body()
+    assert speeds[-1] > 0.0
+    return speeds
+
+
+def test_awareness_deadman_held_publishes_motion(aware_node):
+    # R2 review step 5: all four revised command expectations were flipped
+    # and failed, after adding moving-car confirmation and the fresh-node
+    # no-Joy control. The deadman implementation itself was never modified.
+    # oracle: LB policy permissive path, open road and a moving car ahead.
+    assert _confirm_moving_car(aware_node)[-1] > 0.0
+
+
+def test_awareness_deadman_released_publishes_zero(aware_node):
+    _confirm_moving_car(aware_node)
+    # oracle: CLAUDE.md safety model; released LB must deny motion.
+    speeds = _deadman_with_moving_car(aware_node, 'released', start=40, ticks=4)
+    assert all(speed == 0.0 for speed in speeds)
+
+
+def test_awareness_deadman_never_received_publishes_zero():
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        speeds = _deadman_with_moving_car((node, published), 'never')
+        # oracle: CLAUDE.md safety model; every command without /joy is zero.
+        assert all(speed == 0.0 for speed in speeds)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+    # Fresh node, identical scans, only LB differs: the scenario can drive.
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        assert _confirm_moving_car((node, published))[-1] > 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_awareness_deadman_stale_publishes_zero(aware_node):
+    _confirm_moving_car(aware_node)
+    node, _published = aware_node
+    node.last_joy_time = node.get_clock().now() - Duration(
+        seconds=node.joy_timeout_sec + DT)
+    # oracle: CLAUDE.md safety model; expired /joy must deny motion.
+    speeds = _deadman_with_moving_car(aware_node, 'never', start=40, ticks=4)
+    assert all(speed == 0.0 for speed in speeds)
