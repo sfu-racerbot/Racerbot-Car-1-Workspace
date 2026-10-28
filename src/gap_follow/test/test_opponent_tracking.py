@@ -637,12 +637,25 @@ def test_association_takes_the_closest_pair_first():
 
 
 def test_prediction_follows_motion_along_x_too():
-    # 2 m ahead and 1 m left of the laser, driving +x at 2 m/s: in 0.8 s it
-    # is 3.6 m ahead. A beam at 10 deg misses where it is now but crosses
-    # the rectangle where it is going (oracle: motion and visibility).
+    # oracle: closed form. Plan R4 step 1 replaces the disc, so its fixed
+    # 10-degree bearing is replaced by a rectangle tangent construction.
+    # For h=(1,0), support=(L/2*2+W/2*1)/hypot(2,1) and centre=u*(r+s).
+    # Choose halfway between the lower tangent to the unshifted rectangle
+    # and the lower tangent to the recovered rectangle at t=0. The correct
+    # rectangle misses now and sweeps over this beam at the horizon;
+    # omitting centre recovery instead hits now, which the first assert kills.
     window = np.full(ANGLES.size, MAX_RANGE)
-    opp = [(LASER_X + 2.0, 1.0, 2.0, 0.0, math.hypot(2.0, 1.0))]
-    beam = int(np.argmin(np.abs(ANGLES - math.radians(10.0))))
+    near = math.hypot(2.0, 1.0)
+    params = ot.OpponentParams()
+    support = (params.length / 2 * 2.0 + params.width / 2) / near
+    cx, cy = (2.0 * (near + support) / near, (near + support) / near)
+    half_l = params.length / 2 + params.passing_margin
+    half_w = params.width / 2 + params.passing_margin
+    tangent_unshifted = math.atan2(1.0 - half_w, 2.0 + half_l)
+    tangent_recovered = math.atan2(cy - half_w, cx + half_l)
+    bearing = (tangent_unshifted + tangent_recovered) / 2
+    opp = [(LASER_X + 2.0, 1.0, 2.0, 0.0, near)]
+    beam = int(np.argmin(np.abs(ANGLES - bearing)))
     now_only = ot.inflate_predicted(window, ANGLES, opp, LASER_X, 0.0,
                                     ot.OpponentParams(prediction_horizon=0.0))
     ahead = ot.inflate_predicted(window, ANGLES, opp, LASER_X, 0.0,
