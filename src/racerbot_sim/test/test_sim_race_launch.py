@@ -489,15 +489,28 @@ def test_team_a_car1_deadman_does_not_gate_car2(tmp_path, probe, team_a_packages
     assert max(s['cars'][1]['speed'] for s in statuses) > 0.5
 
 
-@pytest.mark.parametrize('silence_after', [0.0, 6.0], ids=['never_received', 'stale_after_motion'])
+@pytest.mark.parametrize('silence_after', [0.0, 2.0], ids=['never_received', 'stale_after_motion'])
 def test_team_a_missing_joy_denies_published_command_and_motion(
         tmp_path, probe, team_a_packages, silence_after):
     with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=3',
                       'record:=false', 'timeout_s:=12', f'output_dir:={tmp_path}',
-                      car2_silence_after_sec=silence_after) as proc:
+                      car2_silence_after_sec=0.0) as proc:
         graph = Graph(probe)
-        assert graph.spin_until(lambda: proc.poll() is not None, 90), _tail(tmp_path / 'launch.log')
-        assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
+        with contextlib.ExitStack() as cleanup:
+            if silence_after > 0.0:
+                # Start the finite Joy window only after the bridge is stepping.
+                # This real sim_joy_node retains its own 3 s hardware interlock.
+                assert graph.spin_until(lambda: any(
+                    s['cars'][0]['speed'] > 0.5 for s in probe.status), 45)
+                log = cleanup.enter_context(open(tmp_path / 'car2_joy.log', 'w', encoding='utf-8'))
+                joy = subprocess.Popen([
+                    'ros2', 'run', 'racerbot_sim', 'sim_joy_node', '--ros-args',
+                    '-r', '__ns:=/car2', '-r', '__node:=test_silent_joy',
+                    '-p', 'joy_topic:=/car2/joy', '-p', f'silence_after_sec:={silence_after}',
+                ], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                cleanup.callback(harness_procs.stop_group, joy)
+            assert graph.spin_until(lambda: proc.poll() is not None, 90), _tail(tmp_path / 'launch.log')
+            assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
     race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
     assert graph.spin_until(lambda: any(s['steps'] >= race['steps'] for s in probe.status), 5)
     statuses = [s for s in probe.status if s['steps'] <= race['steps']]
