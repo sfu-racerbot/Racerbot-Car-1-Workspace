@@ -138,13 +138,14 @@ deviations are the mean of the three measured axis standard deviations:
 
 | Sensor | Gyro noise (rad/s) | Acceleration noise (m/s²) | Samples |
 |---|---:|---:|---:|
-| BNO | 0.001901879 | 0.021709036 | 505 |
-| VESC | 0.001278374 | 0.013881201 | 100 |
+| BNO | 0.000711561 | 0.021534955 | 4481 |
+| VESC | 0.001347428 | 0.014463125 | 878 |
 
 The source is run `20261026-194514`, `/imu/bno/data` and `/imu/vesc/data`,
-16–18 seconds after the bag began. All 100 `/odom` samples in that window
-showed zero wheel speed. Each axis's mean was removed before measuring its
-spread; this window avoids the initial constant BNO gyro readings.
+3.5–21.3 seconds after the bag began, after the 3-second startup bias. All
+890 `/odom` samples in that window showed zero speed. Each axis's mean was
+removed before measuring its spread. The window is long because the BNO gyro
+reports values in coarse steps, and a short window samples too few of them.
 
 ### Inject an IMU fault
 
@@ -176,6 +177,12 @@ Start the IMU-derived estimator in another sourced terminal with
 `ros2 launch imu_bridge vehicle_state_launch.py hardware:=false`.
 This starts only `vehicle_state_node`, using the simulated BNO and VESC
 topics. The default `hardware:=true` starts the real sensor stack.
+
+When `steering_damping` or `adaptive_grip` is on, `gap_follow_launch.py` starts
+this estimator. In the simulator it chooses the simulated IMU by itself:
+`imu_hardware` defaults to `auto`, which sees the running simulator and starts
+neither `imu_bridge_node` nor the BNO085 bridge. `imu_hardware:=false` forces
+the simulated IMU.
 
 **All simulated IMU output sits behind the hardware interlock.**
 The simulator refuses to send readings beside `imu_bridge_node`, including in
