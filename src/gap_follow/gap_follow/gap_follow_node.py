@@ -38,6 +38,11 @@ TRACTION_DEFAULTS = {
     'imu_traction_timeout_sec': 0.2,
 }
 
+IMPACT_DEFAULTS = {
+    'imu_impact_threshold': 33.7257297468959,
+    'imu_impact_min_samples': 1,
+}
+
 
 class GapFollowNode(Node):
     """Reactive 'follow the gap' driver: steers at the middle of the best
@@ -53,6 +58,17 @@ class GapFollowNode(Node):
         super().__init__('gap_follow_node')
 
         self.declare_parameter('scan_topic', '/scan')
+        self.declare_parameter('enable_imu_impact_stop', False)
+        self.enable_imu_impact_stop = self.get_parameter('enable_imu_impact_stop').value
+        for name, default in IMPACT_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        self.imu_impact_threshold = self.get_parameter('imu_impact_threshold').value
+        self.imu_impact_min_samples = self.get_parameter('imu_impact_min_samples').value
+        self.impact_latch = gap_logic.ImpactLatch(
+            self.imu_impact_threshold, self.imu_impact_min_samples)
+        self.impact_force = math.nan
+        self.impact_time = None
+        self.impact_sample_force = math.nan
         self.declare_parameter('drive_topic', '/drive')
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('fused_odom_topic', '/odom/fused')
@@ -836,10 +852,13 @@ class GapFollowNode(Node):
                 Odometry, self.fused_odom_topic, self.fused_odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
+        if self.enable_imu_impact_stop:
+            self.impact_joy_sub = self.create_subscription(
+                Joy, self.joy_topic, self.impact_joy_callback, 10)
         # Gyro consumers share one subscription and one trust gate.
         if (self.enable_steering_damping or self.enable_adaptive_grip
                 or self.enable_imu_understeer or self.enable_imu_traction
-                or self.using_fused_speed):
+                or self.using_fused_speed or self.enable_imu_impact_stop):
             self.imu_sub = self.create_subscription(
                 Imu, self.imu_topic, self.imu_callback, 10)
             self.imu_status_sub = self.create_subscription(
@@ -873,7 +892,11 @@ class GapFollowNode(Node):
         understeer = {name: value for name, value in requested.items()
                       if name in UNDERSTEER_DEFAULTS}
         traction = {name: value for name, value in requested.items() if name in TRACTION_DEFAULTS}
+        impact = {name: value for name, value in requested.items() if name in IMPACT_DEFAULTS}
         try:
+            gap_logic.ImpactLatch.validate(
+                impact.get('imu_impact_threshold', self.imu_impact_threshold),
+                impact.get('imu_impact_min_samples', self.imu_impact_min_samples))
             self._validate_traction_parameters({
                 name: traction.get(name, getattr(self, name)) for name in TRACTION_DEFAULTS})
             self._validate_understeer_parameters({
@@ -883,7 +906,7 @@ class GapFollowNode(Node):
             return SetParametersResult(successful=False, reason=str(exc))
         accepted, reason = live_tuning.review(
             self._tunables, {k: v for k, v in requested.items()
-                             if k not in understeer and k not in traction},
+                             if k not in understeer and k not in traction and k not in impact},
             self._tunable_values,
             passthrough=('use_sim_time',),
             invariants=live_tuning.GAP_FOLLOW_INVARIANTS)
@@ -899,6 +922,13 @@ class GapFollowNode(Node):
             setattr(self, name, float(value))
         if traction:
             self._restart_traction()
+        for name, value in impact.items():
+            setattr(self, name, value)
+        if impact:
+            # Retuning must never lift a latched stop or discard a release edge.
+            self.impact_latch.threshold = self.imu_impact_threshold
+            self.impact_latch.min_samples = self.imu_impact_min_samples
+            self.impact_latch.on_sample(0.0, 0.0, False)
         for name, value in accepted.items():
             tunable = self._tunables[name]
             previous = self._tunable_values[name]
@@ -1052,8 +1082,32 @@ class GapFollowNode(Node):
             engaged, self.current_speed, self.imu_understeer_speed_factor), None
 
     def imu_callback(self, msg: Imu):
+        if (self.enable_imu_impact_stop and self.last_imu_time is not None
+                and self._imu_gate()[1] is not None):
+            # A gap in trusted data breaks a consecutive sequence, not a latch.
+            self.impact_latch.on_sample(0.0, 0.0, False)
         self.imu_yaw_rate = float(msg.angular_velocity.z)
         self.last_imu_time = self.get_clock().now()
+        if self.enable_imu_impact_stop:
+            ax, ay = msg.linear_acceleration.x, msg.linear_acceleration.y
+            self.impact_sample_force = gap_logic.horizontal_force(ax, ay)
+            was_latched = self.impact_latch.latched
+            self.impact_latch.on_sample(ax, ay, self._imu_gate()[1] is None)
+            if self.impact_latch.latched and not was_latched:
+                self.impact_force = self.impact_sample_force
+                self.impact_time = self.last_imu_time
+
+    def impact_joy_callback(self, msg: Joy):
+        """Independent LB edges for impact reset; never changes the deadman."""
+        pressed = (bool(msg.buttons[self.deadman_button])
+                   if len(msg.buttons) > self.deadman_button else None)
+        self.impact_latch.on_lb(pressed)
+
+    def _impact_detection_reason(self):
+        _, why = self._imu_gate()
+        if why is None and not math.isfinite(self.impact_sample_force):
+            why = 'horizontal force not finite'
+        return why
 
     def imu_status_callback(self, msg: String):
         try:
@@ -1061,6 +1115,8 @@ class GapFollowNode(Node):
         except (ValueError, AttributeError):
             state = None
         self.imu_state = state if isinstance(state, str) else None
+        if self.enable_imu_impact_stop and self.imu_state != 'ok':
+            self.impact_latch.on_sample(0.0, 0.0, False)
 
     def _imu_gate(self):
         """The gyro's verdict for this tick: (yaw rate, None) while it can be
@@ -1248,6 +1304,13 @@ class GapFollowNode(Node):
         deadman_ok, stop_state, stop_detail = self._deadman_status()
         if not deadman_ok:
             self._stop(stop_state, stop_detail)
+            return
+        if self.impact_latch.latched:
+            self._stop(
+                'imu_impact_stop',
+                f'horizontal force {self.impact_force:.6f}m/s^2 at '
+                f'{self.impact_time.nanoseconds / 1e9:.9f}s; '
+                'release LB and press it again to resume')
             return
         self._check_odom_direction()
         if self.enable_ttc and not self._odom_fresh():
@@ -1783,6 +1846,11 @@ class GapFollowNode(Node):
 
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
+        impact_text = ''
+        if self.enable_imu_impact_stop:
+            impact_off = self._impact_detection_reason()
+            if impact_off is not None:
+                impact_text = f', imu_impact_stop_off: {impact_off}'
         if self.enable_imu_traction:
             if traction_off is not None:
                 traction_text = f', imu_traction_off: {traction_off}'
@@ -1898,7 +1966,8 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{grip_text}{understeer_text}{traction_text}{guard_text}{steering_shape_text}{speed_shape_text}")
+            f"{damping_text}{grip_text}{understeer_text}{traction_text}{impact_text}"
+            f"{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
         # Every speed ceiling that competed for this tick, so the dashboard

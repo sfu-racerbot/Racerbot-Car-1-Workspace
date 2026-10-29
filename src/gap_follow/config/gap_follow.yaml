@@ -54,6 +54,12 @@ gap_follow_node:
     # 194514: .01635/.06021/.07860/.14848 (645); 194913:
     # .00812/.05125/.07155/.11661 (1269). Combined p99=.163902809;
     # max(.15, 1.5*p99)=.245854213, rounded .246 < estimator clamp .3.
+    # Impact stop: provisional 1.5 x largest recorded horizontal spike
+    # (22.4838198313 m/s², run 20261029-132902). Needs a recorded wheels-off bump.
+    # A latched stop survives IMU failure and live retuning: release/press LB to clear.
+    enable_imu_impact_stop: false
+    imu_impact_threshold: 33.7257297468959  # m/s²; strict exceedance
+    imu_impact_min_samples: 1              # consecutive trusted samples, integer >= 1
     enable_imu_traction: false
     imu_traction_slip_threshold: 0.246
     imu_traction_release_slip: 0.123
