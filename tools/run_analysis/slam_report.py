@@ -159,6 +159,28 @@ def _read_rosout(run_dir, refresh=False):
     return records
 
 
+def _read_odom_imu(run_dir):
+    """Recover gyro odometry even when slam_bag cannot return its arrays."""
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from rosidl_runtime_py.utilities import get_message
+
+    bag = Path(run_dir) / 'bag'
+    reader = rosbag2_py.SequentialReader()
+    reader.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id='mcap' if list(bag.glob('*.mcap')) else 'sqlite3'),
+                rosbag2_py.ConverterOptions('cdr', 'cdr'))
+    types = {item.name: item.type for item in reader.get_all_topics_and_types()}
+    rows = []
+    if '/odom/imu' in types:
+        reader.set_filter(rosbag2_py.StorageFilter(topics=['/odom/imu']))
+        message_type = get_message(types['/odom/imu'])
+        while reader.has_next():
+            _, raw, stamp = reader.read_next()
+            pose = deserialize_message(raw, message_type).pose.pose
+            rows.append((stamp * 1e-9, pose.position.x, pose.position.y, slam_bag._yaw(pose.orientation)))
+    return np.asarray(rows, dtype=float).reshape(-1, 4)
+
+
 def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_rosout=None):
     """Load recorded inputs, catching only slam_bag's no-map diagnostic."""
     import yaml
@@ -171,6 +193,8 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
         if 'SLAM did not map this run' not in str(exc):
             raise
         run.update(slam=None, no_slam_reason=str(exc))
+        if (path / 'bag').is_dir():
+            run['odom_imu'] = _read_odom_imu(path)
     scans = (load_scans or runlog.load_run)(path)
     if scans is not None:
         for key in ('scan_t', 'scan', 'angle_min', 'angle_increment', 'range_min', 'range_max'):
@@ -322,9 +346,8 @@ def build_report(run):
     timeline = scan_drop_timeline(drops, proc)
     summary['Scan drops'] = dict(count=len(drops), timeline=timeline, system_log=bool(proc))
     lines += ['Scan drops:', f'  /rosout drops: {len(drops)}; ' + ('CPU bins (10 s):' if proc else 'no system log')]
-    if proc:
-        for row in timeline:
-            lines.append(f"  {row['t0']:.1f}: {row['drops']} drops, CPU mean/max {_fmt(row['cpu_mean'])} / {_fmt(row['cpu_max'])} %")
+    for row in timeline:
+        lines.append(f"  {row['t0']:.1f}: {row['drops']} drops, CPU mean/max {_fmt(row['cpu_mean'])} / {_fmt(row['cpu_max'])} %")
     lines.append('Wheel vs scan-matched distance:')
     distance = {}
     if no_slam:
