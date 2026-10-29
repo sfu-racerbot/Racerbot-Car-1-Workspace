@@ -236,3 +236,38 @@ def test_fused_intent_gate_exception_disables_intent_not_driving(held):
         assert all(speed > 0.0 for speed, _, _ in actual)
     else:
         assert actual == [(0.0, 0.0, 'deadman_released')] * (limit + 2)
+
+
+def test_fused_intent_transient_gate_failure_recovers_after_published_stop():
+    with _node(False, FUSED) as n:
+        commands, intents = _capture(n), _capture_intent(n)
+        _hold_deadman(n, held=False)
+        original_gate = n._imu_gate
+        failure_after_commands = []
+
+        def raising_gate():
+            failure_after_commands.append(len(commands))
+            raise RuntimeError('transient diagnostic IMU gate failure')
+
+        n._imu_gate = raising_gate
+        _tick(n)
+        # oracle: spec docs/drive-intent.md: publish the stop first and contain
+        # the failure; FailureLatch tolerates one transient then clears its
+        # count on recovery, without restarting the driving node.
+        assert failure_after_commands == [1]
+        assert len(commands) == 1
+        assert commands[-1].drive.speed == 0.0
+        assert commands[-1].drive.steering_angle == 0.0
+        assert intents == []
+        assert n._intent_failures.consecutive_failures == 1
+        assert not n._intent_failures.disabled
+        n._imu_gate = original_gate
+        _feed_imu(n, yaw_rate=0.0)
+        _tick(n, 1)
+        assert len(commands) == 2
+        assert commands[-1].drive.speed == 0.0
+        assert commands[-1].drive.steering_angle == 0.0
+        assert len(intents) == 1
+        assert 'fused_speed_imu: ok' in intents[-1]['reason']
+        assert n._intent_failures.consecutive_failures == 0
+        assert not n._intent_failures.disabled
