@@ -64,7 +64,7 @@ from ament_index_python.packages import get_package_share_directory
 from gap_follow.speed_overrides import mapping_speed_overrides
 from gap_follow.launch_imu import select_imu_hardware
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription,
+from launch.actions import (DeclareLaunchArgument, EmitEvent, GroupAction, IncludeLaunchDescription,
                             OpaqueFunction, RegisterEventHandler, SetLaunchConfiguration)
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
@@ -227,7 +227,7 @@ def generate_launch_description(imu_probe=None):
                         'profile limits live here).'),
     ]
 
-    diagnostics = IncludeLaunchDescription(
+    diagnostics_include = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('race_diagnostics'), 'launch', 'record_run.py')),
         # Its own folder, given explicitly: launch arguments are shared with
@@ -237,6 +237,7 @@ def generate_launch_description(imu_probe=None):
                           'output_directory': '~/.ros/racerbot_runs'}.items(),
         condition=IfCondition(LaunchConfiguration('diagnostics')),
     )
+    diagnostics = GroupAction(actions=[diagnostics_include], scoped=True)
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('racerbot_launch'), 'launch', 'slam_launch.py')),

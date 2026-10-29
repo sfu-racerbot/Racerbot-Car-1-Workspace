@@ -336,3 +336,45 @@ def test_mapping_speed_default_and_override(requested, expected):
     # oracle: Task J1a R4: 3.5 m/s default; explicit cap wins.
     overrides = {} if requested is None else {'mapping_max_speed': requested}
     assert _gap_follow_params(**overrides)['max_speed'] == expected
+
+
+@pytest.mark.parametrize('requested', [None, '/x/y'])
+def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested):
+    # oracle: Task J1a R5: recorder arguments used to leak into the parent
+    # context, sending maps to racerbot_runs. This fails without GroupAction.
+    from launch.actions import GroupAction, SetLaunchConfiguration
+
+    ld = ml.generate_launch_description(imu_probe=lambda: True)
+    ctx = LaunchContext()
+    if requested is not None:
+        ctx.launch_configurations['output_directory'] = requested
+    recorded = []
+    supervisors = []
+
+    def visit(entities):
+        for entity in entities:
+            if entity.condition is not None and not entity.condition.evaluate(ctx):
+                continue
+            if isinstance(entity, DeclareLaunchArgument):
+                entity.execute(ctx)
+            elif isinstance(entity, GroupAction):
+                visit(entity.execute(ctx))
+            elif isinstance(entity, IncludeLaunchDescription):
+                entity.launch_description_source.get_launch_description(ctx)
+                if entity.launch_description_source.location.endswith('/record_run.py'):
+                    for action in entity.execute(ctx):
+                        if isinstance(action, SetLaunchConfiguration):
+                            action.execute(ctx)
+                    recorded.append(ctx.launch_configurations['output_directory'])
+            elif isinstance(entity, OpaqueFunction):
+                visit(entity.execute(ctx))
+            elif isinstance(entity, Node):
+                if entity.node_package == 'pure_pursuit':
+                    supervisors.append(_node_params(entity, ctx)['output_directory'])
+            elif entity.__class__.__name__ in ('PushLaunchConfigurations', 'PopLaunchConfigurations',
+                                               'SetLaunchConfiguration'):
+                entity.execute(ctx)
+
+    visit(ld.entities)
+    assert recorded == ['~/.ros/racerbot_runs']
+    assert supervisors == [requested or '~/.ros/racerbot_auto']
