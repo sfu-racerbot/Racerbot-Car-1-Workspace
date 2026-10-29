@@ -147,6 +147,12 @@ ros2 run racerbot_launch map_course
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
+After the launch stops, `map_course` runs the run summary, IMU report and SLAM report. It prints the first 15 lines of each and saves the full reports under the recorded run's `analysis/map_course/` directory. The `Recording run to:` line near the start gives that run's path.
+
+With `analysis:=false`, the reports are skipped. If recording is disabled, analysis is skipped because there is no recorded run.
+
+Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
+
 **Then leave the car where it stopped.** That spot is where racing on this map starts. If you'll race this map on another day, mark the spot and the direction (tape on the floor) before moving the car.
 
 Options, added to the end of the command:
@@ -157,6 +163,9 @@ Options, added to the end of the command:
 | `laps:=4` | a different number of laps (at least 2) |
 | `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
 | `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. It also loads `slam_gyro.yaml`: a tighter loop-closure search for good odometry. A loop closure is SLAM noticing it has come back to a place it already mapped. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
+| `imu_lap_turns:=true` | Count lap turning in `odom_imu`; requires `gyro_odom:=true`. |
+| `imu_all:=true` | Enable `gyro_odom`, `fused_speed` and `imu_lap_turns`. An explicit `false` overrides the corresponding setting; if disabling `gyro_odom`, also disable `imu_lap_turns`. All require `imu:=true`. |
+| `analysis:=false` | Skip the reports after the launch exits. |
 | `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=false` | explicitly turn off the IMU stack, including the estimator |
 | `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
