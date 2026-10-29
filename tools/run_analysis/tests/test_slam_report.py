@@ -86,7 +86,7 @@ def test_load_inputs_no_slam_and_other_error(tmp_path):
     (tmp_path / 'events.jsonl').write_text('')
     reason = f'{tmp_path}/bag: no map -> odom or map -> odom_imu transform on /tf; SLAM did not map this run'
     def no_slam(path):
-        raise ValueError(reason)
+        raise report.slam_bag.NoSlamMapping(reason)
     def broken(path):
         raise RuntimeError('broken bag')
     kwargs = dict(load_scans=lambda path: None, load_rosout=lambda path: [])
@@ -140,7 +140,7 @@ def test_build_report_without_system_log():
 def test_main_no_slam_exit_zero(tmp_path):
     # oracle: spec: the no-SLAM report still succeeds at the CLI boundary.
     def no_slam(path):
-        raise ValueError('SLAM did not map this run')
+        raise report.slam_bag.NoSlamMapping('SLAM did not map this run')
     assert report.main([str(tmp_path), '--no-plots'], load_slam=no_slam,
                        load_scans=lambda path: None, load_rosout=lambda path: []) == 0
     assert (tmp_path / 'analysis' / 'slam_report' / 'slam_report.txt').read_text().startswith(
