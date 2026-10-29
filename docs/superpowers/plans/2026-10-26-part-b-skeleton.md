@@ -30,7 +30,7 @@ Everything in Part A's Global Constraints applies unchanged, plus these decision
 
 | Item | Starts when | Why this order |
 |---|---|---|
-| **B6 Overtaking** and **B9 Two controlled cars, racing team A** | **Done 2026-10-29** on branch `part-b1-racing` ([the B-1 plan](2026-10-27-part-b1-racing.md), "Outcome and lessons") | |
+| **B6 Overtaking** and **B9 Two controlled cars, racing team A** | **Done 2026-10-29**, merged to `main` as PR #6 ([the B-1 plan](2026-10-27-part-b1-racing.md), "Outcome and lessons") | |
 | B1 SLAM observability, B2 `map_course` IMU flags, B3 Simulated IMU, B4 `gap_follow` IMU features | B-1 merged to `main`. **Now one plan, two parallel tracks:** [the combined B-2/3 plan](2026-10-29-part-b23-slam-imu.md) | Disjoint code, one shared join (the IMU flags); B3's simulated IMU also closes a simulator gap B-1 found |
 | B10 B-1 follow-ups | When the race schedule needs them; the floor test (R9) first | See B10 below |
 | B7 Car 1's course in the simulator | **Done 2026-10-27** (`car1_course_2026_10_26`, commit `a343d44`) | |
