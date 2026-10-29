@@ -310,6 +310,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
             # with steering damping or the adaptive grip on, so with both off
             # this changes nothing.
             steer, speed = ctrl.command(ego["scan"], float(state[3]), step,
+                                        horizontal_accel=0.0, lb_pressed=True,
                                         fused_speed=float(plant.truth(k)[3]),
                                         yaw_rate=float(state[5]),
                                         measured_steering=steering_from_yaw_rate(

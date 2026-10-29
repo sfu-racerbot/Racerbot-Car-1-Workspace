@@ -235,6 +235,7 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
         # beta). The mirror reads it only with enable_steering_damping or
         # enable_adaptive_grip on, so with both off this changes nothing.
         steering, cmd_speed = ctrl.command(ego["scan"], speed_meas, step,
+                                           horizontal_accel=0.0, lb_pressed=True,
                                            fused_speed=float(plant.truth(0)[3]),
                                            yaw_rate=float(state[5]),
                                            measured_steering=steering_from_yaw_rate(

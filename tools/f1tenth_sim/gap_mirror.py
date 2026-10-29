@@ -50,6 +50,7 @@ NOT_MIRRORED = {
 # Every parameter GapController reads. test_gap_mirror.py checks the YAML
 # provides each one and that nothing else in the YAML goes unread.
 REQUIRED_PARAMS = frozenset((
+    'enable_imu_impact_stop', 'imu_impact_threshold', 'imu_impact_min_samples',
     'enable_imu_traction', 'imu_traction_slip_threshold', 'imu_traction_release_slip',
     'imu_traction_min_speed', 'imu_traction_max_hold_sec',
     'enable_imu_understeer',
@@ -191,6 +192,9 @@ REQUIRED_PARAMS = frozenset((
 # an older YAML (git show <commit>:src/gap_follow/config/gap_follow.yaml) be
 # replayed against the run it drove -- see tools/run_analysis/replay.py.
 LEGACY_VALUES = {
+    'enable_imu_impact_stop': False,
+    'imu_impact_threshold': 33.7257297468959,
+    'imu_impact_min_samples': 1,
     'enable_imu_traction': False,
     'imu_traction_slip_threshold': 0.246,
     'imu_traction_release_slip': 0.123,
@@ -325,11 +329,30 @@ class GapController:
         self.traction_hold = gap_logic.TractionHold(
             self.p['imu_traction_slip_threshold'], self.p['imu_traction_release_slip'],
             self.p['imu_traction_min_speed'], self.p['imu_traction_max_hold_sec'])
+        self.impact_latch = gap_logic.ImpactLatch(
+            self.p['imu_impact_threshold'], self.p['imu_impact_min_samples'])
 
     def command(self, scan, current_speed, step, yaw_rate=None, measured_steering=None,
-                fused_speed=None):
+                fused_speed=None, horizontal_accel=None, lb_pressed=True):
+        """Caller supplies horizontal force (m/s²), or None when untrusted.
+
+        Gym supplies zero unless a test injects an impact. LB defaults held for
+        existing simulation callers; None is a missing Joy button, not release.
+        """
         p = self.p
         tel = self.telemetry = {}
+        if p['enable_imu_impact_stop']:
+            self.impact_latch.on_lb(lb_pressed)
+            trusted = (horizontal_accel is not None and yaw_rate is not None
+                       and math.isfinite(yaw_rate))
+            self.impact_latch.on_sample(
+                horizontal_accel if horizontal_accel is not None else math.nan,
+                0.0, trusted)
+        if lb_pressed is not True:
+            return self._stop(step, 'deadman_released' if lb_pressed is False
+                              else 'waiting_for_joy')
+        if self.impact_latch.latched:
+            return self._stop(step, 'imu_impact_stop')
         clean, valid = gap_logic.sanitize_ranges(
             scan, max_range=p["max_range"], range_min=self.lidar.range_min)
 
