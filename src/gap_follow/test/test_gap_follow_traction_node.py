@@ -92,6 +92,18 @@ def test_not_holding_ramp_uses_fused_speed_not_wheels():
     assert off == 2.0 + 5.0 * DT
 
 
+def test_hold_applies_a_lower_speed_ceiling_immediately():
+    with _node(extra=['-p', 'max_speed:=1.5', '-p', 'corner_speed:=1.5',
+                      '-p', 'corner_speed_wide:=1.5']) as n:
+        commands = _capture(n)
+        _inputs(n)
+        _hold_deadman(n)
+        n.last_commanded_speed = 2.0
+        _tick(n)
+        # oracle: closed form: min(desired=1.5,last=2), not a brake ramp.
+        assert commands[-1].drive.speed == 1.5
+
+
 @pytest.mark.parametrize('wheel,fused', [(0.0, 0.0), (0.2, 0.0), (0.29, 0.0),
                                          (-1.0, -1.3)])
 def test_standstill_and_reverse_accelerate_exactly_as_feature_off(wheel, fused):
