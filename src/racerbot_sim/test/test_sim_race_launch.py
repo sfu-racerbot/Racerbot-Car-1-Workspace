@@ -44,6 +44,9 @@ R7 acceptance races (2026-10-28): all four stopped on car 2 wall contact,
 with zero missed steps and neither car finishing. Car 1 course normal/swapped:
 4.950/2.925 sim s; indoor_wide normal/swapped: 4.050/2.850 sim s. Full logs,
 race.json and recordings: /tmp/oc-part-b1-r7/<track>-<normal|swapped>/.
+
+R7 review step 2: forcing car 2's hold false failed
+test_team_a_deadman_isolated[True] at the movement assertion (peak 0 m/s).
 """
 
 import contextlib
