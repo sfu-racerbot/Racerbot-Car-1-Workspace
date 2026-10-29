@@ -223,7 +223,7 @@ def parse_lap_closed(line):
 
 def parse_lap_quality(line):
     """Extract a failed lap-quality check, if present."""
-    # auto_map_race_node.py:1623-1643 logs failures but has no passing-quality line.
+    # auto_map_race_node.py:1623-1654 logs failures but has no passing-quality line.
     number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
     pattern = (r'Lap (\d+) did not pass the quality check \((\w+)='
                + number + r'deg > ' + number + r'deg')
@@ -232,7 +232,15 @@ def parse_lap_quality(line):
         return None
     lap, metric, value, limit = match.groups()
     return {'lap': int(lap), 'passed': False, 'metric': metric,
-            'value': float(value), 'limit': float(limit)}
+            'value': float(value), 'limit': float(limit),
+            'accepted_at_ceiling': bool(re.search(
+                r'\d+-lap ceiling is reached -- accepting it anyway', line))}
+
+
+def parse_lap_unjudged(line):
+    """Parse the supervisor's intermediate-lap message."""
+    match = re.search(r'Lap (\d+)/(\d+) closed; keep holding LB\.', line) if isinstance(line, str) else None
+    return {'lap': int(match[1]), 'of': int(match[2]), 'judged': False} if match else None
 
 
 def blocking_gate(progress) -> str:

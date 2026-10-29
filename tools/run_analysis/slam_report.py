@@ -14,7 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'race_diagnostics'))
-from race_diagnostics.run_events import parse_lap_closed, parse_lap_quality
+from race_diagnostics.run_events import parse_lap_closed, parse_lap_quality, parse_lap_unjudged
 from run_analysis import slam_bag, slam_metrics, runlog
 
 
@@ -218,30 +218,48 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
     log = Path(log_path).expanduser() if log_path is not None else path / 'launch.log'
     run['log_text'] = log.read_text(errors='replace') if log.exists() else None
     rosout = (load_rosout or _read_rosout)(path)
-    laps, quality, drops = {}, {}, []
+    laps, quality, drops, unjudged, profile_laps = {}, {}, [], set(), set()
+    # _write_profile logs this only after writing the CSV: auto_map_race_node.py:1818-1822.
+    profile_line = re.compile(r'Generated \d+-point racing profile at .+ \([\d.]+-[\d.]+m/s\)\.')
+    latest_lap = None
     for record in rosout:
         msg = record.get('msg', '')
         lap = parse_lap_closed(msg)
         if lap:
             lap['t'] = record['t']
             laps[lap['lap']] = lap
+            latest_lap = lap['lap']
+        note = parse_lap_unjudged(msg)
+        if note:
+            unjudged.add(note['lap'])
+        if latest_lap is not None and profile_line.search(msg):
+            profile_laps.add(latest_lap)
         q = parse_lap_quality(msg)
         if q:
             quality[q['lap']] = q
         if 'Message Filter dropping message' in msg:
             drops.append(record['t'])
     # Launch output supplements rosout; its lap times are only needed if rosout lacks one.
+    latest_lap = None
     for line in (run['log_text'] or '').splitlines():
         lap = parse_lap_closed(line)
+        if lap:
+            latest_lap = lap['lap']
         if lap and lap['lap'] not in laps:
             stamp = re.search(r'\[(\d{10}\.\d+)\]', line)
             if stamp:
                 lap['t'] = float(stamp.group(1))
             laps[lap['lap']] = lap
+        note = parse_lap_unjudged(line)
+        if note:
+            unjudged.add(note['lap'])
+        if latest_lap is not None and profile_line.search(line):
+            profile_laps.add(latest_lap)
         q = parse_lap_quality(line)
         if q:
             quality[q['lap']] = q
-    run.update(laps=list(laps.values()), quality=list(quality.values()), drops=drops)
+    run.update(laps=list(laps.values()), quality=list(quality.values()), drops=drops,
+               unjudged_laps=sorted(unjudged), profile_laps=sorted(profile_laps))
     return run
 
 
@@ -316,9 +334,21 @@ def build_report(run):
     summary['Laps'] = []
     for lap in sorted(laps, key=lambda item: item['lap']):
         q = quality.get(lap['lap'])
-        entry = dict(lap, quality=q)
+        if q and not q.get('passed'):
+            verdict = 'failed (accepted at the ceiling)' if q.get('accepted_at_ceiling') else 'failed'
+            status = f"failed {q['metric']}={q['value']:.1f} deg > {q['limit']:.1f} deg"
+            if q.get('accepted_at_ceiling'):
+                status += ' (accepted at the ceiling)'
+        elif q and q.get('passed'):
+            verdict = status = 'passed'
+        elif lap['lap'] in run.get('unjudged_laps', []) or lap['lap'] < lap.get('of', lap['lap']):
+            verdict, status = 'not judged', 'not judged (only the last lap is)'
+        elif lap['lap'] in run.get('profile_laps', []):
+            verdict = status = 'passed'
+        else:
+            verdict, status = 'unknown', 'unknown (no quality line or profile evidence)'
+        entry = dict(lap, quality=q, verdict=verdict)
         summary['Laps'].append(entry)
-        status = ('passed' if q and q.get('passed') else f"failed {q['metric']}={q['value']:.1f} deg > {q['limit']:.1f} deg" if q else 'unknown (no quality line)')
         lines.append(f"  lap {lap['lap']}/{lap.get('of', '?')}: {lap.get('distance_m', math.nan):.1f} m, closest {lap.get('closest_m', math.nan):.2f} m, corrections {lap.get('corrections', '?')}, quality {status}")
     if not laps:
         lines.append('  no closed lap messages')
