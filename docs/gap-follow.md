@@ -18,15 +18,16 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 5. [Validation](#validation) — the order to bring it up on the car
 6. [Turning a feature off](#turning-a-feature-off)
 7. [The 2026-10-19 run](#the-2026-10-19-run) — why the car braked, and what changed
-8. [Checking it in the simulator](#checking-it-in-the-simulator)
-9. [Swept-path clearance](#swept-path-clearance)
-10. [Arc guard](#arc-guard)
-11. [Corner setup](#corner-setup)
-12. [Measured results](#measured-results)
-13. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
-14. [Keeping the mirror honest](#keeping-the-mirror-honest)
-15. [Steering damping (gyro)](#steering-damping-gyro)
-16. [Adaptive grip (IMU)](#adaptive-grip-imu)
+8. [Several cars at once](#several-cars-at-once) — the other-car layer: on by default, and how to turn it off
+9. [Checking it in the simulator](#checking-it-in-the-simulator)
+10. [Swept-path clearance](#swept-path-clearance)
+11. [Arc guard](#arc-guard)
+12. [Corner setup](#corner-setup)
+13. [Measured results](#measured-results)
+14. [Ideas that were tried and dropped](#ideas-that-were-tried-and-dropped)
+15. [Keeping the mirror honest](#keeping-the-mirror-honest)
+16. [Steering damping (gyro)](#steering-damping-gyro)
+17. [Adaptive grip (IMU)](#adaptive-grip-imu)
 
 ## Highlights
 
@@ -39,7 +40,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 - **Tested against the real node.** A test drives the real ROS node (a running program on the ROS graph — [glossary](glossary.md#node)) and the simulator's copy through the same scans, and requires identical commands to 1e-6.
 
 - **No more false hard stops in corridors (2026-10-20).** On the 2026-10-19 run, all 97 stop ticks were the TTC brake reacting to the inside wall of a bend 0.12–0.18 m *beside* the car. Replayed through the final config, the same scans produce none.
-- **Safe with other cars on track, when you turn it on (2026-10-22).** With `opponent_awareness:=true`, two simulated cars pass 40 of 40 runs and three cars 24 of 24, with no contact at all. Without it: 34 of 40 and 15 of 24. It follows a slower car rather than overtaking it on every track tried. See [Several cars at once](#several-cars-at-once).
+- **Other cars: on by default since 2026-10-28.** Two simulated cars on the shipped settings passed 32 of 32 runs, with no contact and no stalls. With the layer off, 24 of 32 passed, with 3 contacts and 5 stalls. It follows slower cars and rarely passes them. Off switch: `opponent_awareness:=false`. It has never run on the floor. See [Several cars at once](#several-cars-at-once).
 - **More of every track completes (2026-10-20).** Across 11 simulated tracks, 6 seeds each, both directions, 108 of 132 runs pass, against 96 for the 2026-10-19 config. The hall loop `levine_blocked` laps in 23.6 s instead of 34.7 s.
 
 **Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, then to 2.5 m/s² on 2026-10-26.
@@ -100,6 +101,8 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 - `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
 - `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does, so do not run the two together.
+- The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read.
+- Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run.
 
 ### Before the first run on the car
 
@@ -131,6 +134,8 @@ The rule exists because a driving node with a bug does not know it has a bug. LB
 
 The simulator's car is close to this one, but not identical. Its grip has been read on the car in two runs, but no run has yet used the 2.5 m/s² cornering limit on the floor. Bring that limit up in the order in [Validation](#validation).
 
+**The other-car layer is on by default, and it has never run on the floor.** It can only slow the car or choose a side of an opening. Its first-run order is in [Several cars at once](#several-cars-at-once). If it reads a wall as a car, the decision lines show `opponent mode=` with no other car moving. Let go of LB at that point.
+
 ## Validation
 
 **Do these in order and do not skip ahead.** This is the workspace's standard order for any changed driving node ([writing-your-own-node.md](writing-your-own-node.md#testing-before-its-on-wheels)).
@@ -146,6 +151,8 @@ The simulator's car is close to this one, but not identical. Its grip has been r
    - **If the car slides or runs wide in corners:** the floor has less grip than the simulator. Keep `max_lateral_accel` at the highest value that stayed planted.
 
 If anything looks wrong, turn the suspect feature off (next section) and compare. That is what the separate switches are for.
+
+The other-car layer has its own two-car order, in [Several cars at once](#several-cars-at-once).
 
 ### Recording a floor run
 
@@ -202,6 +209,8 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
 | `enable_steering_damping` | `true` (since 2026-10-27; was `false`) | No gyro term: the steering is what it was before 2026-10-27. Turn it off with `steering_damping:=false` on the launch line, which also skips the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
+| `enable_opponent_awareness` (launch: `opponent_awareness`) | `true` (since 2026-10-28; was `false`) | The other-car layer is off, and the node's commands are what they were before the layer existed (2026-10-22). Launch with `opponent_awareness:=false`. See [Several cars at once](#several-cars-at-once). |
+| `opponent_follow_memory_sec` | `1.0` s (since 2026-10-28; was none) | The follow cap is dropped the moment its car is lost, with the layer still on. Set it to `0.0` to get that. |
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
@@ -273,44 +282,148 @@ How to read it:
 
 ### Several cars at once
 
-All cars run `gap_follow` on their own simulated LiDAR, which sees the other cars as obstacles ([run-analysis.md](run-analysis.md#testing-several-cars-at-once)). The leader is held to 1.8 m/s and the others run at 3.5 m/s, so they catch it. 4 seeds per track, both directions, 2 laps each. A run passes only if no car touches anything and every car finishes.
+> **Who this is for:** anyone running two or more cars on one track, or checking the other-car layer on the car.
+> **Read first:** [Safety](#safety) and [Validation](#validation). The layer is on by default, so the same order applies.
+> **You'll be able to:** say what the layer does, turn it off, and run the two-car floor order.
+> **Time:** 15 minutes to read; each simulator check takes several minutes.
+
+All cars run `gap_follow` on their own simulated LiDAR, which sees the other cars as obstacles ([run-analysis.md](run-analysis.md#testing-several-cars-at-once)). The leader was held to 1.8 m/s and the others ran at 3.5 m/s, so they catch it. The runs used 4 seeds per track, both directions, 2 laps each. A run passed only if no car touched anything and every car finished.
 
 | Config | 2 cars (5 tracks) | 3 cars (3 tracks) |
 |---|---|---|
 | 2026-10-19 config | 23/40 | 4/24 |
-| 2026-10-20 config (shipped default) | 34/40 | 15/24 |
-| **2026-10-22, `opponent_awareness:=true`** | **40/40, no contact** | **24/24, no contact** |
+| 2026-10-20 config, layer off (the shipped default until 2026-10-27) | 34/40 | 15/24 |
+| 2026-10-22, layer on (before the follow hold, the memory and the outline) | 40/40, no contact | 24/24, no contact |
 
-Without the layer, every remaining failure is one pattern. A fast car starts to pass a slower one with 0.15–0.2 m between them, because its own path is clear. The slower car then turns into a bend across that path, and at 3.3 m/s the fast car can't stop in the metre left. Follow-the-gap treats every LiDAR return as a fixed wall, so it doesn't know the obstacle beside it can move.
+Without the layer, every remaining failure is one pattern. A fast car starts to pass a slower one with 0.15–0.2 m between them, because its own path is clear.
+
+The slower car then turns into a bend across that path. At 3.3 m/s the fast car can't stop in the metre left. Follow-the-gap treats every LiDAR return as a fixed wall, so it doesn't know the obstacle beside it can move.
 
 #### Opponent awareness: what it does
 
-It's a switch, off by default. **With it off nothing below runs**, and the node's commands are exactly what they were before it existed.
+**The layer is on by default** (since 2026-10-28). With it on, a moving car is treated as a car. This car slows down behind it, and passes only with room on a straight. It is simulator-validated only, and it has never been driven on the floor.
 
-Two checks back that up. With the layer off, the benchmark above reproduces the 2026-10-20 numbers exactly. And a node test runs the same scans with the layer on and off, in a world where nothing moves, and requires identical commands.
+**The off switch is `opponent_awareness:=false` on the launch line.** The same switch is `enable_opponent_awareness` in `config/gap_follow.yaml`. Anything other than `true` or `false` stops the launch.
 
-Leaving it on with only one car costs nothing measurable either. In the single-car sweep (11 tracks, 6 seeds, both directions) it passes 111 of 132 runs, against 108 of 132 with it off, and every track does at least as well.
+**With it off, nothing below runs.** The node's commands are then what they were before the layer existed (2026-10-22). On 2026-10-22, with the layer off, the benchmark above reproduced the 2026-10-20 numbers exactly. A node test checks the same thing: in a world where nothing moves, the commands with the layer on match the commands with it off.
 
-**Terminal 2**, instead of the usual `gap_follow` launch, on **every** car on the track:
+**Before the car, in this order.** Do not skip ahead. Each step is the cheapest place to find a problem the next one would find with a crash.
+
+1. **Wheels off the ground, both cars.** Put each car on a stand. A person holds LB on each car's own F710 controller. Launch with `max_speed:=1.0`.
+2. **Then a slow two-car floor run.** Use open space at least 2 m wide, not the 1.2 m track. One car sits about 2 m behind the other, with nobody standing on the track. Launch with `max_speed:=1.0`, and a person holds LB on each controller.
+3. **If a wall shows up as a car, stop and report.** On the car, a wall that the layer takes for a moving car shows as `opponent mode=` in the decision lines while no other car is moving. If you see that, let go of LB, relaunch with `opponent_awareness:=false`, and report the run with its log.
+
+Step 1 is the first time the layer runs on the car.
+
+Leaving it on with only one car costs nothing measurable, as far as the simulator shows. On 2026-10-22 the single-car sweep (11 tracks, 6 seeds, both directions) passed 111 of 132 runs with the layer on, against 108 of 132 with it off, and every track did at least as well.
+
+On 2026-10-28, with the 1 s memory added, single-car laps were unchanged (24 of 24).
+
+#### Recognition measurements
+
+Recognition means identifying the other visible car as a moving object in the scan. A false mover is an object identified as moving when only one car is on the track. [The metric definitions](run-analysis.md#testing-several-cars-at-once) explain how these are counted.
+
+A simulator sweep tried `opponent_min_hits` of 3, 4, 6 and 8 with `opponent_moving_speed` of 0.4 and 0.6 m/s. No setting recognised cars faster without extra false movers. At 3–4 hits, car 1's course had up to 180 false-mover ticks. The defaults remain 8 hits and 0.6 m/s.
+
+On 2026-10-28 a second sweep (R3: five solo tracks and two race tracks, both directions) chose the same pair. It had a recognised-tick share of 48.92%, against 48.85% for the next eligible pair. Each of the two had 9 false-mover ticks on car1_course and none on the other tracks.
+
+Across the races, about 49% of ticks when the other car was visible were recognised; on car 1's course it was about 35%. The limit was the other car being close to walls, rather than `opponent_min_hits`. These are simulation measurements, not proof of recognition on the physical car.
+
+#### Existing opponent-awareness procedure
+
+**Terminal 2**, on **every** car on the track. The usual launch is enough, because the layer is on by default:
 
 ```bash
-ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true
+ros2 launch gap_follow gap_follow_launch.py
 ```
 
-**Working when:** with another car moving ahead, the decision lines (one a second) include `opponent mode=follow` and `follow cap=...`.
+**Working when:** with another car moving ahead, the decision lines (one a second) include `opponent mode=follow` and `follow cap=...`. A pass that is allowed shows `opponent mode=clear`. Just after a followed car is lost, the line can show `opponent mode=follow_memory` while the cap is held.
 
 With it on, every scan:
 
-1. **Finds car-shaped things.** It splits the scan into clusters and keeps those 0.15–0.7 m across that stand free of anything behind them. A stub of wall is not free-standing, because the beam just past its end doesn't jump further away.
-2. **Tracks them.** It matches clusters from scan to scan against this car's own motion, dead-reckoned from speed and steering (modelled as the servo actually follows the command, 75 ms late), and filters each into a position and a velocity. Something counts as **moving** only after 8 detections in a row at 0.6 m/s or more over the ground. A parked car is still just an obstacle, handled as before.
-3. **Follows.** Behind a moving car, speed is capped at `(gap − 0.5 m) / 1.0 s`, where gap is from this car's bumper to the other car. At 1.8 m/s that allows a 2.3 m gap. In the benchmark the closest two car centres came was 0.82 m on the 1.2 m loop, and over 2.1 m on every other track.
-4. **Passes only with room, on a straight.** The gap search sees where each moving car will be over the next 0.8 s, widened by 0.15 m, so it can only choose a gap with real room beside the other car. That choice is used only to pick a side of the opening the car would take anyway. It's refused while this car steers more than 0.10 rad, or while the car ahead is turning more than 15°.
+1. **Finds car-shaped things.** It groups the scan into clusters 0.15–0.7 m wide. A cluster counts only if the scan shows open space just past each of its ends. A stub of wall fails that test, because the beam past its end doesn't jump further away.
+2. **Tracks them.** It matches clusters from scan to scan against this car's own motion, dead-reckoned from speed and steering, and filters each one into a position and a velocity. A cluster counts as **moving** after 8 scans in a row (0.2 s at 40 Hz) at 0.6 m/s or more over the ground. A parked car stays an obstacle, as before.
 
-The time-to-collision brake, the contact stop, the swept-path speed limit and the arc guard all still read the **real** scan. The layer can lower the speed and pick a side of an opening. It can't switch any safety check off.
+   The steering is modelled as the servo actually follows the command, 75 ms late. Using the command itself made parked clutter 0.9 m away read as a 1 m/s car in simulation.
+3. **Follows.** Behind a moving car, this car's speed is capped at `(gap − 0.5 m) / 1.0 s`. The gap runs from this car's front bumper to the other car. At 1.8 m/s that allows a 2.3 m gap.
 
-**What it doesn't do: overtake on our tracks.** On every simulated track, including the wide gym race tracks, the fast car followed the leader for the whole run.
+   A car already alongside the front bumper is not followed, because it is being passed. On 2026-10-22 the two car centres came as close as 0.82 m on the 1.2 m loop, and stayed over 2.1 m apart on every other track.
+4. **Passes only with room, on a straight.** A pass needs all three of these:
+   - this car steers less than 0.10 rad;
+   - no car ahead heads more than 15° away from this car's direction, which would mean it is turning;
+   - the room beside the other car is at least `car_width + 2 × opponent_passing_margin`, which is 0.61 m on the shipped settings.
 
-A pass needs about 2.4 m of width with these margins, and these tracks are narrower than that where the leader drives. The real track is 1.0–1.3 m wide, where two 0.30 m cars can't pass each other safely anyway. Expect following, not racing.
+   The pass must also be the same opening the car would take anyway. The check runs on every scan, so a pass under way is abandoned the moment the room narrows.
+
+   If the other car is alongside when a pass is refused or abandoned, this car drops back behind it. Alongside means its rear face is at or behind this car's front bumper. This car's speed is then capped 0.5 m/s (`opponent_abort_speed_margin`) below the other car's speed. Two rules keep this from stopping both cars:
+   - **Only the car that is behind yields:** the cap applies only when the other car's centre is ahead of this car's. When two of these cars ran side by side and each slowed below the other, both ended at zero (2026-10-29: 0 of 2 runs finished on car 1's course, reversed, with a 2.5 m/s leader).
+   - **The cap lasts only while that car is seen.** The follow memory never holds it. A stretch of wall briefly tracked as a moving object beside the car would otherwise brake it for a whole second: in simulation, 3 of 36 two-car runs on car 1's course ended wedged that way.
+
+**The other car's outline.** The layer does not use a 0.30 m disc for the other car. It uses the measured 0.31 × 0.58 m rectangle. The scan sees only the face of the other car that faces this car.
+
+The layer works out the rectangle's centre from that visible face, using the car's length and width (the support-distance rule in `inflate_predicted`). It then widens the rectangle by 0.15 m on every side, and carries it 0.8 s ahead along the other car's motion.
+
+`opponent_radius` (0.30 m) is now only the rear cutoff. A moving car more than 0.30 m behind this car's base link (the rear axle) is ignored.
+
+**The follow hold.** Once a car has counted as moving, this car keeps following it for 1.0 s after the car drops below 0.3 m/s (`opponent_stopped_release_sec`). After that the car is an ordinary obstacle. The hold lowers the speed cap only. It never enables a pass, and its value must stay above zero.
+
+**The follow memory.** If the car being followed is lost for a moment, the [follow cap](glossary.md#follow-cap) is held for 1.0 s (`opponent_follow_memory_sec`) instead of being dropped. A car is lost when its track is dropped, or when it leaves the band the layer watches.
+
+The held cap can lower speed to zero. It never raises speed, overrides a safety stop or authorises motion by itself.
+
+It does not steer. Set the memory to `0.0` to turn it off and keep the rest of the layer on.
+
+**Narrow sections.** If the room beside the other car is narrower than the pass needs, the pass is refused, or abandoned if one is under way, and the car follows instead.
+
+**What the layer cannot do.** It can only slow the car, or choose a side of an opening. It cannot switch off any safety check. The time-to-collision brake, the contact stop, the swept-path speed limit and the arc guard all still read the **real** scan. LB still gates everything: with LB let go, the car commands zero speed.
+
+**It rarely passes.** On the 2026-10-22 benchmark the fast car followed the leader for the whole run on every simulated track, including the wide gym race tracks. The 2026-10-28 sweeps passed rarely too. In the shipped margin's 36-run sweep there was one overtake in total.
+
+On the shipped settings a pass needs at least 0.61 m of room beside the other car. The real track is 1.0–1.3 m wide, where two 0.30 m cars can't pass each other safely anyway. Expect following, not racing.
+
+<details>
+<summary><b>The evidence, and the designs that were rejected</b> — click to expand. Skip it unless you're quoting a number or changing a setting. Skipping is safe: the rules above are the whole behaviour.</summary>
+
+**Two cars, the 2026-10-28 matrix (R2b and R2c).** `car1_course_2026_10_26` and `indoor_wide`, both directions, 2 seeds, 3 laps. The car ahead ran at 1.0, 1.5, 2.0 and 2.5 m/s. That is 32 two-car runs per row, and 616 simulator runs in all.
+
+A run passes when no car touches anything and every car finishes. A [stall](glossary.md#stall) is a car below 0.05 m/s for more than 1 s while another car moves at 0.05 m/s or more.
+
+| Layer | Passed | Stalls | Contacts |
+|---|---|---|---|
+| Off (the shipped config before 2026-10-28) | 24/32 | 5 | 3 |
+| On, follow memory 0.0 s | 30/32 | 4 | not given |
+| **On, follow memory 1.0 s (shipped)** | **32/32** | **0** | **0** |
+
+Single-car laps were unchanged with the memory on: 24 of 24. The accepted cost is that the faster car rarely passes on wide tracks.
+
+The 8 in the YAML comment ("1 overtake against 8 before") is the awareness-on, no-memory configuration in the same 32-run matrix. All 8 of its overtakes were on indoor_wide, against a leader at 1.0–1.5 m/s. With the 1 s memory on, the same matrix gave 1 overtake.
+
+**The margin sweep, 2026-10-28 (R4).** Leaders at 1.0, 1.5 and 2.0 m/s, on `car1_course_2026_10_26`, `indoor_wide` and `asb_10000`, both directions, 2 seeds, 3 laps. That is 36 runs per setting.
+
+A margin of 0.15 m was the only one with 0 stalls at every steering limit tried (0.10, 0.20 and 0.33 rad). Each of those three settings gave 36 of 36 finished, 0 contacts and 1 overtake. Margins of 0.05 m and 0.10 m overtook up to 4 times, but stalled 1 to 5 times.
+
+The rule for choosing: most overtakes with 0 contacts and 0 stalls, and ties go to the larger time gained by the faster car.
+
+Time gained is the sum, over 18 cells (3 tracks × 3 leader speeds × 2 directions), of the faster car's mean time gained in each cell. Each cell has 2 seeds. eval_gap_multi prints a `mean time gained` figure for each car on the aggregate line under each track, and the faster car's figure is the one summed.
+
+At 0.15 m, the shipped 0.10 rad gained +21.56 s. The 0.33 rad setting gained +21.34 s, and 0.20 rad gained +16.05 s. The raw sweep output is not checked into this repo.
+
+**The follow hold (R2).** Holds of 1, 2 and 3 s each passed all 40 two-car races and 8 solo runs, with no contacts or stalls. The 1 s hold was shipped because the stuck follower in seed 12346 finished in 27.62 s at 1 s, against 29.18 s at 2 and 3 s.
+
+**Rejected designs (R2b).**
+
+- A wider following gap in corners. It regressed at 2.5 m/s and lost passes.
+- A reachable-target filter. It gave 39 stalls.
+- A deadlock escape. It almost never engaged, because the stuck car is held by `emergency_clearance`, which must never be overridden.
+- Releasing the memory during a pass. It gave 13 stalls.
+
+**History (2026-10-22).** The text then said a pass needed about 2.4 m of width with the margins in use, and that these tracks were narrower than that where the leader drives. The outline and the room rule changed on 2026-10-28. A pass now needs at least 0.61 m of room beside the other car.
+
+**Why the follow hold and memory exist.** Behind a slower car on car 1's course, the shipped controller could get stuck for good. The car closed on the slow car in a tight corner, steered round it towards the outer wall, and stopped in a pose that no forward command allowed by its safety rules could leave. `gap_follow` never reverses.
+
+R2b showed these were [controller deadlocks](glossary.md#deadlock), not physical traps. A scripted forward-only escape exists, but the stop rules (time-to-collision, no safe gap, emergency clearance and the creep reserve) hold the car at zero. With the layer on, the main route in was the leader's track being dropped after 7 missed scans in a row. `opponent_max_misses` is 6.
+
+</details>
 
 <details>
 <summary><b>How each rule was found, in the simulator</b> — click to expand. Safe to skip.</summary>
@@ -328,9 +441,11 @@ Each rule below fixed a failure that was measured first, with the layer on:
 
 The [odometry](glossary.md#odometry--odom) (wheel-speed position estimate) the dead reckoning uses over-reads speed by 5–11% on the real car, and its turning is computed from the steering *command*. In the simulator the car's own heading estimate drifted up to about 25°/s while the steering changed, because the servo lags the command.
 
-The servo model, the 0.6 m/s "moving" threshold and the consecutive-detection rule are what absorb that. A 1.0 m/s threshold was also tried: it did no better with several cars and worse with one (108 of 132). On the car, a wall that the layer takes for a moving car would show up as `opponent mode=` in a run where no other car is moving. If you see that, turn the layer off and report the run.
+The servo model, the 0.6 m/s "moving" threshold and the consecutive-detection rule are what absorb that. A 1.0 m/s threshold was also tried: it did no better with several cars and worse with one (108 of 132). The on-car check for a wall taken for a car is in the main text above.
 
-Code: `src/gap_follow/gap_follow/opponent_tracking.py` (no ROS; 71 unit tests), wired in `gap_follow_node.py` and mirrored in `tools/f1tenth_sim/gap_mirror.py`. Every `opponent_*` parameter is commented in `config/gap_follow.yaml`.
+Code: `src/gap_follow/gap_follow/opponent_tracking.py` (no ROS; 95 test functions in `test_opponent_tracking.py` on 2026-10-28, 71 when this was first written). It is wired in `gap_follow_node.py` and mirrored in `tools/f1tenth_sim/gap_mirror.py`.
+
+Every `opponent_*` parameter is commented in `config/gap_follow.yaml`.
 
 </details>
 
@@ -343,7 +458,53 @@ python3 tools/f1tenth_sim/eval_gap_multi.py --track indoor_oval,indoor_wide,asb_
     --cars 2 --speeds 1.8,3.5 --seeds 4 --set enable_opponent_awareness=true
 ```
 
+The layer is on by default, so the `--set` only restates the default. To check the layer off, use `--set enable_opponent_awareness=false`.
+
 **Working when:** every line reads `pass 4/4  wall 0  car-car 0`.
+
+### Racing team A in the simulator
+
+Four simulated races compared team A's shipped controller and safety parameters with car 1's `gap_follow.yaml`, with opponent awareness off. Each was set to 3 laps. These results are simulation only; they do not predict a physical race.
+
+Team A's car touched a wall in every race, ending it before either car finished. These results were measured on 2026-10-28 with team A at commit `6bef23d`. Progress is rounded to three decimal places.
+
+To repeat all four races, complete the [simulator and team A setup](ros-simulator.md#race-team-a) first. Run the commands one at a time; each race ends before the next starts.
+
+**Terminal 1 — parameter copy**, from the workspace root: make a copy with awareness off to match the recorded races.
+
+```bash
+sed 's/^\([[:space:]]*enable_opponent_awareness:\) true/\1 false/' src/gap_follow/config/gap_follow.yaml > /tmp/gap-follow-team-a.yaml
+```
+
+**Working when:** `/tmp/gap-follow-team-a.yaml` exists and its `enable_opponent_awareness` entry reads `false`. If the source file is not found, check that the terminal is at the workspace root.
+
+**Terminal 1 — races**, from the workspace root, with ROS and the workspace sourced and no real drivers running:
+
+```bash
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+```
+
+**Working when:** each race prints a standings table and writes a `race.json` under `~/.ros/racerbot_sim/races/`. A wall contact ends the race early. **If it doesn't:** check the terminal for missing team A packages or a hardware interlock message. Timing can vary between runs.
+
+| Track | Start order | Contact time (simulated seconds) | Car 1 laps | Team A laps |
+|---|---|---:|---:|---:|
+| `car1_course_2026_10_26` | normal | 4.950 | 0.470 | 0.212 |
+| `car1_course_2026_10_26` | swapped | 2.925 | 0.142 | 0.206 |
+| `indoor_wide` | normal | 4.050 | 0.302 | 0.182 |
+| `indoor_wide` | swapped | 2.850 | 0.146 | 0.162 |
+
+**Car 1's awareness setting in these four races: off.** They ran before the default changed on 2026-10-28, so car 1's `gap_follow` had `enable_opponent_awareness` off in all four.
+
+A rerun with today's defaults, which enable opponent awareness, may differ from this table.
+
+Normal starts put car 1 first; swapped starts put team A first. In all four files, car 2 has wall contact, neither car has car contact, both finish times are `null`, and `winner` is `null`.
+
+The measured cause was team A's disparity extender turning in late at 3.0 m/s, then asking for 0.56–0.67 rad of steering. The simulator limits steering to car 1's measured 0.509 rad left and 0.448 rad right (`STEERING_MAX_LEFT/RIGHT` in `sim_bridge.py`), so the car runs wide.
+
+Team A's shipped settings are tuned for its own car: `wheelbase` 0.33 m, `max_speed` 3.0 m/s and `max_lateral_acc` 3.5 m/s². See [how to launch the race](ros-simulator.md#race-team-a).
 
 ## Checking it in the simulator
 

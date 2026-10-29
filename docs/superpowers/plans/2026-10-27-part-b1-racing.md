@@ -36,6 +36,16 @@
 - **Docs** under `docs/` follow the `novice-docs` skill, and `check_docs.py` must add no new findings.
 - **Commits** end with the attribution line the session's system prompt gives. Never push to `main`.
 
+## Execution notes (2026-10-28)
+
+Decisions taken before Task R1, with the user:
+- **Branch:** `part-b1-racing`, from `main`, which already holds Part A (PR #5). The "merge Part A first" step above is done.
+- **Who types:** opencode sessions on the OpenAI subscription. `openai/gpt-6.1-sol` implements R2 and R4 (the code that sets speed) and does the final whole-branch review. `openai/gpt-6.1-terra` implements R1, R3, R5, R6 and R7 and reviews each task. The controlling session writes every brief, re-runs every gate and reads every diff.
+- **Where they work:** a worktree at `.oc-worktrees/oc/part-b1-racing`, with its own build. `RB_WS=<worktree> rb <command>` runs there instead of `~/racerbot-ws`; without `RB_WS`, `rb` is unchanged.
+- **Team A is used as built, never copied or edited.** Task R8 (a Python port of `disparity_extender`) is **dropped**. Tuning against team A uses their compiled node in `racerbot_sim` (R7).
+- **Team A's own deadman and TTC stay on** (their launch defaults), not their README's simulator setting `enable_deadman:=false`. Car 2's `sim_joy_node` forges LB on `/car2/joy` for them, so Review Focus 4 is tested on their side too.
+- **Their `safety_node` subscribes to absolute names:** `/scan`, `/joy`, `/drive_raw`, `/ego_racecar/odom`. A `/car2` namespace does not move these, so R7 remaps each one explicitly (`/scan:=/car2/scan` and so on). The static check in R7 step 4 covers both the relative and the absolute names.
+
 ## Review Focus
 
 1. **The leader stops dead** in front of the follower: the follower must stop with it, without contact, and **resume** when the leader moves on. Today it never resumes.
@@ -168,3 +178,38 @@ Only if R7 shows that tuning against team A needs many races.
 ### Task R9: Floor test hand-over
 
 Give the team the order: two-car wheels-off check, then a slow two-car floor run with `max_speed:=1.0`, recorded by bringup's `auto_record`, then the race. Show how to read the recording with the R1 score where possible.
+
+## Outcome and lessons (2026-10-29)
+
+**Status:** R1-R7 done on `oc/part-b1-racing`, merged into `part-b1-racing`. R8 dropped. R9 handed to the team (outline item B10). The ledger with every ruling is `.oc-runs/part-b1-racing/progress.md` on the dev box.
+
+### What changed from the plan
+
+- **R2 grew three sub-tasks.**
+  - **R2b (diagnosis).** It absorbed R6b, the ROS-against-fast-simulator disagreement. Across 616 fast-simulator runs, the stall behind a slower car is a controller-policy deadlock: gap_follow never reverses, so once its stop rules hold it at zero beside the other car, it stays there. With awareness on, the main way in is a track expiring while the cars are close. A deadlock-escape design was rejected, because emergency clearance holds the stuck car and any escape would touch the safety model.
+  - **R2c (follow-cap memory).** The follow cap is held for `opponent_follow_memory_sec` (1.0 s) after its track disappears. It gave 32 of 32 runs with 0 stalls and 0 contacts. **User decision:** awareness **on by default for racing**, with the memory, and switchable off (`opponent_awareness:=false`).
+  - **R2d (mapping launches).** **User decision:** mapping is always one car, so `map_course`, `auto_map_race` and `autonomous_mapping` default awareness **off**, with an `opponent_awareness` argument.
+- **R3:** no recognition setting was faster without adding false movers. `min_hits` 8 and `moving_speed` 0.6 stay. About 49% of passes are recognised (35% on car 1's course).
+- **R4:** the outline is a 0.58 × 0.31 m rectangle, with its centre recovered from the near face. Margin 0.15 was the only setting with 0 stalls, so the margins (0.15, 0.10) stay.
+- **The final review added an alongside abort:** when the narrow-section rule refuses a pass with the other car alongside, cap the speed at `max(0, v_other − 0.5)` so this car drops back. Before, the cap there was infinite.
+- **The abort needed two fixes of its own (2026-10-29):**
+  - As first written, it stalled both cars: side by side, each capped below the other, down to zero (car 1's course reversed, 2.5 m/s leader: 0 of 2 finished). Now only the car whose centre is behind yields.
+  - A wall segment briefly tracked as a mover beside the leader fired the abort for 2 ticks, and the 1 s follow memory held it, which led to a wedge (33 of 36 runs finished, against 36 of 36 without the abort). Now the memory holds only the follow law, and the abort applies only on scans that see the car.
+- **The simulator interlock got a clean-graph window (2026-10-29):** discovery took about 2.45 s against a 3 s hold, and a forged `/joy` occasionally got out beside a live `urg_node`. The graph must now read clean for 3 s after the hold.
+- **R7:** team A's `disparity_extender` hits the wall within 3-5 s in `racerbot_sim`. It turns in late at 3.0 m/s and asks for 0.56-0.67 rad, while car 1's servo stops at 0.45-0.51 rad. Car 1 ran those races with awareness off.
+- **R8 dropped** (user, 2026-10-28): no copy or edit of team A's code. They run from their own launch files under a `/car2` namespace with remaps, with their own deadman on, fed a forged `/car2/joy`.
+
+### Lessons, carried into the combined B-2/3 plan
+
+1. **Make sure the scenario exercises the behaviour.** The first R2 and R4 acceptance runs used a 2.5 m/s "slow" leader. A 5.0 m/s-capped car only averages about 2.4 m/s on car 1's course, so the follower never caught up, and the results said nothing. Size the speeds to the course, and report a measure that proves the behaviour happened.
+2. **Hard rule 1 for deadman tests:** flipping an expectation proves nothing. Monkeypatch the deadman gate in memory in a scratch process, and require every deny test to fail.
+3. **Simulator ROS tests:** use `/test_only/...` drive chains, plus a conftest guard that fails fast without an isolated domain.
+4. **Two simulators, two steering laws:** `racerbot_sim` has no IMU, so steering damping is inert there. B-2/3's simulated IMU fixes it.
+5. **Parallel tracks work:** sibling worktrees on separate ROS domains (78 and 79), merged at the end, with no conflicts.
+6. **Dev-box hazards:**
+   - Duplicate package names (team A's and team B's `safety_node`) leave a stale CMake cache.
+   - `pytest --basetemp` needs an existing parent directory.
+   - The box is shared: `--workers 2`, and hold sweeps while a real-time race runs.
+7. **Models:** OpenAI, tokenzap and Haiku all hit usage limits during the run. Small checkpoint commits and the ledger made every hand-over between models a resume, not a restart.
+8. **Good implementers stop on contradictions** (NEEDS_CONTEXT 9 times). Most of those stops were errors in the controller's own briefs: "and" written for "or", wrong test geometry, a missing file. Check each brief against the plan before sending it.
+9. **One controller per branch.** A session resumed in a VS Code terminal and a forked background copy of it both carried the note "B-1 was handed to me", ran the same suites on the same ROS domains for hours, and broke each other's tests. Before starting, run `ListAgents` (or `ps` for `claude`) and check that no other session is working the plan.
