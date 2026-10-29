@@ -1244,6 +1244,10 @@ class GapFollowNode(Node):
 
     def _scan_step(self, scan: LaserScan):
         self.last_scan_time = self.get_clock().now()
+        if self.using_fused_speed:
+            # Diagnostic snapshot must also be current on early-stop ticks
+            # that never read the gated odometry properties.
+            self._fused_imu_reason = self._imu_gate()[1]
 
         deadman_ok, stop_state, stop_detail = self._deadman_status()
         if not deadman_ok:

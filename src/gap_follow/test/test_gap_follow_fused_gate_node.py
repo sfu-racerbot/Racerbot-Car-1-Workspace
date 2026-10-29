@@ -147,3 +147,24 @@ def test_fused_gate_rechecks_imu_dropout_between_ticks_without_odom_callback():
     assert on[0][0] == 1.8 + 5.0 * 0.025
     assert on[1] == raw[1]
     assert on[1][0] == 2.0 + 5.0 * 0.025
+
+
+def test_fused_intent_refreshes_imu_state_on_deadman_denied_scan():
+    with _node(False, FUSED) as n:
+        commands, intents = _capture(n), _capture_intent(n)
+        _feed_odom(n, 1.8)
+        _odom(n.wheel_odom_callback, 2.0)
+        _hold_deadman(n, held=False)
+        _tick(n)
+        # oracle: spec I5 fused-speed intent names the current IMU state,
+        # even on an early stop; CLAUDE.md requires the published zero command.
+        assert 'fused_speed_imu: no imu' in intents[-1]['reason']
+        assert commands[-1].drive.speed == 0.0
+        assert commands[-1].drive.steering_angle == 0.0
+        _feed_imu(n, yaw_rate=0.0)
+        _tick(n, 1)
+        assert len(commands) == 2
+        assert commands[-1].drive.speed == 0.0
+        assert commands[-1].drive.steering_angle == 0.0
+        assert n.last_decision_state == 'deadman_released'
+        assert 'fused_speed_imu: ok' in intents[-1]['reason']
