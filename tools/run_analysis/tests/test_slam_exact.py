@@ -97,3 +97,37 @@ def test_exact_children_isolated():
         assert env['ROS_DOMAIN_ID'] == '77', name
         assert env['ROS_AUTOMATIC_DISCOVERY_RANGE'] == 'LOCALHOST', name
         assert env['ROS_STATIC_PEERS'] == '', name
+
+
+def test_odometry_brackets():
+    # oracle: closed form - first sample >= scan, including equality, no later sample.
+    assert replay.odometry_brackets([10, 20, 30, 40], [15, 20, 31]) == [2, 2, 4]
+
+
+@pytest.mark.parametrize('odoms', [[], [10, 20]])
+def test_missing_odometry_bracket_refused(odoms):
+    # oracle: spec controller ruling - no future bracket refuses with scan stamp.
+    with pytest.raises(replay.StampMismatch, match='bracket.*21'):
+        replay.odometry_brackets(odoms, [21])
+
+
+@pytest.mark.parametrize('distance,first', [(0, None), (-.001, None), (.0010001, 10)])
+def test_position_bar_boundary(distance, first):
+    # oracle: spec 1 mm, strict exceedance; sign does not change distance.
+    result = replay.pose_sequence_error([(10, 0, 0, 0)], [(10, distance, 0, 0)])
+    assert result['max_position_m'] == abs(distance)
+    assert result['first_over_bar'] == first
+
+
+def test_empty_pose_sequences():
+    # oracle: closed form - empty sets have no matches, differences or errors.
+    assert replay.pose_sequence_error([], []) == {
+        'matched': 0, 'missing_in_replay': 0, 'extra_in_replay': 0,
+        'max_position_m': 0.0, 'max_yaw_deg': 0.0, 'first_over_bar': None}
+
+
+@pytest.mark.parametrize('value', [math.nan, math.inf, -math.inf])
+def test_nonfinite_pose_refused(value):
+    # oracle: invariant - undefined error must not appear as zero error.
+    with pytest.raises(ValueError, match='non-finite.*10'):
+        replay.pose_sequence_error([(10, 0, 0, 0)], [(10, value, 0, 0)])

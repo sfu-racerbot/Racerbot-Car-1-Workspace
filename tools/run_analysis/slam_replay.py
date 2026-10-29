@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import time
+from bisect import bisect_left
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -196,6 +197,18 @@ def bag_exact_plan(bag):
     if not stamps['/pose']:
         raise ReplayRefused('exact replay needs recorded /pose messages')
     return exact_scan_plan(stamps['/scan'], stamps['/pose'])
+
+
+def odometry_brackets(odom_stamps_ns, scan_stamps_ns):
+    """Exclusive odometry end indices including each scan's interpolation bracket."""
+    odoms = list(odom_stamps_ns)
+    ends = []
+    for stamp in scan_stamps_ns:
+        index = bisect_left(odoms, stamp)
+        if index == len(odoms):
+            raise StampMismatch(f'no odometry interpolation bracket for scan {stamp}')
+        ends.append(index + 1)
+    return ends
 
 
 class ServiceError(RuntimeError):
@@ -618,11 +631,17 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
                       exact_specs[0][2] if exact else env, out / 'slam_toolbox.log', log)
         if exact:
             for transition in ('configure', 'activate'):
-                done = subprocess.run(['ros2', 'lifecycle', 'set', '/slam_toolbox', transition],
-                                      env=env, capture_output=True, text=True, timeout=SERVICE_TIMEOUT_S)
-                log(f'lifecycle {transition}: {done.stdout.strip()} {done.stderr.strip()}')
-                if done.returncode != 0:
-                    raise ReplayFailed(f'could not {transition} synchronous SLAM')
+                deadline = time.monotonic() + MAP_WAIT_S
+                while True:
+                    _check_alive(slam)
+                    done = subprocess.run(['ros2', 'lifecycle', 'set', '/slam_toolbox', transition],
+                                          env=env, capture_output=True, text=True, timeout=SERVICE_TIMEOUT_S)
+                    log(f'lifecycle {transition}: {done.stdout.strip()} {done.stderr.strip()}')
+                    if done.returncode == 0 and 'Transitioning successful' in done.stdout:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise ReplayFailed(f'could not {transition} synchronous SLAM')
+                    time.sleep(.2)
         recorder = _start(children, 'bag_record',
                           ['ros2', 'bag', 'record', '-o', str(out / 'bag'), '--storage', 'mcap',
                            '--use-sim-time', *RECORD_TOPICS],
@@ -634,7 +653,8 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
         _check_alive(relay, recorder)
         if exact:
             name, argv, feed_env = exact_specs[1]
-            play = _start(children, name, argv, feed_env, out / 'exact_feed.log', log)
+            play = _start(children, name, [*argv, '--result', str(out / 'exact_feed.json')],
+                          feed_env, out / 'exact_feed.log', log)
         else:
             play = _start(children, 'bag_play',
                       ['ros2', 'bag', 'play', str(plan.run_dir / 'bag'), '--clock', '--rate', str(rate),
@@ -642,7 +662,9 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
                       env, out / 'bag_play.log', log)
         code = play.proc.wait()
         if code != 0:
-            raise ReplayFailed(f'{play.name} exited with {code}; see {play.log_name}')
+            details = (out / play.log_name).read_text(encoding='utf-8').splitlines()
+            last_line = details[-1] if details else 'no output'
+            raise ReplayFailed(f'{play.name} exited with {code}: {last_line}; see {play.log_name}')
         log(f'bag played; giving slam_toolbox {SETTLE_S:g} s to finish its queue')
         time.sleep(SETTLE_S)
 
@@ -693,6 +715,10 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
         if exact and (out / 'bag' / 'metadata.yaml').exists():
             summary['pose_sequence_error'] = pose_sequence_error(
                 bag_pose_rows(plan.run_dir / 'bag'), bag_pose_rows(out / 'bag'))
+        if exact:
+            feed_result = out / 'exact_feed.json'
+            summary['exact'] = json.loads(feed_result.read_text()) if feed_result.exists() else {
+                'lookahead_samples': 0}
         (out / 'replay.json').write_text(json.dumps(summary, indent=2, default=str) + '\n', encoding='utf-8')
         if (plan.run_dir / 'metadata').is_dir():
             shutil.copytree(plan.run_dir / 'metadata', out / 'metadata')
@@ -716,7 +742,9 @@ def main(argv=None) -> int:
                 key in plan.profile for key in ('mode', 'sync', 'async', 'synchronous', 'slam_mode')):
             raise ReplayRefused('--exact does not allow profile overrides of sync/async mode')
         if args.exact:
-            bag_exact_plan(plan.run_dir / 'bag')
+            scan_plan = bag_exact_plan(plan.run_dir / 'bag')
+            odometry_brackets(sorted(stamp_ns(msg) for _, msg in
+                              bag_messages(plan.run_dir / 'bag', [plan.odom_topic])), scan_plan)
     except ReplayRefused as exc:
         print(f'refusing: {exc}', file=sys.stderr)
         return 2
