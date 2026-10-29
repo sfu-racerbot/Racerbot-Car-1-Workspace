@@ -309,11 +309,14 @@ def test_interlock_suppresses_both_cars_and_namespaced_joy(ros_context):
         assert _spin_until(node, lambda: all(node.count_publishers(topic) > 0
                                              for topic in received), 20.0)
         # oracle: active hardware suppresses all synthetic sensor and joy output.
-        assert not _spin_until(node, lambda: any(received.values()), 5.0), received
+        # The window outlasts the shipped discovery hold plus clean-graph
+        # confirmation (3 s + 3 s), so a leak after either is caught.
+        assert not _spin_until(node, lambda: any(received.values()), 10.0), received
     finally:
         hardware.destroy_node()
-    # oracle: after the hardware disappears both scans resume.
-    assert _spin_until(node, lambda: received['/scan'] > 0 and received['/car2/scan'] > 0, 10.0)
+    # oracle: after the hardware disappears both scans resume (after a full
+    # clean-graph confirmation window).
+    assert _spin_until(node, lambda: received['/scan'] > 0 and received['/car2/scan'] > 0, 15.0)
 
 
 def test_silent_car_stops_while_other_car_drives(ros_context):

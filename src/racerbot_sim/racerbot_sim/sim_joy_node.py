@@ -44,6 +44,7 @@ class SimJoyNode(Node):
         # Stop publishing entirely, to test the joy_stale watchdogs.
         self.declare_parameter('silence_after_sec', -1.0)
         self.declare_parameter('interlock_discovery_hold_sec', 3.0)
+        self.declare_parameter('interlock_clear_confirm_sec', 3.0)
 
         self.rate_hz = float(self.get_parameter('rate_hz').value)
         self.deadman_button = int(self.get_parameter('deadman_button').value)
@@ -54,7 +55,8 @@ class SimJoyNode(Node):
 
         self.interlock = HardwareInterlock(
             self, 'the synthetic LB deadman', discovery_hold_sec=float(
-                self.get_parameter('interlock_discovery_hold_sec').value))
+                self.get_parameter('interlock_discovery_hold_sec').value),
+            clear_confirm_sec=float(self.get_parameter('interlock_clear_confirm_sec').value))
         self.start_time = None
         self.publisher = self.create_publisher(
             Joy, str(self.get_parameter('joy_topic').value), 10)
