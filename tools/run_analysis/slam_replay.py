@@ -65,6 +65,101 @@ class ReplayFailed(RuntimeError):
     """A replay that had started could not finish. The output folder keeps its logs."""
 
 
+class StampMismatch(ReplayRefused):
+    """The recorded processed scans cannot be identified unambiguously."""
+
+
+def exact_scan_plan(scan_stamps_ns, pose_stamps_ns) -> list[int]:
+    """Return one scan stamp per recorded pose, in pose order; no exceptions.
+
+    Run 20261026-194913 has 315 poses, all matching distinct recorded scans.
+    Its 314 'updates' are changes between map->odom_imu TF corrections (initial
+    correction identity), not 314 processed scans. No start pose is exempt.
+    Missing scans mean the recorder dropped input SLAM processed; duplicates
+    are ambiguous. Either case refuses before starting replay children.
+    """
+    seen = set()
+    for stamp in scan_stamps_ns:
+        if stamp in seen:
+            raise StampMismatch(f'duplicate scan stamp {stamp}; exact replay is ambiguous')
+        seen.add(stamp)
+    poses = list(pose_stamps_ns)
+    missing = [stamp for stamp in poses if stamp not in seen]
+    if missing:
+        raise StampMismatch(f'{len(missing)} processed scan stamps missing; first {missing[0]}; '
+                            'the recorder dropped a scan SLAM used; no start-pose exception')
+    return poses
+
+
+def pose_sequence_error(recorded, replayed) -> dict:
+    """Match (stamp_ns, x, y, yaw) rows; measure against 1 mm / 0.1 degree.
+
+    Missing and extra stamps are counted separately from numeric errors.
+    first_over_bar follows recorded order, and yaw wraps to [-pi, pi).
+    """
+    recorded, replayed = list(recorded), list(replayed)
+    source = {row[0]: row[1:] for row in recorded}
+    target = {row[0]: row[1:] for row in replayed}
+    if len(source) != len(recorded) or len(target) != len(replayed):
+        raise ValueError('duplicate pose stamps cannot be compared unambiguously')
+    result = dict(matched=0, missing_in_replay=len(source.keys() - target.keys()),
+                  extra_in_replay=len(target.keys() - source.keys()),
+                  max_position_m=0.0, max_yaw_deg=0.0, first_over_bar=None)
+    for stamp, (x, y, yaw) in source.items():
+        if stamp not in target:
+            continue
+        rx, ry, ryaw = target[stamp]
+        if not all(math.isfinite(v) for v in (x, y, yaw, rx, ry, ryaw)):
+            raise ValueError(f'non-finite pose at {stamp}')
+        position = math.hypot(rx - x, ry - y)
+        rotation = abs(math.degrees((ryaw - yaw + math.pi) % (2 * math.pi) - math.pi))
+        result['matched'] += 1
+        result['max_position_m'] = max(result['max_position_m'], position)
+        result['max_yaw_deg'] = max(result['max_yaw_deg'], rotation)
+        if result['first_over_bar'] is None and (position > .001 or rotation > .1):
+            result['first_over_bar'] = stamp
+    return result
+
+
+def map_from_bag_files(grid, resolution, origin_xy, out_dir) -> tuple[Path, Path]:
+    """Save trinary pixels with nav2's y flip, and S4's 0.65/0.25 YAML thresholds.
+
+    Convention checked in navigation2 jazzy nav2_map_server/src/map_io.cpp,
+    tryWriteMapToFile: <=25 free, >=65 occupied, others unknown; rows inverted.
+    https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_map_server/src/map_io.cpp
+    YAML uses the requested free_thresh 0.25 (newer nav2 uses 0.196 there).
+    """
+    import numpy as np
+    cells = np.asarray(grid)
+    if cells.ndim != 2 or not cells.size:
+        raise ValueError('grid must be a nonempty 2D occupancy grid')
+    if not math.isfinite(resolution) or resolution <= 0:
+        raise ValueError('resolution must be finite and positive')
+    pixels = np.full(cells.shape, 205, dtype=np.uint8)
+    pixels[(cells >= 0) & (cells <= 25)] = 254
+    pixels[(cells >= 65) & (cells <= 100)] = 0
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    pgm, meta = out / 'map.pgm', out / 'map.yaml'
+    height, width = cells.shape
+    pgm.write_bytes(f'P5\n{width} {height}\n255\n'.encode('ascii') + pixels[::-1].tobytes())
+    meta.write_text(yaml.safe_dump(dict(image='map.pgm', mode='trinary',
+                    resolution=float(resolution), origin=[float(origin_xy[0]), float(origin_xy[1]), 0],
+                    negate=0, occupied_thresh=.65, free_thresh=.25), sort_keys=False), encoding='utf-8')
+    return pgm, meta
+
+
+def exact_children(params_file, bag, odom_topic, base_env):
+    """Plan exact-only children with their isolated environments (also used by _run)."""
+    return [
+        ('slam_toolbox', ['ros2', 'run', 'slam_toolbox', 'sync_slam_toolbox_node',
+                         '--ros-args', '--params-file', str(params_file), '-p', 'use_sim_time:=true'],
+         child_env(base_env)),
+        ('exact_feed', [sys.executable, str(Path(__file__).with_name('slam_exact_feed.py')),
+                        str(bag), '--odom-topic', odom_topic], child_env(base_env)),
+    ]
+
+
 class ServiceError(RuntimeError):
     """One call to a slam_toolbox service did not answer, or answered with an error.
 
@@ -282,7 +377,10 @@ def _parser() -> argparse.ArgumentParser:
                         help='the odometry to localise on: odom (wheels) or odom_imu (wheels and gyro)')
     parser.add_argument('--profile', type=Path, default=None,
                         help='YAML of slam_toolbox parameters laid over the recorded ones')
-    parser.add_argument('--rate', type=_positive_float, default=1.0, help='playback speed (default 1.0)')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--rate', type=_positive_float, default=None, help='playback speed (default 1.0)')
+    mode.add_argument('--exact', action='store_true', help='feed processed scans in lockstep to synchronous SLAM')
+    parser.add_argument('--out-root', type=Path, default=None, help='output parent (default ~/.ros/racerbot_runs)')
     parser.add_argument('--label', default='default', help='names the output folder (default "default")')
     return parser
 
@@ -557,11 +655,17 @@ def main(argv=None) -> int:
               'Stop bringup first, so the car is parked.', file=sys.stderr)
         return 2
     try:
-        plan = plan_replay(args.run_dir, args.odom, args.profile, RUNS_ROOT, args.label)
+        plan = plan_replay(args.run_dir, args.odom, args.profile,
+                           args.out_root if args.out_root is not None else RUNS_ROOT, args.label)
+        if args.exact and plan.profile and any(
+                key in plan.profile for key in ('mode', 'sync', 'async', 'synchronous', 'slam_mode')):
+            raise ReplayRefused('--exact does not allow profile overrides of sync/async mode')
     except ReplayRefused as exc:
         print(f'refusing: {exc}', file=sys.stderr)
         return 2
-    return _run(plan, args.rate, args.profile, args.label)
+    if args.exact:
+        return _run(plan, None, args.profile, args.label)
+    return _run(plan, args.rate if args.rate is not None else 1.0, args.profile, args.label)
 
 
 if __name__ == '__main__':
