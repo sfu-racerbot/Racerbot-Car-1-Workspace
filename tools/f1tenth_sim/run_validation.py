@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sim_fidelity.bootstrap import bootstrap  # noqa: E402
 
 ROOT = bootstrap()
-sys.path.insert(0, str(ROOT / 'src' / 'imu_bridge'))
 
 try:
     import gymnasium as gym
@@ -51,7 +50,6 @@ except ImportError as exc:
 
 from gap_follow import gap_logic
 from gap_mirror import GapController, node_params
-from imu_bridge.vehicle_state import steering_from_yaw_rate
 from pure_pursuit import racing_math, tracking_laws
 
 from sim_fidelity import CALIBRATION, FidelityPlant, PROFILES
@@ -578,10 +576,7 @@ def run_gap_solo(track: str, seed: int, timeout_s: float) -> dict:
         for step in range(max_steps):
             ego = obs["agent_0"]
             state = np.asarray(ego["std_state"], dtype=float)
-            steering, speed = controller.command(
-                ego["scan"], float(state[3]), step, yaw_rate=float(state[5]),
-                measured_steering=steering_from_yaw_rate(
-                    float(state[5]), float(state[3]), controller.p['wheelbase'], 0.3))
+            steering, speed = controller.command(ego["scan"], float(state[3]), step)
             min_scan = min(min_scan, nearest_valid_range(ego["scan"]))
             stop_steps += int(controller.stopped)
             offset = corridor_offset(ego["scan"])

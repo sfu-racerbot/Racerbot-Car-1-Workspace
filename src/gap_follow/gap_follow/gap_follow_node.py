@@ -798,9 +798,9 @@ class GapFollowNode(Node):
             Odometry, self.odom_topic, self.odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
-        # Subscribed only when a gyro feature is on, so with both off the node's
-        # ROS graph is exactly what it was before those features existed.
-        if self.enable_steering_damping or self.enable_adaptive_grip or self.enable_imu_understeer:
+        # Gyro consumers share one subscription and one trust gate.
+        if (self.enable_steering_damping or self.enable_adaptive_grip
+                or self.enable_imu_understeer):
             self.imu_sub = self.create_subscription(
                 Imu, self.imu_topic, self.imu_callback, 10)
             self.imu_status_sub = self.create_subscription(
@@ -875,7 +875,8 @@ class GapFollowNode(Node):
     @staticmethod
     def _validate_understeer_parameters(values):
         for name, value in values.items():
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)):
                 raise ValueError(f'{name} must be finite')
         if not (0 < values['imu_understeer_engage_ratio']
                 < values['imu_understeer_release_ratio'] <= 1.5):
@@ -1647,6 +1648,7 @@ class GapFollowNode(Node):
         acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
         speed = min(desired_speed, acceleration_ceiling)
 
+        self._publish_drive(steering_angle, speed, now=now)
         understeer_text = ''
         if self.enable_imu_understeer:
             if understeer_off is not None:
@@ -1655,7 +1657,6 @@ class GapFollowNode(Node):
                 ratio = self.understeer_check.ratio_filter.value
                 understeer_text = (f', imu understeer cap {understeer_cap:.2f}m/s '
                                    f'(ratio {ratio:.2f})')
-        self._publish_drive(steering_angle, speed, now=now)
         gap_lo_angle = scan.angle_min + (lo_idx + gap_start) * scan.angle_increment
         gap_hi_angle = scan.angle_min + (lo_idx + gap_end) * scan.angle_increment
         closest_text = (

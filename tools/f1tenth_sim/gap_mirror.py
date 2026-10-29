@@ -254,7 +254,8 @@ class GapController:
 
     ``params`` is node_params() (optionally with overrides); ``lidar`` needs
     ``angle_min``, ``angle_increment`` and ``range_min``. ``command(scan,
-    measured_speed, step, yaw_rate=None)`` returns ``(steering, speed)`` for one
+    measured_speed, step, yaw_rate=None, measured_steering=None)`` returns
+    ``(steering, speed)`` for one
     40 Hz tick; ``yaw_rate`` is read when steering damping or the adaptive grip
     is on, and None means no healthy IMU sample this tick.
 

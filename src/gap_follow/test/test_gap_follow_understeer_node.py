@@ -38,8 +38,9 @@ def _measured(node, angle=0.02):
 def _inputs(node, failure=None):
     _feed_odom(node, 2.0)
     if failure != 'never-imu':
-        _feed_imu(node, yaw_rate=0.0,
-                  state=failure if failure in ('waiting', 'fault') else 'ok',
+        _feed_imu(node, yaw_rate=math.nan if failure == 'nan-imu' else 0.0,
+                  state=(None if failure == 'no-status' else
+                         failure if failure in ('waiting', 'fault') else 'ok'),
                   age_sec=0.2 if failure == 'stale-imu' else 0.0)
     if failure != 'never-measured':
         _measured(node, math.nan if failure == 'nan-measured' else 0.02)
@@ -80,6 +81,7 @@ def test_engaged_cap_is_min_of_feature_off_command_and_measured_speed_factor():
 @pytest.mark.parametrize('failure,reason', [
     ('waiting', 'imu waiting'), ('fault', 'imu fault'),
     ('stale-imu', 'imu stale'), ('never-imu', 'no imu'),
+    ('nan-imu', 'imu yaw not finite'), ('no-status', 'no imu'),
     ('nan-measured', 'measured steering not finite'),
     ('stale-measured', 'measured steering stale'),
     ('never-measured', 'no measured steering'),

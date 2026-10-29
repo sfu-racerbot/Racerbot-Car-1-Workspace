@@ -1254,7 +1254,8 @@ def understeer_ratio(measured_steering, commanded_steering, speed,
         return math.nan
     if abs(commanded_steering) < min_steering or speed < min_speed:
         return math.nan
-    if measured_steering * commanded_steering < 0 and abs(measured_steering) >= min_steering:
+    if (measured_steering * commanded_steering < 0
+            and abs(measured_steering) >= min_steering):
         return math.nan
     return math.tan(measured_steering) / math.tan(commanded_steering)
 

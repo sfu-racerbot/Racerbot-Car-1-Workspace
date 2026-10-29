@@ -29,6 +29,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 16. [Steering damping (gyro)](#steering-damping-gyro)
 17. [Adaptive grip (IMU)](#adaptive-grip-imu)
 18. [Fused speed (IMU)](#fused-speed-imu)
+19. [Understeer check (IMU)](#understeer-check-imu)
 
 ## Highlights
 
@@ -889,6 +890,129 @@ If `vehicle_state_node` dies, `/odom/fused` goes silent. The shipped stale-odome
 ### Limitations
 
 **Fused speed ships off; floor trial needed.** The simulator cannot show a benefit because the gym tyres never slip, so fused speed equals wheel speed there. No simulator tuning sweep is used to enable it by default. Leave the flag out, or pass `fused_speed:=false`, to keep using `/odom`.
+
+## Understeer check (IMU)
+
+The understeer check slows the car when it turns much less than the steering command asks.
+It is **off by default** (`enable_imu_understeer: false`); `imu_understeer:=true` enables it for a floor trial.
+
+The check reads `/steering/measured`, the effective steering angle calculated from the
+gyros' turn rate and the car's speed, rather than a sensor on the steering servo.
+A ratio of 1.0 means the car makes the commanded turn; 0.6 means it makes 60% of that turn.
+The [imu_bridge README](../src/imu_bridge/README.md#fused-speed-and-measured-steering) explains the measurement.
+
+### When it caps speed
+
+The ratio is smoothed with a 0.3 s low-pass filter. If the smoothed ratio stays below
+0.75 for at least 0.2 s, speed is capped at **85% of fresh measured speed**.
+For example, at 2.0 m/s the cap is 1.70 m/s. Other speed limits can still ask for less.
+
+The cap takes effect immediately, before the acceleration ramp, and releases when the
+smoothed ratio rises above 0.85. Missing judgements retain the engagement state for
+up to 0.2 s, but apply no cap on those ticks; a longer gap resets the state and filter.
+
+Judging needs speed of at least 1.0 m/s and commanded steering of at least 0.05 rad
+in either direction. The check uses the command from 0.15 s earlier, because the car
+responds late, and judges only while steering changes by at most 0.05 rad over that interval.
+
+### When it falls back
+
+An untrusted reading removes the understeer ceiling on that same control tick.
+The published command then matches the command with this feature off, including when
+the optional speed hold is enabled. The other control and stop rules still apply.
+
+The shared IMU trust check requires status `ok`, a fresh sample and a finite yaw rate.
+Status `waiting` or `fault`, stale data, or a missing IMU prevents judging.
+Measured steering must also be finite and less than 0.1 s old; missing, stale or
+`NaN` steering gives no judgement, as does missing or stale odometry.
+
+Counter-steering, where the measured turn is in the opposite direction by at least
+0.05 rad, also gives no judgement. The check does not label it understeer.
+
+On `/drive_intent`, an active ceiling is named `imu understeer cap 1.70m/s (ratio 0.60)`
+for that example. Untrusted inputs are named `imu_understeer_off: <reason>`, such as
+`imu stale` or `measured steering not finite`. With the feature off, it adds no reason
+and creates no `/steering/measured` subscription.
+
+<details>
+<summary><b>Threshold evidence and parameters</b>: skip this unless tuning the check.</summary>
+
+The turn ratio is `tan(measured steering) / tan(lagged commanded steering)`, the same
+grip ratio used by adaptive grip. It is not the ratio of the angles themselves.
+
+On 2026-10-29, `tools/run_analysis/grip_replay.py` replayed the shipped adaptive-grip
+logic over two car 1 runs. These are median ratios by lateral acceleration demand:
+
+| Demand (m/s²) | Run `20261026-194514` | Run `20261026-194913` |
+|---|---:|---:|
+| 0.3–1.0 | 0.85 | 0.84 |
+| 1.0–1.5 | 0.95 | 0.95 |
+| 1.5–2.0 | 0.92 | 0.97 |
+| 2.0–2.5 | 0.89 | 0.94 |
+| 2.5–3.0 | 0.84 | 0.88 |
+| 3.0–5.0 | 0.80 | no samples |
+
+Normal readings are mostly 0.84–0.97, so engagement at 0.75 leaves room below them.
+Release at 0.85 separates the two thresholds to avoid switching repeatedly near one value.
+The 0.15 s lag comes from `20261026-194514`'s `analysis/report.md`: “steering lag 0.150 s”.
+
+| YAML parameter | Default |
+|---|---:|
+| `imu_understeer_engage_ratio` | 0.75 |
+| `imu_understeer_release_ratio` | 0.85 |
+| `imu_understeer_speed_factor` | 0.85 |
+| `imu_understeer_hold_sec` | 0.2 s |
+| `imu_understeer_timeout_sec` | 0.1 s |
+| `imu_understeer_steering_lag_sec` | 0.15 s |
+| `imu_understeer_max_steering_change` | 0.05 rad |
+
+These numeric parameters can be changed through ROS parameter services while running;
+an accepted change restarts the check and its steering history. Invalid values are
+refused at startup and on live changes. The feature flag requires a restart.
+The check has its own lag parameters and state, independent of adaptive grip.
+
+</details>
+
+### Floor-trial order
+
+**Test with the wheels off the ground first, then on the floor at low speed in open space.**
+Hold LB whenever the car moves; releasing it stops the car. Keep recording on as in
+[Validation](#validation), so the measured turn can be compared with each command.
+
+In **Terminal 2**, with ROS and the workspace sourced and bringup already running in
+**Terminal 1**, start the first check at 1.0 m/s:
+
+```bash
+ros2 launch gap_follow gap_follow_launch.py imu_understeer:=true max_speed:=1.0
+```
+
+**Working when:** the IMU stack starts once, `/imu/status` reaches `ok`, and the decision
+reason names any unusable input. The launch shares the stack with the other IMU features
+and uses the existing `imu_hardware` selection.
+
+On a stand, or below 1.0 m/s, the check cannot judge understeer; do not expect engagement.
+After the wheels-off check, drive one low-speed corner in open space, with someone
+ready to release LB. If the cap behaves unexpectedly, release LB and relaunch with
+`imu_understeer:=false` before comparing the recorded measurements.
+
+### Limitations
+
+**This is a floor-trial feature.** Gym's linear tyres do not model a real loss of grip,
+so simulated results cannot establish the engagement thresholds. Those come from the
+recorded runs above, and the feature ships off.
+
+The 2026-10-29 wiring sweep completed all 24 enabled runs with zero chassis contacts
+and the same stop counts as the 24 feature-off runs. It used five indoor tracks and
+`car1_course_2026_10_26`, both directions, seeds 12345 and 12346, with shipped speeds.
+
+Engagement was not zero: it occupied 2.29–12.29% of ticks per track/direction pair.
+The simulator's `car` profile adds a steering-limiting friction envelope outside gym
+(`tools/f1tenth_sim/sim_fidelity/grip.py`). It can therefore produce a low measured-turn
+ratio. This is synthetic understeer, not measured tyre slip.
+
+The largest lap-time cost was on reversed `asb_sharp`: mean lap 16.44 s off versus
+17.09 s on. Its closest body clearance with the check on was 0.009 m.
+These results support keeping the feature off pending a recorded floor trial.
 
 ## See also
 

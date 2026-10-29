@@ -207,17 +207,6 @@ gap_follow_node:
     # that steering has moved no more than adaptive_grip_max_steering_change (rad)
     # over the window. Turn it on with gap_follow_launch.py adaptive_grip:=true.
     # Not yet run in the simulator or on the car (docs/gap-follow.md#adaptive-grip-imu).
-    # Understeer is a floor-trial feature: gym tyres cannot slide.
-    enable_imu_understeer: false
-    imu_understeer_engage_ratio: 0.75
-    imu_understeer_release_ratio: 0.85
-    imu_understeer_speed_factor: 0.85
-    imu_understeer_hold_sec: 0.2
-    imu_understeer_timeout_sec: 0.1
-    # Car 1 run 20261026-194514 analysis/report.md: steering lag 0.150 s.
-    imu_understeer_steering_lag_sec: 0.15
-    imu_understeer_max_steering_change: 0.05
-
     enable_adaptive_grip: false
     adaptive_grip_ceiling: 3.0
     adaptive_grip_rise_per_s: 0.2
@@ -227,6 +216,18 @@ gap_follow_node:
     adaptive_grip_judge_fraction: 0.8
     adaptive_grip_steering_lag_sec: 0.15
     adaptive_grip_max_steering_change: 0.05
+    # --- Understeer check (docs/gap-follow.md#understeer-check-imu) ---
+    # Floor-trial feature: gym tyres cannot model real loss of grip.
+    # Replayed runs 20261026-194514/194913 normally read ratios 0.84-0.97.
+    enable_imu_understeer: false
+    imu_understeer_engage_ratio: 0.75       # below this for hold_sec
+    imu_understeer_release_ratio: 0.85      # above this releases
+    imu_understeer_speed_factor: 0.85       # fraction of fresh odometry speed
+    imu_understeer_hold_sec: 0.2            # low-ratio hold / missing-judgement reset [s]
+    imu_understeer_timeout_sec: 0.1         # measured-steering freshness [s]
+    # Car 1 run 20261026-194514 analysis/report.md: steering lag 0.150 s.
+    imu_understeer_steering_lag_sec: 0.15
+    imu_understeer_max_steering_change: 0.05  # steadiness over that lag [rad]
     # --- Rectangular vehicle footprint ---
     # Measured on this car with a tape, 2026-08-24, NOT the Traxxas 74276-4
     # published figures the earlier values came from:
