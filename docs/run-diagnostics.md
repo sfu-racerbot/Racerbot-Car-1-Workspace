@@ -232,12 +232,16 @@ One timestamped directory per run under `~/.ros/racerbot_runs/`:
 | `launch.log` | your `tee` | What every node decided, tick by tick |
 | `events.jsonl` | `race_diag_node` | Machine-readable pipeline state, **pose lag**, watchdog fires |
 | `probe.log` | `race_diag_node` stdout | Same, human-readable |
+| `system/proc.jsonl` | `system_log`, every second | CPU use, memory and thread count for each named ROS node process. CPU use of 100% means one full core. Was a node starved of CPU? |
+| `system/tegrastats.log` | The Jetson's `tegrastats`, every second, when available on the car | CPU use per core, GPU use, memory and temperatures |
 | `bag/` | `ros2 bag record` | Everything, replayable offline. Includes both odometries (`/odom`, `/odom/imu`), both IMUs, SLAM's `/pose` and pose graph, and every node's log on `/rosout` |
 | `metadata/git/` | `record_run.py` at start | Which code ran: HEAD, branch, `git status` and the full uncommitted diff of `racerbot-ws` and `~/imu-calibration`. Untracked files are listed, not copied |
 | `metadata/files/` | `record_run.py` at start | Copies of imu-calibration's `car.yaml` and calibration JSONs: the IMU mounts and calibration, which no ROS parameter holds |
 | `metadata/params/` | `snapshot_params`, from 15 s in and every 2 s for the whole run | Each node's parameters in `ros2 param dump` YAML format (usable as `--params-file`). A node that starts later gets a file when it appears. A restarted node gets `<name>.<n>.yaml`. Namespaced nodes use `ns__name.yaml`; names that collide get `~2`, `~3`, and so on before any restart number. Later parameter changes are in the bag's `/parameter_events` |
 | `map.pgm` / `map.yaml` | `slam_toolbox` save | The map as SLAM saw it |
 | `raceline_*.csv` | `auto_map_race_node` | The line that was generated and driven. `raceline_raw.csv` is the unmodified recording and is written even when the cleanup *refuses* the run, so a refusal can be plotted against the map |
+
+If `tegrastats` is missing, the recorder logs a warning and continues recording.
 
 ### Why the probe exists at all
 

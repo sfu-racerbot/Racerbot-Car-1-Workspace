@@ -1,5 +1,6 @@
 """Record per-process resource use and, when available, Jetson statistics."""
 import argparse
+import ctypes
 import json
 import math
 import os
@@ -136,6 +137,15 @@ def main(argv=None) -> int:
     previous_handlers = {}
     for sig in (signal.SIGINT, signal.SIGTERM):
         previous_handlers[sig] = signal.signal(sig, lambda *_: stop.set())
+    # ros2 run is a wrapper and can exit without forwarding launch's signal.
+    # Linux delivers SIGTERM if that parent dies, including during setup.
+    parent = os.getppid()
+    if sys.platform.startswith('linux'):
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            print('Warning: cannot register parent-death signal', file=sys.stderr, flush=True)
+        if os.getppid() != parent:
+            stop.set()
     tegra = None
     try:
         tegra = start_tegrastats(output / 'tegrastats.log', binary=args.tegrastats,

@@ -157,18 +157,17 @@ def _setup(context, *args, **kwargs):
         ),
     ]
 
+    if LaunchConfiguration('record_bag').perform(context).lower() in ('true', '1'):
+        actions.append(ExecuteProcess(
+            cmd=['ros2', 'bag', 'record', '--node-name', bag_name,
+                 '-o', os.path.join(run_dir, 'bag')] + topics,
+            output='screen',
+        ))
     if LaunchConfiguration('system_log', default='true').perform(context).lower() in ('true', '1'):
         actions.append(ExecuteProcess(
             cmd=['ros2', 'run', 'race_diagnostics', 'system_log',
                  '--output', os.path.join(run_dir, 'system')],
             name=f'{prefix}system_log',
-            output='screen',
-        ))
-
-    if LaunchConfiguration('record_bag').perform(context).lower() in ('true', '1'):
-        actions.append(ExecuteProcess(
-            cmd=['ros2', 'bag', 'record', '--node-name', bag_name,
-                 '-o', os.path.join(run_dir, 'bag')] + topics,
             output='screen',
         ))
     return actions
