@@ -2,6 +2,8 @@
 
 Run with rb env ROS_DOMAIN_ID=78 python3 -m pytest src/gap_follow/test/.
 Oracles: I1 round-1 controller ruling and map_course's pgrep -f probe.
+Seen failing with auto always choosing hardware, the simulator overriding
+explicit values, unconditional inclusion, and accepted invalid values.
 """
 
 import importlib.util
