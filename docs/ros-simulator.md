@@ -100,7 +100,7 @@ source /opt/ros/jazzy/setup.bash && source install/setup.bash
 ros2 launch racerbot_sim sim_bringup_launch.py controlled_cars:=2
 ```
 
-**Working when:** after the discovery hold, `gym_bridge_node` reports two cars and starts publishing their scans. Leave this terminal running. **If it doesn't:** check for `REAL HARDWARE DETECTED` or a missing Gym installation.
+**Working when:** `gym_bridge_node` reports two cars; after the discovery hold, the scan (one sweep of LiDAR readings, [glossary](glossary.md#scan)) check below receives a message. Leave this terminal running. **If it doesn't:** check for `REAL HARDWARE DETECTED` or a missing Gym installation.
 
 **Terminal 2 — check car 2**, sourced in a separate terminal:
 

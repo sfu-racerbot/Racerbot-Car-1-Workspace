@@ -301,6 +301,8 @@ A simulator sweep tried `opponent_min_hits` of 3, 4, 6 and 8 with `opponent_movi
 
 Across the races, about 49% of ticks when the other car was visible were recognised; on car 1's course it was about 35%. The limit was the other car being close to walls, rather than `opponent_min_hits`. These are simulation measurements, not proof of recognition on the physical car.
 
+#### Existing opponent-awareness procedure
+
 **Terminal 2**, instead of the usual `gap_follow` launch, on **every** car on the track:
 
 ```bash

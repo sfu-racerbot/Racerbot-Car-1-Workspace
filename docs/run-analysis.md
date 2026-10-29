@@ -214,9 +214,9 @@ python3 tools/f1tenth_sim/eval_gap_multi.py --track levine_blocked --cars 2 --sp
 
 All cars run the shipped `gap_follow` on their own simulated LiDAR, which sees the other cars as obstacles. They start one behind another along the track, 3 m apart (`--spacing`). By default the leader runs at 0.7 × `max_speed` and the others at full speed, so they catch it. `--speeds` sets each car's top speed directly, leader first.
 
-**Working when:** it prints one line per track and exits. A fully passing track reads `pass N/N wall 0 car-car 0 unfinished 0`; the exit code is 0 only if every track did. `closest` is the smallest centre-to-centre distance between any two cars during the run.
+**Working when:** it prints one line per track and exits. A fully passing track reads `pass N/N wall 0 car-car 0 unfinished 0`. `closest` is the smallest centre-to-centre distance between any two cars during the run.
 
-**If it doesn't:** a missing Gym module means the simulator setup has not been completed; see [simulator setup](simulator.md). For two cars this is a comparison, and the command exits 0 even if there is contact or an unfinished car. Read the results rather than using the exit code as a pass signal.
+**If it doesn't:** a missing Gym module means the simulator setup has not been completed; see [simulator setup](simulator.md). For two cars this is a comparison, and the command exits 0 even if there is contact or an unfinished car. With more than two cars, it exits 0 only if every run passes.
 
 With `--cars 2`, the head-to-head table uses car indices 0 and 1. Both cars default to their own configured maximum speed; the 0.7 multiplier above applies to runs with more than two cars. `--swap-starts` repeats each seed with the other car in front.
 
