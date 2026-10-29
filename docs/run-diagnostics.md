@@ -433,7 +433,9 @@ output directory. It does not write into either run.
    a failure; it may be accepted anyway at the maximum lap count, which the
    report also says. A judged lap with no failure is marked passed only when a
    later message confirms that its racing profile was written. Without that
-   evidence, its verdict is unknown.
+   evidence, its verdict is unknown. So each lap gets exactly one of "not
+   judged", "passed", "failed", "failed (accepted at the ceiling)" or
+   "unknown", always from what the supervisor logged.
 5. **Map consistency** is the percentage of finite LiDAR endpoints that land
    on or within one grid cell of an occupied wall in the final map. A higher
    percentage means more of what the LiDAR saw lines up with those walls. It
