@@ -49,6 +49,14 @@ NOT_MIRRORED = {
 # Every parameter GapController reads. test_gap_mirror.py checks the YAML
 # provides each one and that nothing else in the YAML goes unread.
 REQUIRED_PARAMS = frozenset((
+    'enable_imu_understeer',
+    'imu_understeer_engage_ratio',
+    'imu_understeer_release_ratio',
+    'imu_understeer_speed_factor',
+    'imu_understeer_hold_sec',
+    'imu_understeer_timeout_sec',
+    'imu_understeer_steering_lag_sec',
+    'imu_understeer_max_steering_change',
     "adaptive_grip_ceiling",
     "adaptive_grip_cut_factor",
     "adaptive_grip_hold_ratio",
@@ -180,6 +188,14 @@ REQUIRED_PARAMS = frozenset((
 # an older YAML (git show <commit>:src/gap_follow/config/gap_follow.yaml) be
 # replayed against the run it drove -- see tools/run_analysis/replay.py.
 LEGACY_VALUES = {
+    'enable_imu_understeer': False,
+    'imu_understeer_engage_ratio': 0.75,
+    'imu_understeer_release_ratio': 0.85,
+    'imu_understeer_speed_factor': 0.85,
+    'imu_understeer_hold_sec': 0.2,
+    'imu_understeer_timeout_sec': 0.1,
+    'imu_understeer_steering_lag_sec': 0.15,
+    'imu_understeer_max_steering_change': 0.05,
     "arc_guard_blocked_fallback": "freest",
     "braking_latency_sec": 0.0,
     "speed_hold_sec": 0.0,
@@ -290,8 +306,13 @@ class GapController:
             judge_fraction=self.p["adaptive_grip_judge_fraction"])
         self.grip_ratio_filter = gap_logic.LowPass(gap_logic.GRIP_RATIO_TAU_SEC)
         self.steering_lag = gap_logic.SteeringLag(self.p["adaptive_grip_steering_lag_sec"])
+        self.understeer_check = gap_logic.UndersteerCheck(
+            self.p['imu_understeer_engage_ratio'], self.p['imu_understeer_release_ratio'],
+            self.p['imu_understeer_hold_sec'])
+        self.understeer_steering_lag = gap_logic.SteeringLag(
+            self.p['imu_understeer_steering_lag_sec'])
 
-    def command(self, scan, current_speed, step, yaw_rate=None):
+    def command(self, scan, current_speed, step, yaw_rate=None, measured_steering=None):
         p = self.p
         tel = self.telemetry = {}
         clean, valid = gap_logic.sanitize_ranges(
@@ -574,6 +595,13 @@ class GapController:
         if follow_cap < desired_speed:
             desired_speed = follow_cap
             binding = 'follow'
+        understeer_cap = self._understeer_cap(
+            steering, dt, current_speed, yaw_rate, measured_steering)
+        tel['imu_understeer_engaged'] = math.isfinite(understeer_cap)
+        tel['imu_understeer_cap'] = understeer_cap
+        if understeer_cap < desired_speed:
+            desired_speed = understeer_cap
+            binding = 'understeer'
         if creeping:
             binding = 'creep'
         if used_fallback and effective_corner < desired_speed:
@@ -607,6 +635,23 @@ class GapController:
         self.last_command_time = step
         self.stopped = False
         return steering, float(speed)
+
+    def _understeer_cap(self, steering, dt, current_speed, yaw_rate, measured_steering):
+        """Fresh samples arrive per tick; None is an untrusted/missing sample."""
+        p = self.p
+        if not p['enable_imu_understeer']:
+            return math.inf
+        lagged = self.understeer_steering_lag.step(
+            dt, steering, p['imu_understeer_max_steering_change'])
+        trusted = (yaw_rate is not None and math.isfinite(yaw_rate)
+                   and measured_steering is not None)
+        ratio = (gap_logic.understeer_ratio(measured_steering, lagged, current_speed)
+                 if trusted else math.nan)
+        engaged = self.understeer_check.update(ratio, dt)
+        if not math.isfinite(ratio):
+            return math.inf
+        return gap_logic.understeer_speed_cap(
+            engaged, current_speed, p['imu_understeer_speed_factor'])
 
     def _adaptive_width(self, left, right):
         p = self.p
