@@ -2,38 +2,95 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from run_analysis import slam_report as report
 
 
+def _metadata(path, topics):
+    bag = path / 'bag'
+    bag.mkdir()
+    entries = [{'topic_metadata': {'name': topic}} for topic in topics]
+    (bag / 'metadata.yaml').write_text(yaml.safe_dump(
+        {'rosbag2_bagfile_information': {'topics_with_message_count': entries}}))
+
+
 def test_missing_scans_keeps_partial_report_and_cli(tmp_path, capsys):
-    # oracle: runlog.py reports missing topics and empty scans as ValueError;
-    # the partial report must retain independent sections and exit successfully.
-    reason = 'bag: bag needs /scan and /drive, has []'
-    def no_scans(path):
-        raise ValueError(reason)
+    _metadata(tmp_path, ['/odom', '/odom/imu', '/rosout'])
     def no_slam(path):
         raise ValueError('SLAM did not map this run')
-    kwargs = dict(load_slam=no_slam, load_scans=no_scans, load_rosout=lambda p: [])
+    # oracle: a 3-4-5 triangle followed by a 3 m leg has total length 8 m.
+    odom = np.array([[0, 0, 0, 0], [1, 3, 4, 0], [2, 6, 4, 0]])
+    gyro = np.array([[0, 0, 0, 0], [1, 3, 4, .1], [2, 6, 4, .2]])
+    kwargs = dict(load_slam=no_slam, read_inputs=lambda bag, topics: {
+        'odom': odom, 'odom_imu': gyro, 'rosout': []})
     run = report.load_inputs(tmp_path, **kwargs)
     lines, summary = report.build_report(run)
     assert lines[0] == 'No SLAM in this run: SLAM did not map this run'
-    assert lines[lines.index('Map consistency:') + 1] == '  no scans: ' + reason
+    assert lines[lines.index('Map consistency:') + 1] == '  no scans: topic /scan not recorded'
+    assert summary['Setup']['distance_m'] == 8
+    assert '  /odom distance: 8.00 m' in '\n'.join(lines)
+    assert summary['Wheel vs scan-matched distance']['wheel_m'] == 8
+    assert '/odom vs /odom/imu' in summary['Heading drift']
     assert 'Laps' in summary and 'Setup' in summary and 'Heading drift' in summary
     assert report.main([str(tmp_path), '--no-plots'], **kwargs) == 0
     assert capsys.readouterr().out.startswith(lines[0] + '\n')
+
+
+def test_scans_are_usable_without_drive(tmp_path):
+    _metadata(tmp_path, ['/scan'])
+    grid = np.zeros((40, 40), dtype=np.int8)
+    grid[:, 20] = 100
+    pose = np.array([[0, 0, .5, 0], [2, 0, .5, 0]])
+    slam = {'pose': pose, 'map': (.05, 0., 0., grid)}
+    scans = {'scan_t': np.array([1.]), 'scan': np.array([[.76]]),
+             'angle_min': 0., 'angle_increment': 0., 'range_min': .05, 'range_max': 10.}
+    run = report.load_inputs(tmp_path, load_slam=lambda p: slam,
+                             read_inputs=lambda bag, topics: scans)
+    lines, summary = report.build_report(run)
+    # oracle: .26 m laser offset + .76 m range hits wall at x=1.0 m.
+    assert summary['Map consistency']['overall'] == 1.
+    assert '  overall: 100.0%' in lines
+
+
+def test_input_reader_errors_propagate(tmp_path):
+    _metadata(tmp_path, ['/scan'])
     def broken(path):
         raise RuntimeError('broken bag')
+    def broken_reader(bag, topics):
+        raise RuntimeError('broken bag')
+    # oracle: only missing topics are optional; reader errors are not.
     with pytest.raises(RuntimeError, match='broken bag'):
-        report.load_inputs(tmp_path, load_slam=no_slam, load_scans=broken,
-                           load_rosout=lambda p: [])
-    def malformed(path):
-        raise ValueError('scans have varying beam counts')
-    with pytest.raises(ValueError, match='varying beam counts'):
-        report.load_inputs(tmp_path, load_slam=no_slam, load_scans=malformed,
-                           load_rosout=lambda p: [])
+        report.load_inputs(tmp_path, load_slam=lambda p: {}, read_inputs=broken_reader)
+    with pytest.raises(RuntimeError, match='broken bag'):
+        report.load_inputs(tmp_path, load_slam=broken, read_inputs=broken_reader)
+    def malformed_reader(bag, topics):
+        raise ValueError('malformed scan')
+    with pytest.raises(ValueError, match='malformed scan'):
+        report.load_inputs(tmp_path, load_slam=lambda p: {}, read_inputs=malformed_reader)
+
+
+def test_cached_inputs_reused_and_refresh_reads_again(tmp_path):
+    _metadata(tmp_path, ['/odom', '/rosout'])
+    rows = np.array([[0., 0., 0., 0.], [1., 3., 4., 0.]])
+    records = [{'t': 1., 'name': 'slam_toolbox', 'msg': 'Message Filter dropping message'}]
+    def reader(bag, topics):
+        assert topics == {'/odom', '/rosout'}  # oracle: bag metadata topic list
+        return {'odom': rows, 'rosout': records}
+    first = report.load_inputs(tmp_path, load_slam=lambda p: {}, read_inputs=reader)
+    def unavailable(bag, topics):
+        raise RuntimeError('reader invoked')
+    second = report.load_inputs(tmp_path, load_slam=lambda p: {}, read_inputs=unavailable)
+    # oracle: same persisted topic inputs yield the same 3-4-5 path and drop.
+    assert report.build_report(first)[1]['Setup']['distance_m'] == 5
+    assert report.build_report(second)[1]['Setup']['distance_m'] == 5
+    assert second['drops'] == [1.]
+    assert second['missing_topics']['/odom/imu'] == 'topic /odom/imu not recorded'
+    with pytest.raises(RuntimeError, match='reader invoked'):
+        report.load_inputs(tmp_path, load_slam=lambda p: {}, read_inputs=unavailable, refresh=True)
 
 
 def test_scan_drops_only_count_slam_toolbox_logger(tmp_path):

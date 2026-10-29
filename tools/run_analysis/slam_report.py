@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'race_diagnostics'))
 from race_diagnostics.run_events import parse_lap_closed, parse_lap_quality, parse_lap_unjudged
-from run_analysis import slam_bag, slam_metrics, runlog
+from run_analysis import slam_bag, slam_metrics, slam_replay
 
 
 def heading_drift(a, b, window_s=1.0):
@@ -132,56 +132,83 @@ def path_length(rows):
     return float(np.hypot(np.diff(rows[:, 1]), np.diff(rows[:, 2])).sum()) if len(rows) else 0.0
 
 
-def _read_rosout(run_dir, refresh=False):
-    """Cache receive times and text separately from slam_bag's cache."""
-    cache = Path(run_dir) / 'analysis' / 'rosout.jsonl'
+INPUT_TOPICS = ('/scan', '/odom', '/odom/imu', '/rosout')
+
+
+def _read_inputs(bag, topics):
+    """Read present report topics in one pass; timestamps are bag receive times."""
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from rosidl_runtime_py.utilities import get_message
+
+    bag = Path(bag)
+    wanted = [topic for topic in INPUT_TOPICS if topic in topics]
+    if not wanted:
+        return {}
+    reader = rosbag2_py.SequentialReader()
+    reader.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id='mcap' if list(bag.glob('*.mcap')) else 'sqlite3'),
+                rosbag2_py.ConverterOptions('cdr', 'cdr'))
+    types = {item.name: item.type for item in reader.get_all_topics_and_types()}
+    message_types = {topic: get_message(types[topic]) for topic in wanted}
+    reader.set_filter(rosbag2_py.StorageFilter(topics=wanted))
+    rows = {'/odom': [], '/odom/imu': []}
+    scans, scan_t, speeds, records = [], [], [], []
+    meta = None
+    while reader.has_next():
+        topic, raw, stamp = reader.read_next()
+        msg = deserialize_message(raw, message_types[topic])
+        t = stamp * 1e-9
+        if topic == '/scan':
+            scan_t.append(t)
+            scans.append(np.asarray(msg.ranges, dtype=np.float32))
+            meta = (msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max)
+        elif topic == '/rosout':
+            records.append({'t': t, 'name': msg.name, 'msg': msg.msg})
+        else:
+            pose = msg.pose.pose
+            rows[topic].append((t, pose.position.x, pose.position.y, slam_bag._yaw(pose.orientation)))
+            if topic == '/odom':
+                speeds.append((t, msg.twist.twist.linear.x))
+    result = {}
+    if '/scan' in topics:
+        result['scan_t'] = np.asarray(scan_t)
+        result['scan'] = np.stack(scans) if scans else np.empty((0, 0), dtype=np.float32)
+        if meta is not None:
+            result.update(zip(('angle_min', 'angle_increment', 'range_min', 'range_max'), meta))
+    for topic, key in (('/odom', 'odom'), ('/odom/imu', 'odom_imu')):
+        if topic in topics:
+            result[key] = np.asarray(rows[topic], dtype=float).reshape(-1, 4)
+    if '/odom' in topics:
+        result['wheel_speed'] = np.asarray(speeds, dtype=float).reshape(-1, 2)
+    if '/rosout' in topics:
+        result['rosout'] = records
+    return result
+
+
+def _load_recorded_inputs(path, topics, read_inputs, refresh):
+    """Cache the independent bag inputs, invalidating on a topic-list change."""
+    cache = path / 'analysis' / 'slam_report_inputs.npz'
+    relevant = sorted(set(INPUT_TOPICS) & topics)
     if cache.exists() and not refresh:
-        return [json.loads(line) for line in cache.read_text().splitlines() if line.strip()]
-    import rosbag2_py
-    from rclpy.serialization import deserialize_message
-    from rosidl_runtime_py.utilities import get_message
-
-    bag = Path(run_dir) / 'bag'
-    reader = rosbag2_py.SequentialReader()
-    reader.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id='mcap' if list(bag.glob('*.mcap')) else 'sqlite3'),
-                rosbag2_py.ConverterOptions('cdr', 'cdr'))
-    types = {item.name: item.type for item in reader.get_all_topics_and_types()}
-    records = []
-    if '/rosout' in types:
-        reader.set_filter(rosbag2_py.StorageFilter(topics=['/rosout']))
-        message_type = get_message(types['/rosout'])
-        while reader.has_next():
-            _, raw, stamp = reader.read_next()
-            msg = deserialize_message(raw, message_type)
-            records.append({'t': stamp * 1e-9, 'name': msg.name, 'msg': msg.msg})
+        with np.load(cache, allow_pickle=False) as data:
+            if list(data['topics']) == relevant:
+                result = {key: data[key] for key in data.files if key not in ('topics', 'rosout_json')}
+                if 'rosout_json' in data:
+                    result['rosout'] = json.loads(str(data['rosout_json']))
+                return result
+    result = read_inputs(path / 'bag', set(relevant))
+    arrays = {key: value for key, value in result.items() if key != 'rosout'}
+    if 'rosout' in result:
+        arrays['rosout_json'] = np.array(json.dumps(result['rosout']))
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(''.join(json.dumps(record) + '\n' for record in records))
-    return records
+    partial = cache.with_name('slam_report_inputs.partial.npz')
+    np.savez_compressed(partial, topics=np.array(relevant, dtype=str), **arrays)
+    partial.replace(cache)
+    return result
 
 
-def _read_odom_imu(run_dir):
-    """Recover gyro odometry even when slam_bag cannot return its arrays."""
-    import rosbag2_py
-    from rclpy.serialization import deserialize_message
-    from rosidl_runtime_py.utilities import get_message
-
-    bag = Path(run_dir) / 'bag'
-    reader = rosbag2_py.SequentialReader()
-    reader.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id='mcap' if list(bag.glob('*.mcap')) else 'sqlite3'),
-                rosbag2_py.ConverterOptions('cdr', 'cdr'))
-    types = {item.name: item.type for item in reader.get_all_topics_and_types()}
-    rows = []
-    if '/odom/imu' in types:
-        reader.set_filter(rosbag2_py.StorageFilter(topics=['/odom/imu']))
-        message_type = get_message(types['/odom/imu'])
-        while reader.has_next():
-            _, raw, stamp = reader.read_next()
-            pose = deserialize_message(raw, message_type).pose.pose
-            rows.append((stamp * 1e-9, pose.position.x, pose.position.y, slam_bag._yaw(pose.orientation)))
-    return np.asarray(rows, dtype=float).reshape(-1, 4)
-
-
-def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_rosout=None):
+def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_rosout=None,
+                read_inputs=None, refresh=False):
     """Load recorded inputs, preserving partial runs when topics are absent."""
     import yaml
 
@@ -193,23 +220,22 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
         if 'SLAM did not map this run' not in str(exc):
             raise
         run.update(slam=None, no_slam_reason=str(exc))
-        if (path / 'bag').is_dir():
-            run['odom_imu'] = _read_odom_imu(path)
-    try:
-        scans = (load_scans or runlog.load_run)(path)
-    except ValueError as exc:
-        if 'bag needs /scan and /drive, has ' not in str(exc) and not str(exc).endswith(': no /scan messages'):
-            raise
-        scans = None
-        run['no_scans_reason'] = str(exc)
-    if scans is not None:
-        for key in ('scan_t', 'scan', 'angle_min', 'angle_increment', 'range_min', 'range_max'):
-            run[key] = scans[key] if isinstance(scans, dict) else getattr(scans, key)
-        odom = scans.get('odom', []) if isinstance(scans, dict) else scans.odom
-        odom = np.asarray(odom)
-        if odom.size and odom.shape[1] == 7:
-            run['wheel_speed'] = odom[:, [0, 1]]
-            run['odom'] = np.column_stack((odom[:, 0], odom[:, 3:5], 2*np.arctan2(odom[:, 5], odom[:, 6])))
+    if load_scans is not None or load_rosout is not None:
+        # Compatibility for callers supplying the original synthetic inputs.
+        scans = load_scans(path) if load_scans else None
+        if scans is not None:
+            for key in ('scan_t', 'scan', 'angle_min', 'angle_increment', 'range_min', 'range_max'):
+                run[key] = scans[key] if isinstance(scans, dict) else getattr(scans, key)
+        rosout = load_rosout(path) if load_rosout else []
+    else:
+        topics = slam_replay.bag_topics(path / 'bag')
+        missing = {topic: f'topic {topic} not recorded' for topic in INPUT_TOPICS if topic not in topics}
+        run['missing_topics'] = missing
+        if '/scan' in missing:
+            run['no_scans_reason'] = missing['/scan']
+        recorded = _load_recorded_inputs(path, topics, read_inputs or _read_inputs, refresh)
+        run.update({key: value for key, value in recorded.items() if key != 'rosout'})
+        rosout = recorded.get('rosout', [])
     files = list((path / 'metadata' / 'params').glob('*slam_toolbox*.yaml'))
     run['params'] = {}
     if files:
@@ -223,7 +249,6 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
     run['proc_records'] = [json.loads(line) for line in proc.read_text().splitlines() if line.strip()] if proc.exists() else []
     log = Path(log_path).expanduser() if log_path is not None else path / 'launch.log'
     run['log_text'] = log.read_text(errors='replace') if log.exists() else None
-    rosout = (load_rosout or _read_rosout)(path)
     laps, quality, drops, unjudged, profile_laps = {}, {}, [], set(), set()
     # _write_profile logs this only after writing the CSV: auto_map_race_node.py:1818-1822.
     profile_line = re.compile(r'Generated \d+-point racing profile at .+ \([\d.]+-[\d.]+m/s\)\.')
@@ -290,8 +315,8 @@ def build_report(run):
     if no_slam:
         lines.append('No SLAM in this run: ' + run.get('no_slam_reason', 'no /pose or map-to-odometry transform'))
     summary = {}
-    odom = _rows4(slam.get('odom', run.get('odom')))
-    oi = _rows4(slam.get('odom_imu', run.get('odom_imu')))
+    odom = _rows4(run.get('odom', slam.get('odom')))
+    oi = _rows4(run.get('odom_imu', slam.get('odom_imu')))
     frame = run.get('params', {}).get('odom_frame')
     tf_frame = slam.get('odom_frame')
     speeds = np.asarray(run.get('wheel_speed', []), dtype=float).reshape(-1, 2)
@@ -390,7 +415,11 @@ def build_report(run):
     lines.append('Wheel vs scan-matched distance:')
     distance = {}
     if no_slam:
-        lines.append('  no SLAM')
+        if len(odom):
+            distance['wheel_m'] = path_length(odom)
+            lines.append(f"  wheel {distance['wheel_m']:.2f} m; no SLAM")
+        else:
+            lines.append('  no SLAM')
     elif len(odom) < 2 or len(pose) < 2:
         lines.append('  missing /odom or SLAM pose')
     else:
@@ -427,7 +456,7 @@ def _plots(runs, out):
         plotted = False
         for label, run in runs:
             slam = run.get('slam') or {}
-            odom = _rows4(slam.get('odom', run.get('odom')))
+            odom = _rows4(run.get('odom', slam.get('odom')))
             pose = slam_pose(slam)
             if kind == 'path':
                 for name, rows in (('wheel', odom), ('SLAM', pose)):
@@ -437,7 +466,7 @@ def _plots(runs, out):
                 ax.set(xlabel='x (m)', ylabel='y (m)', title='Recorded paths (each in its own frame)')
                 ax.axis('equal')
             elif kind == 'heading':
-                for name, rows in (('/odom', odom), ('/odom/imu', _rows4(slam.get('odom_imu', run.get('odom_imu')))), ('SLAM', pose)):
+                for name, rows in (('/odom', odom), ('/odom/imu', _rows4(run.get('odom_imu', slam.get('odom_imu')))), ('SLAM', pose)):
                     if len(rows):
                         yaw = np.unwrap(rows[:, 3])
                         ax.plot(rows[:, 0] - rows[0, 0], np.degrees(yaw-yaw[0]), label=f'{label} {name}')
@@ -462,7 +491,7 @@ def _plots(runs, out):
         plt.close(fig)
 
 
-def main(argv=None, load_slam=None, load_scans=None, load_rosout=None):
+def main(argv=None, load_slam=None, load_scans=None, load_rosout=None, read_inputs=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run', nargs='?')
     parser.add_argument('--log')
@@ -476,9 +505,8 @@ def main(argv=None, load_slam=None, load_scans=None, load_rosout=None):
 
     def load(path):
         sl = load_slam or (lambda p: slam_bag.load(p, refresh=args.refresh))
-        sc = load_scans or (lambda p: runlog.load_run(p, refresh=args.refresh))
-        ro = load_rosout or (lambda p: _read_rosout(p, refresh=args.refresh))
-        return load_inputs(path, args.log, sl, sc, ro)
+        return load_inputs(path, args.log, sl, load_scans, load_rosout,
+                           read_inputs=read_inputs, refresh=args.refresh)
 
     if args.compare:
         paths = [Path(p).expanduser().resolve() for p in args.compare]
