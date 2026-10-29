@@ -428,12 +428,21 @@ output directory. It does not write into either run.
    transform, the largest movement and turn, and jumps over 0.3 m and 1.5 m.
    A Ceres solve in the launch log is used as a proxy for a loop closure.
 4. **Laps** lists each closed lap's distance, closest approach to its start,
-   corrections absorbed and any quality failure. A missing quality message is
-   reported as unknown, not as a pass.
+   corrections absorbed and quality verdict. Laps before the last requested
+   lap are not judged. A judged lap is marked failed when the supervisor logs
+   a failure; it may be accepted anyway at the maximum lap count, which the
+   report also says. A judged lap with no failure is marked passed only when a
+   later message confirms that its racing profile was written. Without that
+   evidence, its verdict is unknown.
 5. **Map consistency** is the percentage of finite LiDAR endpoints that land
    on or within one grid cell of an occupied wall in the final map. A higher
    percentage means more of what the LiDAR saw lines up with those walls. It
-   is shown for the whole run and for each lap window.
+   is shown for the whole run and for each lap window. Each lap's scans are
+   placed using the poses SLAM published at that time, then compared with the
+   final map. Later loop closures can move the map, so early laps may score
+   lower even when the final map is not wrong. In the 19:49 run, laps 1 and 2
+   scored 19–27%, while lap 4 scored 55%. Compare corresponding laps between
+   runs rather than treating an early-to-late difference as a map fault.
 6. **Scan drops** counts dropped scan messages recorded on `/rosout`. The
    10-second bins also show slam_toolbox CPU use when a system log exists;
    100% means one full CPU core. A missing system log leaves CPU unknown.
