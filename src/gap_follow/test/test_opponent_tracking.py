@@ -1113,6 +1113,10 @@ def test_follow_memory_of_zero_disables_the_hold():
     assert memory.update(math.inf, 0.025) == (math.inf, False)
     assert memory.update(0.9, 0.05) == (0.9, False)
     assert memory.update(math.inf, 0.075) == (math.inf, False)
+    # oracle: the same spec -- NaN comes back as it is, not turned into no cap.
+    # Removing the zero guard turns it into inf; this line catches that.
+    cap, held = memory.update(math.nan, 0.1)
+    assert math.isnan(cap) and held is False
 
 
 def test_a_new_finite_cap_replaces_the_stored_value_and_restarts_the_hold():
@@ -1253,3 +1257,14 @@ def test_a_bad_scan_interval_forgets_the_held_cap():
     r, v = _scan(_box(1.0, 0.0))
     layer.observe(r, v, ANGLES, 1.0, 0.0, math.nan)
     assert layer.follow_memory.update(math.inf, 0.025) == (math.inf, False)
+
+
+@pytest.mark.parametrize('bad_time', [math.nan, math.inf, -math.inf])
+def test_a_non_finite_time_clears_the_memory_and_passes_the_cap_through(bad_time):
+    # oracle: spec -- a t_s that is not finite clears the memory and returns
+    # (follow_cap, False): the cap given comes back as it is, never held. The
+    # layer's own reset is a separate path, so this is the memory's own branch.
+    memory = ot.FollowCapMemory(1.0)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    assert memory.update(0.9, bad_time) == (0.9, False)
+    assert memory.update(math.inf, 0.025) == (math.inf, False)
