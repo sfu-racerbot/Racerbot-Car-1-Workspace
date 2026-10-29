@@ -97,7 +97,8 @@ def gym_bridge(tmp_path):
 
 def test_gym_circle_geometry(gym_bridge):
     bridge, imu = gym_bridge, noiseless()
-    states, samples = [], []
+    states, samples, previous_rates = [], [], []
+    previous_rate = bridge.agent_state(0).yaw_rate
     for tick in range(200):  # 5 s: settle 3 s, fit the final 2 s
         bridge.step_cars([(0.15, 2.0)])
         state = bridge.agent_state(0)
@@ -107,18 +108,31 @@ def test_gym_circle_geometry(gym_bridge):
         if tick >= 120:
             states.append(state)
             samples.append(sample)
+            previous_rates.append(previous_rate)
+        previous_rate = state.yaw_rate
     xy = np.array([(s.x, s.y) for s in states])
     cx, cy, c = np.linalg.lstsq(np.column_stack((2*xy, np.ones(len(xy)))),
                                np.sum(xy**2, axis=1), rcond=None)[0]
     radius = np.sqrt(c + cx*cx + cy*cy)
-    for state, sample in zip(states, samples):
-        # oracle: fitted position geometry gives r=v/R and a_y=v²/R,
-        # independent of the gym's rate and the simulated IMU implementation.
-        assert sample.bno_gyro[2] == pytest.approx(state.speed/radius, rel=0.02)
-        assert sample.bno_acc[1] == pytest.approx(state.speed**2/radius, rel=0.02)
-        assert sample.bno_acc[0] == pytest.approx(
-            -BNO_X_OFFSET * (state.speed/radius)**2, abs=0.05)  # m/s²
-    print(f'circle R={radius:.6f} m; 200 ticks without body_contact')
+    for state, sample, prev_rate in zip(states, samples, previous_rates):
+        # oracle: controller ruling -- instantaneous wiring uses the true
+        # state even though the gym rate oscillates around geometric v/R.
+        assert sample.bno_gyro[2] == pytest.approx(state.yaw_rate, abs=1e-12)  # rad/s
+        assert sample.bno_acc[1] == pytest.approx(
+            state.speed * state.yaw_rate
+            + BNO_X_OFFSET * (state.yaw_rate-prev_rate)/bridge.config.control_dt,
+            abs=1e-9)  # m/s²
+    speed = np.mean([s.speed for s in states])
+    rates = np.array([s.yaw_rate for s in states])
+    # oracle: fitted position geometry gives mean r=v/R and a_y=v²/R.
+    # Controller ruling permits window means to average the plant oscillation.
+    assert np.mean([s.bno_gyro[2] for s in samples]) == pytest.approx(speed/radius, rel=0.02)
+    assert np.mean([s.bno_acc[1] for s in samples]) == pytest.approx(speed**2/radius, rel=0.02)
+    assert np.mean([s.bno_acc[0] for s in samples]) == pytest.approx(
+        -BNO_X_OFFSET * np.mean(rates**2), abs=0.05)  # m/s²
+    print(f'circle R={radius:.9f} m; 200 ticks without body_contact; '
+          f'true rate mean={rates.mean():.9f}, peak-to-peak={np.ptp(rates):.9f}, '
+          f'std={rates.std():.9f}, v/R={speed/radius:.9f} rad/s')
 
 
 def test_gym_speed_ramp(gym_bridge):
