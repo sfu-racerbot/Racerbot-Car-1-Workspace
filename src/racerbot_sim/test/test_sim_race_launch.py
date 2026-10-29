@@ -72,6 +72,8 @@ import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Bool, String
+from ackermann_msgs.msg import AckermannDriveStamped
+from sensor_msgs.msg import Joy
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -120,14 +122,33 @@ def _tail(path, lines=60):
 
 
 @contextlib.contextmanager
-def _race_launch(tmp_path, *arguments):
+def _race_launch(tmp_path, *arguments, car2_silence_after_sec=None):
     """Start sim_race_launch.py, yield its process, and stop its group on exit."""
     _isolated_domain()
     _refuse_strays()
+    launch_command = ['ros2', 'launch', 'racerbot_sim', 'sim_race_launch.py']
+    if car2_silence_after_sec is not None:
+        # Scoped test-only parameter injection exercises the real launch and
+        # sim_joy_node without adding a production launch control interface.
+        params = tmp_path / 'car2_joy.yaml'
+        params.write_text(yaml.safe_dump({'/car2/sim_joy_node': {'ros__parameters': {
+            'silence_after_sec': float(car2_silence_after_sec)}}}), encoding='utf-8')
+        wrapper = tmp_path / 'silent_joy.launch.py'
+        wrapper.write_text(
+            'from launch import LaunchDescription\n'
+            'from launch.actions import IncludeLaunchDescription\n'
+            'from launch.launch_description_sources import PythonLaunchDescriptionSource\n'
+            'from launch_ros.actions import SetParametersFromFile\n'
+            'def generate_launch_description():\n'
+            f'    return LaunchDescription([SetParametersFromFile({str(params)!r}),\n'
+            '        IncludeLaunchDescription(PythonLaunchDescriptionSource('
+            f'{os.path.join(get_package_share_directory("racerbot_sim"), "launch", "sim_race_launch.py")!r}))])\n',
+            encoding='utf-8')
+        launch_command = ['ros2', 'launch', str(wrapper)]
     log_path = tmp_path / 'launch.log'
     with open(log_path, 'w', encoding='utf-8') as log:
         proc = subprocess.Popen(
-            ['ros2', 'launch', 'racerbot_sim', 'sim_race_launch.py', *arguments,
+            [*launch_command, *arguments,
              'drive_topic_prefix:=/test_only'],
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
@@ -143,11 +164,20 @@ class _Probe(Node):
         super().__init__('race_test_probe')
         self.status = []
         self.brakes = []
+        self.car2_commands = []
+        self.car2_joy = []
         self.create_subscription(String, '/sim/status', self._on_status, STATUS_QOS)
         self.create_subscription(Bool, '/car2/safety/brake', lambda msg: self.brakes.append(msg.data), 10)
+        self.create_subscription(AckermannDriveStamped, '/test_only/car2/drive',
+                                 lambda msg: self.car2_commands.append(
+                                     (time.monotonic(), msg.drive.speed)), 1000)
+        self.create_subscription(Joy, '/car2/joy',
+                                 lambda msg: self.car2_joy.append(time.monotonic()), 1000)
 
     def _on_status(self, message):
-        self.status.append(json.loads(message.data))
+        status = json.loads(message.data)
+        status['_received_at'] = time.monotonic()
+        self.status.append(status)
 
 
 @pytest.fixture
@@ -457,6 +487,50 @@ def test_team_a_car1_deadman_does_not_gate_car2(tmp_path, probe, team_a_packages
     # task context: docs/superpowers/plans/2026-10-27-part-b1-racing.md, Task R7.
     assert max(abs(s['cars'][0]['speed']) for s in statuses) < 0.05
     assert max(s['cars'][1]['speed'] for s in statuses) > 0.5
+
+
+@pytest.mark.parametrize('silence_after', [0.0, 6.0], ids=['never_received', 'stale_after_motion'])
+def test_team_a_missing_joy_denies_published_command_and_motion(
+        tmp_path, probe, team_a_packages, silence_after):
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=3',
+                      'record:=false', 'timeout_s:=12', f'output_dir:={tmp_path}',
+                      car2_silence_after_sec=silence_after) as proc:
+        graph = Graph(probe)
+        assert graph.spin_until(lambda: proc.poll() is not None, 90), _tail(tmp_path / 'launch.log')
+        assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
+    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    assert graph.spin_until(lambda: any(s['steps'] >= race['steps'] for s in probe.status), 5)
+    statuses = [s for s in probe.status if s['steps'] <= race['steps']]
+    # oracle: invariant -- no missing steps may hide a denied car moving.
+    assert race['missed_steps'] == 0
+    assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
+    assert len(statuses) >= 100
+    assert probe.car2_commands
+    # oracle: invariant -- contact stop or early termination cannot supply the denial.
+    assert race['timed_out'] is True
+    assert not any(c['wall'] or c['car'] for c in race['contacts'])
+    # oracle: permissive control -- car 1 holds its own LB and moves independently.
+    assert max(s['cars'][0]['speed'] for s in statuses) > 0.5
+    if silence_after == 0.0:
+        assert probe.car2_joy == []
+        commands = [speed for _, speed in probe.car2_commands]
+        stopped = statuses
+    else:
+        assert probe.car2_joy
+        last_joy = probe.car2_joy[-1]
+        # oracle: the stale path must first have authorised actual motion.
+        before = [s for s in statuses if s['_received_at'] <= last_joy]
+        assert before and max(s['cars'][1]['speed'] for s in before) > 0.5
+        # Team A safety_node's 50 ms watchdog + 150 ms callback/transport
+        # budget. This budget is not a plant-speed tolerance: commands must be zero.
+        commands = [speed for t, speed in probe.car2_commands if t >= last_joy + 0.2]
+        # The plant needs finite braking time after a zero command. Require
+        # at least one continuous second stopped, starting 1 s after Joy ends.
+        stopped = [s for s in statuses if s['_received_at'] >= last_joy + 1.0]
+        assert stopped and stopped[-1]['sim_time_s'] - stopped[0]['sim_time_s'] >= 1.0
+    # oracle: CLAUDE.md LB policy, through disparity_extender + safety_node.
+    assert commands and all(speed == 0.0 for speed in commands)
+    assert stopped and max(abs(s['cars'][1]['speed']) for s in stopped) < 0.05
 
 
 def test_referee_creates_only_the_result_publisher():
