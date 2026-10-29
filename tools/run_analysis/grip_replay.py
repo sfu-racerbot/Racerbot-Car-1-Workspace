@@ -21,7 +21,8 @@ tick, with a finite yaw rate. Odometry is fresh when the latest /odom is
 younger than odom_timeout_sec. Ticks are the /drive receive times, and dt is
 the difference of consecutive tick times. A tick with dt <= 0 or dt > 0.5 s is
 skipped and counted as a restart. The ratio filter and the steering lag start
-afresh. The limit is kept, as gap_follow keeps it across a gap.
+afresh. The limit is kept: gap_follow resets it only when the gyro is untrusted
+or max_lateral_accel is retuned (AdaptiveGrip.follow_base).
 
 "Judged" means the grip ratio was measured on the tick: gap_logic.grip_ratio is
 finite, which needs a quasi-steady steering (SteeringLag), a speed of at least

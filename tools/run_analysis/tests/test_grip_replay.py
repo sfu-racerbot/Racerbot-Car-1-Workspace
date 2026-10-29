@@ -195,36 +195,46 @@ def test_gyro_gap_restarts_limit_at_base_at_first_untrusted_tick():
 
 
 def test_steering_step_not_judged_for_one_lag_window():
-    # oracle: a step to 0.30 rad (a change of 0.1 > max_steering_change 0.05)
-    # at t = 3.0 makes every tick with t <= 3.0 + lag (0.15) unjudged: that
-    # tick's lag window still holds the old steering, so SteeringLag.step
-    # returns NaN (|0.30 - 0.20| > 0.05). At the next tick the window is
-    # wholly in the new steering (|0.30 - 0.30| <= 0.05) and judging resumes.
-    # The limit stays where it is through the window and the car holds the new
-    # turn (ratio 1.0 again), so the run never cuts.
-    ticks = np.arange(0.0, 8.0, DT)
-    steer_fn = lambda t: STEER if t <= 3.0 else 2.0 * STEER
-    gyro_t = np.arange(0.0, 8.0, GYRO_DT)
+    # oracle: the steering steps from STEER (0.20) to 2 * STEER (0.40 rad), a
+    # change of 0.20 above max_steering_change (0.05), at STEP_T = 1.0 s, while
+    # the limit is still climbing (the ceiling is reached at 2.8 s). The tick at
+    # STEP_T still has the old steering. For the next LAG seconds the lagged
+    # steering is interpolated from old to new, so SteeringLag.step is NaN
+    # (|0.40 - lagged| > 0.05) and the tick is not judged. The window is
+    # (STEP_T, STEP_T + LAG], which is LAG / DT = 6 ticks at 40 Hz. Judging
+    # resumes on the next tick, and the limit climbs from the value the step
+    # found: limit = base + rise * (t - 2 * LAG) on the judged ticks that follow,
+    # because the window cost one lag of climb (gap_logic.AdaptiveGrip.update:
+    # rise_per_s * dt per judged tick). A window judged on the current steering
+    # would move the limit, so the step is placed below the ceiling.
+    step_t = 1.0
+    new_steer = 2.0 * STEER
+    steer_at = lambda t: STEER if t <= step_t + 1e-9 else new_steer
+    ticks = np.arange(0.0, 6.0, DT)
+    gyro_t = np.arange(0.0, 6.0, GYRO_DT)
     gyro = np.column_stack(
-        [gyro_t, [_yaw_exact(SPEED, steer_fn(t)) for t in gyro_t]])
+        [gyro_t, [_yaw_exact(SPEED, steer_at(t)) for t in gyro_t]])
     odom = np.column_stack([gyro_t, np.full(len(gyro_t), SPEED)])
-    drive = np.column_stack([ticks, [steer_fn(t) for t in ticks]])
+    drive = np.column_stack([ticks, [steer_at(t) for t in ticks]])
     r = grip_replay.replay(drive, gyro, odom, PARAMS)
     t = r['t']
-    # perfect grip up to the step: limit at the ceiling from CEILING_T on
-    assert r['limit'][int(np.searchsorted(t, CEILING_T, side='left'))] == \
-        pytest.approx(CEILING, abs=1e-6)
-    # unjudged for the whole lag window after the step
-    window = (t > 3.0 + 1e-12) & (t <= 3.0 + LAG + 1e-12)
-    assert np.any(window)
+    k_step = int(np.argmin(np.abs(t - step_t)))
+    assert t[k_step] == pytest.approx(step_t, abs=1e-6)
+    # the window: unjudged, and the limit held where the step found it
+    window = (t > step_t + 1e-9) & (t <= step_t + LAG + 1e-9)
+    assert np.sum(window) == round(LAG / DT)
     assert not np.any(r['judged'][window])
     assert np.all(np.isnan(r['ratio'][window]))
     assert np.all(np.isnan(r['demand'][window]))
-    assert np.all(r['limit'][window] == pytest.approx(CEILING, abs=1e-6))
-    # and judged again immediately after, no cut (the car holds the new turn)
-    after = t > 3.0 + LAG + DT
-    assert np.all(r['judged'][after])
-    assert np.all(np.diff(r['limit'][after]) >= -1e-12)
+    assert np.all(np.abs(r['limit'][window] - r['limit'][k_step]) <= 1e-12)
+    # the held value is the perfect-grip climb up to the step: base + rise * (step - LAG)
+    assert r['limit'][k_step] == pytest.approx(BASE + RISE * (step_t - LAG), abs=1e-6)
+    # judging resumes on the next tick, and the limit climbs from the held value
+    resume = t >= step_t + LAG + DT - 1e-9
+    assert np.all(r['judged'][resume])
+    climbing = resume & (t <= 2.7)            # below the ceiling, reached at 2.8 s
+    assert np.allclose(r['limit'][climbing], BASE + RISE * (t[climbing] - 2 * LAG),
+                       rtol=0, atol=1e-9)
     assert grip_replay.summarize(r, BASE)['cuts'] == 0
 
 
@@ -308,3 +318,102 @@ def test_summarize_bands_and_fractions_closed_form():
     assert n == 1 and med == pytest.approx(0.9, abs=1e-9)
     for band in ('0.3-1.0', '1.5-2.0', '2.0-2.5', '3.0-5.0'):
         assert bands[band][0] == 0
+
+
+@pytest.mark.parametrize('speed, steering, judged_expected', [
+    (0.999, 0.2, False),   # just below 1 m/s
+    (1.0, 0.2, True),      # exactly 1 m/s
+    (4.0, 0.049, False),   # just inside the 0.05 rad centre band
+    (4.0, 0.05, True),     # exactly 0.05 rad
+])
+def test_grip_ratio_speed_and_centre_rules_decide_judging_at_their_edges(
+        speed, steering, judged_expected):
+    # oracle: gap_logic.grip_ratio's rule (its docstring): NaN, so not judged,
+    # for speed < 1.0 m/s or |steering| < 0.05 rad, and judged otherwise. The
+    # base is lowered to 0.5 m/s^2 so the demand gate (0.8 * 0.5 = 0.4 m/s^2)
+    # never blocks: the demands here are 0.56, 0.56, 2.18 and 2.22, so only the
+    # rule under test can decide. The yaw is exact, so a judged ratio is 1.0.
+    base = 0.5
+    params = dict(PARAMS, max_lateral_accel=base)
+    ticks, gyro, odom = _synthetic(
+        5.0, lambda t: steering, lambda t: speed,
+        lambda t: _yaw_exact(speed, steering))
+    r = grip_replay.replay(ticks, gyro, odom, params)
+    after = r['t'] >= LAG + DT - 1e-9        # the steering lag window is full
+    assert np.sum(after) > 0
+    assert np.all(r['judged'][after] == judged_expected)
+    if not judged_expected:
+        assert np.all(r['limit'] == pytest.approx(base, abs=1e-9))
+
+
+def test_judged_tick_below_the_demand_gate_is_measured_but_does_not_move_the_limit():
+    # oracle: closed form. Speed 3.0 m/s and steering 0.06 rad, perfectly
+    # gripping (yaw = speed * tan(steer) / wheelbase), so the ratio is exactly
+    # 1.0 and is measured on every tick after the lag window. The demand is
+    # speed^2 * tan(0.06) / 0.36 = 1.50 m/s^2, below judge_fraction * base =
+    # 0.8 * 2.5 = 2.0, so AdaptiveGrip.update's demand gate holds the limit at
+    # the base. "judged" records the measurement; the gate is not part of it.
+    steer = 0.06
+    ticks, gyro, odom = _synthetic(
+        10.0, lambda t: steer, lambda t: SPEED, lambda t: _yaw_exact(SPEED, steer))
+    r = grip_replay.replay(ticks, gyro, odom, PARAMS)
+    demand = SPEED * SPEED * math.tan(steer) / WHEELBASE
+    assert demand < PARAMS['adaptive_grip_judge_fraction'] * BASE
+    after = r['t'] >= LAG + DT - 1e-9
+    assert np.all(r['judged'][after])
+    assert np.allclose(r['ratio'][after], 1.0, rtol=0, atol=1e-9)
+    assert np.allclose(r['demand'][after], demand, rtol=0, atol=1e-9)
+    assert np.all(r['limit'] == pytest.approx(BASE, abs=1e-9))
+
+
+@pytest.mark.parametrize('gap, restarts', [(0.5, 0), (0.501, 1)])
+def test_a_tick_gap_over_half_a_second_restarts_the_filters_but_keeps_the_limit(gap, restarts):
+    # oracle: the replay's dt rule (the brief: a tick with dt <= 0 or dt > 0.5 s
+    # is skipped and counted, and the filters restart). A 0.25 s grid is exact
+    # in binary, so a 0.5 s gap is exactly 0.5 and is kept. Perfect grip reaches
+    # the ceiling at 2.75 s, before the gap. The restart resets the ratio filter
+    # and the steering lag; the limit is gap_follow's own state and is kept.
+    step = 0.25
+    before = np.arange(0.0, 4.0, step)
+    after = before[-1] + gap + np.arange(0.0, 4.0, step)
+    tick_t = np.concatenate([before, after])
+    ticks = np.column_stack([tick_t, np.full(len(tick_t), STEER)])
+    gyro_t = np.arange(0.0, tick_t[-1] + 0.5, GYRO_DT)
+    gyro = np.column_stack(
+        [gyro_t, np.full(len(gyro_t), _yaw_exact(SPEED, STEER))])
+    odom = np.column_stack([gyro_t, np.full(len(gyro_t), SPEED)])
+    r = grip_replay.replay(ticks, gyro, odom, PARAMS)
+    assert r['restarts'] == restarts
+    assert len(r['t']) == len(tick_t) - 1 - restarts    # the first tick has no dt
+    assert np.all(r['trusted'])
+    pre = np.isclose(r['t'], before[-1])
+    assert np.sum(pre) == 1
+    assert r['limit'][pre][0] == pytest.approx(CEILING, abs=1e-9)
+    assert np.all(r['limit'][r['t'] > before[-1] + 1e-9] == pytest.approx(CEILING, abs=1e-9))
+
+
+def test_summarize_band_edges_are_lower_inclusive_and_top_exclusive():
+    # oracle: tools/run_analysis/actuation.py bins the run report's grip table
+    # with (a_cmd >= lo) & (a_cmd < hi). So a demand of exactly 1.0 is in
+    # 1.0-1.5, exactly 3.0 is in 3.0-5.0, and exactly 5.0 is in no band.
+    demands = np.array([0.3, 1.0, 1.5, 2.5, 3.0, 5.0])
+    ratios = np.array([0.5, 0.6, 0.7, 0.8, 0.9, 1.1])
+    n = len(demands)
+    result = {
+        't': np.arange(n, dtype=float),
+        'limit': np.full(n, BASE),
+        'ratio': ratios,
+        'judged': np.ones(n, dtype=bool),
+        'trusted': np.ones(n, dtype=bool),
+        'speed': np.ones(n),
+        'demand': demands,
+        'restarts': 0,
+    }
+    bands = grip_replay.summarize(result, BASE)['ratio_by_demand_band']
+    expected = {'0.3-1.0': (1, 0.5), '1.0-1.5': (1, 0.6), '1.5-2.0': (1, 0.7),
+                '2.0-2.5': (0, None), '2.5-3.0': (1, 0.8), '3.0-5.0': (1, 0.9)}
+    for name, (count, median) in expected.items():
+        assert bands[name][0] == count
+        if median is not None:
+            assert bands[name][1] == pytest.approx(median, abs=1e-12)
+    assert sum(count for count, _ in bands.values()) == 5    # the 5.0 demand is in no band
