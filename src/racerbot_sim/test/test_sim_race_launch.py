@@ -32,6 +32,13 @@ oracle before the fix; depth 10 and BEST_EFFORT each failed the status QoS test;
 writing missed_steps=1 failed all three live race JSON checks; dropping probe
 step 10 failed deadman completeness despite zero referee loss. Restoring broad
 stray-process patterns failed the quoted-brief regression. All breaks restored.
+
+R7 mutation audit: removing the brake remap or namespace push failed
+test_team_a_graph_and_short_race; removing the joy remap failed
+test_team_a_deadman_isolated[False] (car 2 reached 2.9999 m/s). Wiring the
+car 2 hold argument to car 1 failed the same test (car 1 stayed at 0 m/s).
+With the namespace removed the explicit drive remap still targets /car2/drive;
+the graph check detects the nodes' incorrect root namespace. All breaks restored.
 """
 
 import contextlib
