@@ -1080,3 +1080,176 @@ def test_rectangle_undefined_heading_uses_line_of_sight():
     # oracle: line-of-sight rear face d, regardless of the low-speed vector.
     assert out[0] == pytest.approx(2.0 - p.passing_margin, abs=1e-12)
     assert out[1] == 10.0  # oracle: beyond rear-view width, inside crossing length
+
+
+# --- FollowCapMemory: the follow cap held for a moment after its car is lost ---
+#
+# Spec: the FollowCapMemory docstring in opponent_tracking.py, and the user's
+# decision of 2026-10-28 (option 1): awareness on, with opponent_follow_memory_sec
+# 1.0 s. Each oracle is restated in its test: an inclusive hold of memory_sec
+# measured from the last stored finite cap; the clock rule of
+# OpponentAwareness.observe, 0 < dt <= 0.5 s; and speed-only, so a held cap is
+# never above the stored one. FollowCapMemory is reached through ot.* inside each
+# test body, so the module still imports before the class exists.
+
+@pytest.mark.parametrize('memory_sec, dt', [(1.0, 0.025), (1.0, 0.125), (0.5, 0.025)])
+def test_follow_memory_holds_inclusive_then_releases_one_tick_past(memory_sec, dt):
+    # oracle: spec -- an infinite cap is held while t - t_stored <= memory_sec.
+    # Times are k * dt (a product, as the mirror computes them). dt 0.125 is
+    # binary-exact; dt 0.025 is the real 40 Hz scan interval.
+    memory = ot.FollowCapMemory(memory_sec)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    last_hold = round(memory_sec / dt)
+    for k in range(1, last_hold + 1):
+        assert memory.update(math.inf, k * dt) == (0.4, True), k
+    assert memory.update(math.inf, (last_hold + 1) * dt) == (math.inf, False)
+
+
+def test_follow_memory_of_zero_disables_the_hold():
+    # oracle: spec -- memory_sec == 0 always returns (follow_cap, False).
+    memory = ot.FollowCapMemory(0.0)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    assert memory.update(math.inf, 0.0) == (math.inf, False)
+    assert memory.update(math.inf, 0.025) == (math.inf, False)
+    assert memory.update(0.9, 0.05) == (0.9, False)
+    assert memory.update(math.inf, 0.075) == (math.inf, False)
+
+
+def test_a_new_finite_cap_replaces_the_stored_value_and_restarts_the_hold():
+    # oracle: spec -- the newest finite cap is the one held, and its hold runs
+    # from its own stored time (0.9 s), not from the first cap (0.0 s).
+    memory = ot.FollowCapMemory(1.0)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    for k in range(1, 36):                       # 0.025 .. 0.875 s: the old cap
+        assert memory.update(math.inf, k * 0.025) == (0.4, True), k
+    assert memory.update(0.9, 36 * 0.025) == (0.9, False)    # t = 0.9 s
+    for k in range(37, 77):                      # to 1.9 s: 1.0 s after the new cap
+        assert memory.update(math.inf, k * 0.025) == (0.9, True), k
+    # From t=0 the hold would have ended at 1.0 s, so this is the restart.
+    assert memory.update(math.inf, 77 * 0.025) == (math.inf, False)
+
+
+@pytest.mark.parametrize('second_time', [0.5, 0.45])
+def test_a_repeated_or_backwards_clock_clears_the_hold(second_time):
+    # oracle: spec -- a non-monotonic t_s clears the memory. The rule is the one
+    # OpponentAwareness.observe uses, 0 < dt <= 0.5 s, so a repeated stamp (dt 0,
+    # second_time 0.5) clears it too; 0.45 is a step backwards.
+    memory = ot.FollowCapMemory(1.0)
+    assert memory.update(0.4, 0.5) == (0.4, False)
+    assert memory.update(math.inf, second_time) == (math.inf, False)
+    # Nothing is stored any more, so the clock moving on does not bring it back.
+    assert memory.update(math.inf, 0.525) == (math.inf, False)
+
+
+@pytest.mark.parametrize('gap, held', [(0.5, True), (0.5 + 2.0 ** -20, False)])
+def test_a_gap_over_half_a_second_clears_the_hold_and_exactly_half_does_not(gap, held):
+    # Binary-exact times (0.25 and 0.75) make the boundary exact. The hold would
+    # still be inside memory_sec here (0.75 + 2**-20 < 1.0 s), so only the clock
+    # rule can release it.
+    memory = ot.FollowCapMemory(1.0)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    assert memory.update(math.inf, 0.25) == (0.4, True)
+    # oracle: observe's staleness rule, 0 < dt <= 0.5 s, inclusive at exactly 0.5.
+    expected = (0.4, True) if held else (math.inf, False)
+    assert memory.update(math.inf, 0.25 + gap) == expected
+
+
+def test_a_nan_cap_reads_as_no_cap_and_clears_the_hold():
+    # oracle: spec -- NaN is no cap: clear, and return (inf, False).
+    memory = ot.FollowCapMemory(1.0)
+    assert memory.update(0.4, 0.0) == (0.4, False)
+    assert memory.update(math.nan, 0.025) == (math.inf, False)
+    assert memory.update(math.inf, 0.05) == (math.inf, False)
+
+
+def test_the_held_cap_never_exceeds_the_last_stored_finite_cap():
+    # oracle: invariant over a fixed-seed random run. Whenever a cap is held it
+    # is the last finite cap stored, and never higher. The expected answer for
+    # every call comes from a reference model written here from the spec, not
+    # from the implementation: a finite cap is stored with its time; NaN and a
+    # stale or backwards clock clear the store; an infinite cap is held while
+    # t - t_stored <= 1.0 s (inclusive).
+    rng = np.random.default_rng(20261028)
+    memory = ot.FollowCapMemory(1.0)
+    stored = None                 # (cap, time) as the spec defines it
+    k = 0                         # tick index, t = k * 0.025 (no accumulated roundoff)
+    holds = stale = nans = 0
+    for _ in range(4000):
+        u = rng.random()
+        step = 24 if u < 0.03 else (-1 if u < 0.05 else 1)   # 0.6 s gap, backwards, normal
+        if step != 1:
+            stored = None
+            stale += 1
+        k += step
+        t = k * 0.025
+        u = rng.random()
+        if u < 0.02:
+            cap = math.nan
+        elif u < 0.45:
+            cap = float(rng.uniform(0.0, 3.0))
+        else:
+            cap = math.inf
+        if math.isnan(cap):
+            expected = (math.inf, False)
+            stored = None
+            nans += 1
+        elif math.isfinite(cap):
+            expected = (cap, False)
+            stored = (cap, t)
+        elif stored is not None and t - stored[1] <= 1.0 + 1e-12:
+            expected = (stored[0], True)
+            holds += 1
+        else:
+            expected = (math.inf, False)
+        got = memory.update(cap, t)
+        assert got == expected, (k, cap, got, expected)
+        if got[1]:
+            # oracle: invariant -- a held cap is finite and never above the stored one.
+            assert math.isfinite(got[0]) and got[0] <= stored[0], (k, got, stored)
+    # The run must exercise every branch, or the invariant proves little.
+    assert holds >= 100 and stale >= 50 and nans >= 20, (holds, stale, nans)
+
+
+@pytest.mark.parametrize('value', [-0.1, -1e-9, math.nan, math.inf])
+def test_follow_memory_must_be_finite_and_not_negative(value):
+    # oracle: spec -- validate() requires finite and >= 0; -1e-9 is one step past 0.
+    with pytest.raises(ValueError, match='opponent_follow_memory_sec must be >= 0'):
+        ot.OpponentParams(follow_memory_sec=value).validate()
+
+
+def test_follow_memory_defaults_to_one_second_and_zero_is_accepted():
+    # oracle: spec (Interfaces) -- default 1.0 s; 0.0 is the off switch and validates.
+    assert ot.OpponentParams().follow_memory_sec == 1.0
+    ot.OpponentParams(follow_memory_sec=0.0).validate()
+
+
+def _layer():
+    return ot.OpponentAwareness(ot.OpponentParams(), WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+
+
+@pytest.mark.parametrize('memory_sec, expected', [(0.0, (math.inf, False)),
+                                                  (1.0, (0.4, True))])
+def test_the_layer_passes_its_memory_parameter_to_the_memory(memory_sec, expected):
+    # oracle: spec -- follow_memory_sec is the memory's hold; 0 holds nothing.
+    layer = ot.OpponentAwareness(ot.OpponentParams(follow_memory_sec=memory_sec),
+                                 WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+    layer.follow_memory.update(0.4, 0.0)
+    assert layer.follow_memory.update(math.inf, 0.025) == expected
+
+
+def test_resetting_the_layer_forgets_the_held_cap():
+    # oracle: spec -- the memory is reset wherever the node resets its opponent layer.
+    layer = _layer()
+    layer.follow_memory.update(0.4, 0.0)
+    layer.reset()
+    assert layer.follow_memory.update(math.inf, 0.025) == (math.inf, False)
+
+
+def test_a_bad_scan_interval_forgets_the_held_cap():
+    # oracle: the same reset path as test_layer_bad_dt_resets_history. A dt that is
+    # not positive makes the layer start over, and the memory starts over with it.
+    layer = _layer()
+    layer.follow_memory.update(0.4, 0.0)
+    r, v = _scan(_box(1.0, 0.0))
+    layer.observe(r, v, ANGLES, 1.0, 0.0, math.nan)
+    assert layer.follow_memory.update(math.inf, 0.025) == (math.inf, False)

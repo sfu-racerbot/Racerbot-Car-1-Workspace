@@ -506,3 +506,69 @@ def test_mirror_matches_the_node_with_adaptive_grip_on():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+def test_mirror_matches_the_node_through_a_drop_and_hold():
+    """The same comparison with awareness on and the followed car leaving the
+    scan after it was confirmed. The node holds its follow cap for
+    opponent_follow_memory_sec (opponent_tracking.FollowCapMemory), and the
+    mirror must hold it on the same ticks. Each controller keeps its own state."""
+    from test_opponent_awareness_node import _make
+    gap = 0.9
+    node, published = _make('-p', 'enable_opponent_awareness:=true')
+    try:
+        params = gap_mirror.node_params()
+        params.update(enable_opponent_awareness=True, command_slew_max_dt=DT)
+        mirror = gap_mirror.GapController(params, _Lidar(_raycast([])))
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, 1]
+        speed = 1.0
+        node.steering_basis = mirror.steering_basis = 0.0
+        node.last_commanded_speed = mirror.last_commanded_speed = speed
+        pairs = []
+        for step in range(100):
+            segments = _corridor(2.0, 2.0)
+            if step < 40:
+                segments = segments + _box_ahead(gap + 0.47 - 0.26)
+            scan = _raycast(segments)
+            ns = round((100.0 + step * DT) * 1e9)
+            scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+            node.joy_callback(joy)
+            odom = Odometry()
+            odom.twist.twist.linear.x = speed
+            node.odom_callback(odom)
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            # The scene is drawn for a car that does not turn: keep the rack (and so
+            # both dead-reckoned poses) straight on both sides, as the awareness
+            # parity test above does. Otherwise the parked car drifts sideways.
+            node.steering_basis = mirror.steering_basis = 0.0
+            node.scan_callback(scan)
+            steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
+            drive = published[-1].drive
+            assert node.opponent_mode == mirror.opponent_mode, f'tick {step}: mode'
+            assert drive.speed == pytest.approx(expected, abs=TOLERANCE), f'tick {step}: speed'
+            assert drive.steering_angle == pytest.approx(
+                steering, abs=TOLERANCE), f'tick {step}: steering'
+            pairs.append((mirror.opponent_mode, mirror.binding_cap))
+        # oracle: the hold ran for ~40 ticks after the car was lost, and the held
+        # cap was the binding ceiling on them, so the parity above is not vacuous.
+        held = [binding for mode, binding in pairs if mode == 'follow_memory']
+        assert len(held) >= 30, pairs
+        assert sum(binding == 'follow' for binding in held) >= 20, pairs
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_an_old_yaml_without_the_memory_replays_with_it_off(tmp_path):
+    # oracle: spec -- gap_mirror.LEGACY_VALUES: a parameter that did not exist yet
+    # reads as the value that reproduces the behaviour from before it existed. The
+    # memory did not exist before 2026-10-28, and 0 is no hold.
+    lines = open(PACKAGED_CONFIG).read().splitlines()
+    kept = [ln for ln in lines if not ln.lstrip().startswith('opponent_follow_memory_sec:')]
+    assert len(kept) == len(lines) - 1
+    old = tmp_path / 'gap_follow.yaml'
+    old.write_text('\n'.join(kept) + '\n')
+    assert gap_mirror.node_params(old, fill_legacy=True)['opponent_follow_memory_sec'] == 0.0
+    # The shipped file says what the car does now: the hold is on.
+    assert gap_mirror.node_params()['opponent_follow_memory_sec'] == 1.0

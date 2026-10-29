@@ -7,6 +7,8 @@ anything starts. true also starts imu_bridge's vehicle_state_launch.py (the
 IMU stack that publishes /imu/data and /imu/status) and sets
 enable_steering_damping on the node. false does neither. true is the default
 since 2026-10-27 (the race defaults), so a bare launch starts the IMU stack.
+The opponent_awareness:= argument's checks sit at the end of this file, because
+they reuse this file's launch helpers.
 
 Nothing is started: the launch description is built, and its node-building
 step is evaluated with launch's own LaunchContext. Needs ROS sourced and the
@@ -123,3 +125,31 @@ def test_anything_else_is_refused_with_the_argument_named(text):
 def test_the_node_step_refuses_a_bad_value_before_it_builds_anything():
     with pytest.raises(RuntimeError, match='steering_damping'):
         _launch(steering_damping='maybe')
+
+
+# --- opponent_awareness:= (on by default since 2026-10-28) -------------------
+# The same harness: the launch argument sets the node's enable_opponent_awareness.
+# The node's own declared default stays False; test_opponent_awareness_node.py
+# covers that half.
+
+def test_the_opponent_awareness_argument_defaults_to_true():
+    # oracle: the user's decision of 2026-10-28 -- awareness on by default, off on request.
+    ld = gl.generate_launch_description()
+    defaults = {e.name: ''.join(s.perform(LaunchContext()) for s in e.default_value)
+                for e in ld.entities if isinstance(e, DeclareLaunchArgument)}
+    assert defaults['opponent_awareness'] == 'true'
+
+
+def test_the_shipped_default_turns_opponent_awareness_on():
+    nodes, _includes, ctx = _launch()
+    assert _node_params(_gap_node(nodes), ctx)['enable_opponent_awareness'] is True
+
+
+def test_false_turns_opponent_awareness_off():
+    nodes, _includes, ctx = _launch(opponent_awareness='false')
+    assert _node_params(_gap_node(nodes), ctx)['enable_opponent_awareness'] is False
+
+
+def test_the_node_step_refuses_a_bad_opponent_awareness_value():
+    with pytest.raises(RuntimeError, match='opponent_awareness'):
+        _launch(opponent_awareness='maybe')
