@@ -96,3 +96,52 @@ def test_load_inputs_no_slam_and_other_error(tmp_path):
     assert report.build_report(run)[0][0] == 'No SLAM in this run: ' + reason
     with pytest.raises(RuntimeError, match='broken bag'):
         report.load_inputs(tmp_path, load_slam=broken, **kwargs)
+
+
+def test_lap_windows_use_closure_times():
+    # oracle: spec: successive closure times partition the run from its start.
+    assert report.lap_windows([{'lap': 1, 't': 10}, {'lap': 2, 't': 20}], 0, 30) == [
+        (1, 0, 10), (2, 10, 20)]
+
+
+def test_build_report_complete_synthetic_run():
+    # oracle: closed form: a 2 m straight path at 1 m/s, zero corrections,
+    # matching scan endpoints, one drop, and a single 2 m lap.
+    grid = np.zeros((40, 80), dtype=np.int8)
+    grid[:, 20] = 100
+    pose = np.array([[0., 0., .5, 0.], [2., 2., .5, 0.]])
+    slam = dict(pose=pose, odom=pose, odom_imu=pose, odom_base=pose,
+                map_odom=np.array([[0., 0., 0., 0.], [2., 0., 0., 0.]]),
+                map=(.05, 0., 0., grid), odom_frame='odom_imu')
+    run = dict(slam=slam, params={'odom_frame': 'odom_imu'},
+               scan_t=np.array([0.]), scan=np.array([[.76]]), angle_min=0.,
+               angle_increment=0., range_max=10., laps=[dict(lap=1, of=1, t=2.,
+               distance_m=2., closest_m=0., corrections=0)], quality=[], drops=[1.],
+               proc_records=[dict(t=1., node='/slam_toolbox', cpu_pct=20.)], log_text='')
+    lines, summary = report.build_report(run)
+    for heading in ('Setup', 'Heading drift', 'Corrections and loop closures', 'Laps',
+                    'Map consistency', 'Scan drops', 'Wheel vs scan-matched distance'):
+        assert any(heading in line for line in lines)
+        assert heading in summary
+    assert summary['Setup']['distance_m'] == pytest.approx(2., abs=1e-9)  # m
+    assert summary['Corrections and loop closures']['updates'] == 0
+    assert summary['Map consistency']['overall'] == 1.
+    assert summary['Scan drops']['count'] == 1
+    assert summary['Wheel vs scan-matched distance']['ratio'] == pytest.approx(1., abs=1e-9)
+
+
+def test_build_report_without_system_log():
+    # oracle: spec: absent proc samples are explicitly identified, not inferred as zero CPU.
+    lines, _ = report.build_report({'slam': None, 'no_slam_reason': 'no map'})
+    assert lines[0] == 'No SLAM in this run: no map'
+    assert any('no system log' in line for line in lines)
+
+
+def test_main_no_slam_exit_zero(tmp_path):
+    # oracle: spec: the no-SLAM report still succeeds at the CLI boundary.
+    def no_slam(path):
+        raise ValueError('SLAM did not map this run')
+    assert report.main([str(tmp_path), '--no-plots'], load_slam=no_slam,
+                       load_scans=lambda path: None, load_rosout=lambda path: []) == 0
+    assert (tmp_path / 'analysis' / 'slam_report' / 'slam_report.txt').read_text().startswith(
+        'No SLAM in this run: SLAM did not map this run')
