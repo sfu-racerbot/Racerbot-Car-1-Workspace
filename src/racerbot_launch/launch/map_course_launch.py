@@ -129,7 +129,20 @@ def slam_profile_for(gyro_odom):
 
 
 def _wiring(context, imu_probe=None):
+    imu = _flag('imu', LaunchConfiguration('imu').perform(context))
+    all_imu = _flag('imu_all', LaunchConfiguration('imu_all').perform(context))
+    lap_turns = _flag('imu_lap_turns', LaunchConfiguration('imu_lap_turns').perform(context))
     gyro_odom = LaunchConfiguration('gyro_odom').perform(context)
+    gyro = _flag('gyro_odom', gyro_odom)
+    fused = _flag('fused_speed', LaunchConfiguration('fused_speed').perform(context))
+    if not imu:
+        for name, enabled in (('imu_all', all_imu), ('imu_lap_turns', lap_turns),
+                              ('gyro_odom', gyro), ('fused_speed', fused)):
+            if enabled:
+                raise RuntimeError(f'{name}:=true needs imu:=true; pass imu:=true or {name}:=false')
+    if lap_turns and not gyro:
+        raise RuntimeError('imu_lap_turns:=true needs gyro_odom:=true; pass gyro_odom:=true '
+                           'or imu_lap_turns:=false')
     frame, publish_tf = gyro_odom_settings(
         LaunchConfiguration('imu').perform(context), gyro_odom)
     actions = [SetLaunchConfiguration('slam_odom_frame', frame),
@@ -159,11 +172,15 @@ def generate_launch_description(imu_probe=None):
                         'discovery; the last is kept as the racing line. '
                         'Up to two more are driven if the last lap fails the '
                         'quality check.'),
+        # Gyro SLAM (slam_gyro.yaml) was validated by replay only up to about
+        # 3.3 m/s. Raise this default only after a faster recorded gyro run has
+        # a clean slam_report.
         DeclareLaunchArgument(
-            'mapping_max_speed', default_value='',
-            description='Optional speed cap while mapping (m/s). Empty: '
-                        'gap_follow.yaml governs. Use 1.5 on a course nobody '
-                        'has driven yet.'),
+            'mapping_max_speed', default_value='3.5',
+            description='Mapping speed cap in m/s (default 3.5). Gyro SLAM was '
+                        'replay-validated only to about 3.3 m/s; raise the default '
+                        'only after a faster recorded gyro run has a clean slam_report. '
+                        'Use 1.5 on a new course; empty uses gap_follow.yaml.'),
         DeclareLaunchArgument(
             'mapping_min_speed', default_value='',
             description='Optional speed floor. Empty: gap_follow.yaml governs.'),
@@ -187,14 +204,20 @@ def generate_launch_description(imu_probe=None):
             description='IMU source: auto uses simulated topics when gym_bridge_node is running, '
                         'otherwise real hardware. true/false explicitly select real/simulated inputs.'),
         DeclareLaunchArgument(
-            'gyro_odom', default_value='false',
+            'imu_all', default_value='false',
+            description='Enable gyro_odom, fused_speed and imu_lap_turns unless explicitly set.'),
+        DeclareLaunchArgument(
+            'gyro_odom', default_value=LaunchConfiguration('imu_all', default='false'),
             description='true: slam_toolbox maps on gyro odometry (odom_imu) instead of '
                         "vesc_to_odom's steering-model odometry, and loads slam_gyro.yaml. "
                         'Needs imu:=true.'),
         DeclareLaunchArgument(
-            'fused_speed', default_value='false',
+            'fused_speed', default_value=LaunchConfiguration('imu_all', default='false'),
             description='true: gap_follow reads /odom/fused (IMU-fused speed) '
                         'instead of /odom. Needs imu:=true.'),
+        DeclareLaunchArgument(
+            'imu_lap_turns', default_value=LaunchConfiguration('imu_all', default='false'),
+            description='true: count lap turns in odom_imu. Needs gyro_odom:=true.'),
         DeclareLaunchArgument(
             'supervisor_config',
             default_value=os.path.join(
@@ -251,6 +274,9 @@ def generate_launch_description(imu_probe=None):
             parameters=[gap_config, {'enable_opponent_awareness': enabled == 'true'},
                         dict({'drive_topic': '/auto_map/drive'}, **speeds, **odom)],
         )
+        lap_frame = ({'odom_frame': IMU_ODOM_FRAME}
+                     if _flag('imu_lap_turns', LaunchConfiguration('imu_lap_turns').perform(context))
+                     else {})
         supervisor = Node(
             package='pure_pursuit', executable='auto_map_race_node',
             name='auto_map_race_node', output='screen',
@@ -259,6 +285,7 @@ def generate_launch_description(imu_probe=None):
                 'max_mapping_laps': laps + 2,
                 'finish_after_mapping': True,
                 'output_directory': LaunchConfiguration('output_directory'),
+                **lap_frame,
             }],
         )
         # The supervisor exiting -- finished, crashed or Ctrl+C -- ends the
