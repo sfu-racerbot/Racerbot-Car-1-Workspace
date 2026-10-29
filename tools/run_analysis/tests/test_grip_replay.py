@@ -166,11 +166,13 @@ def test_gyro_gap_restarts_limit_at_base_at_first_untrusted_tick():
     r = grip_replay.replay(drive, gyro, odom, PARAMS)
     t = r['t']
     trust = r['trusted']
-    # ticks through the first 4.1 s are trusted (last sample 3.995: age < 0.1)
-    first_untrusted = int(np.searchsorted(t, gap[0] + PARAMS['imu_timeout_sec'],
-                                          side='right') - 1)
-    assert t[first_untrusted] == pytest.approx(gap[0] + PARAMS['imu_timeout_sec'],
-                                               abs=1e-6)
+    # the first untrusted tick is the first whose age (t - 3.995) reaches 0.1 s:
+    # 4.075 - 3.995 = 0.080 (trusted), 4.1 - 3.995 = 0.105 (untrusted). The tick
+    # grid is not exact in binary, so the index is taken from the trust flags,
+    # not from a searchsorted on the float 4.1.
+    first_untrusted = int(np.argmax(~trust))
+    assert t[first_untrusted] == pytest.approx(4.1, abs=1e-6)
+    assert t[first_untrusted - 1] == pytest.approx(4.075, abs=1e-6)
     assert np.all(trust[:first_untrusted])
     # every untrusted tick lies inside the gap, none after it
     assert np.all(~trust[first_untrusted:int(np.searchsorted(t, gap[1], 'left'))])
