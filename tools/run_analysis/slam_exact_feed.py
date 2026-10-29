@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Feed every recorded scan; wait for poses only at recorded pose checkpoints.
+"""Force recorded scan admission, or run the all-scans timing experiment.
+
+Forced mode sends the first planned scan, three sacrificial scans immediately
+before the second planned scan, then only the remaining planned scans. In
+2.8.5 src/slam_toolbox_common.cpp:795, callback counts 2-4 are rejected for startup
+stabilisation. Sacrifices must produce no pose. Admission overrides open the
+throttle/time/travel gates: each planned scan already passed these on the car
+relative to the same previous processed pose, so identical inputs pass again.
+Scan matching and solver settings are preserved. All-scans mode retains the
+recorded admission parameters and sends every recorded scan.
 
 Before each scan, send odometry through the first sample at or after its
 stamp. On the car, SLAM's message filter likewise holds a scan until this
@@ -33,7 +42,8 @@ from tf2_msgs.msg import TFMessage
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
-from slam_replay import ExactPoseAccounting, bag_messages, exact_feed_steps, stamp_ns
+from slam_replay import (ExactPoseAccounting, bag_messages, exact_feed_steps,
+                         forced_scan_plan, odometry_brackets, stamp_ns)
 
 
 class FeedTimeout(RuntimeError):
@@ -41,9 +51,10 @@ class FeedTimeout(RuntimeError):
 
 
 class ExactFeed(Node):
-    def __init__(self, odom_topic, params):
+    def __init__(self, odom_topic, params, exact_mode='forced'):
         super().__init__('slam_exact_feed')
         self.params = params
+        self.exact_mode = exact_mode
         self.transform_timeout_ns = round(params.get('transform_timeout', .5) * 1_000_000_000)
         self.map_frame = params.get('map_frame', 'map')
         self.odom_frame = params['odom_frame']
@@ -61,9 +72,16 @@ class ExactFeed(Node):
         self.completed_scans = 0
         self.scans_sent = 0
         self.unbracketed_scans = 0
+        self.sacrificial_stamps = set()
         self.create_subscription(PoseWithCovarianceStamped, '/pose',
-                                 lambda msg: self.accounting.observe(stamp_ns(msg)), 100)
+                                 self.on_pose, 100)
         self.create_subscription(TFMessage, '/tf', self.on_tf, 100)
+
+    def on_pose(self, msg):
+        stamp = stamp_ns(msg)
+        self.accounting.observe(stamp)
+        if stamp in self.sacrificial_stamps:
+            raise RuntimeError(f'sacrificial scan unexpectedly produced /pose at {stamp}')
 
     def on_tf(self, msg):
         for transform in msg.transforms:
@@ -102,7 +120,15 @@ class ExactFeed(Node):
             raise RuntimeError('scan receipt barrier requires restamp_tf=false and transform_publish_period>0')
         self.accounting = ExactPoseAccounting(poses)
         odoms.sort(key=stamp_ns)
-        steps = exact_feed_steps([stamp_ns(msg) for msg in odoms], [stamp_ns(msg) for msg in scans], poses)
+        odom_stamps = [stamp_ns(msg) for msg in odoms]
+        if self.exact_mode == 'forced':
+            forced = forced_scan_plan([stamp_ns(msg) for msg in scans], poses)
+            ends = odometry_brackets(odom_stamps, [stamp for stamp, _ in forced])
+            by_stamp = {stamp_ns(msg): msg for msg in scans}
+            scans = [by_stamp[stamp] for stamp, _ in forced]
+            steps = [(stamp, planned, end, True) for (stamp, planned), end in zip(forced, ends)]
+        else:
+            steps = exact_feed_steps(odom_stamps, [stamp_ns(msg) for msg in scans], poses)
         self.wait(lambda: self.scan_pub.get_subscription_count() > 0
                   and self.odom_pub.get_subscription_count() > 0
                   and self.clock_pub.get_subscription_count() > 0,
@@ -124,6 +150,8 @@ class ExactFeed(Node):
                 self.lookahead_samples += stamp_ns(odom) > stamp
                 index += 1
             self.clock(stamp)
+            if self.exact_mode == 'forced' and not planned:
+                self.sacrificial_stamps.add(stamp)
             self.scan_pub.publish(scan)
             self.scans_sent += 1
             receipt_timed_out = False
@@ -150,6 +178,12 @@ class ExactFeed(Node):
                     print(f'answered {stamp}', flush=True)
                 else:
                     print(f'missing planned pose {stamp}; continuing', flush=True)
+            elif self.exact_mode == 'forced':
+                # Continue checking all later pose callbacks too, so a delayed
+                # sacrificial pose is fatal rather than silently counted extra.
+                deadline = time.monotonic() + .05
+                while time.monotonic() < deadline:
+                    rclpy.spin_once(self, timeout_sec=.01)
         # Capture final unplanned poses while the synchronous FIFO drains.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -163,10 +197,11 @@ def main():
     parser.add_argument('--odom-topic', required=True)
     parser.add_argument('--result', type=Path, required=True)
     parser.add_argument('--slam-params', type=Path, required=True)
+    parser.add_argument('--exact-mode', choices=('forced', 'all-scans'), default='forced')
     args = parser.parse_args()
     rclpy.init()
     params = yaml.safe_load(args.slam_params.read_text())['slam_toolbox']['ros__parameters']
-    node = ExactFeed(args.odom_topic, params)
+    node = ExactFeed(args.odom_topic, params, args.exact_mode)
     try:
         node.feed(args.bag, args.odom_topic)
     except RuntimeError as exc:
@@ -177,7 +212,8 @@ def main():
                                           'unbracketed_scans': node.unbracketed_scans,
                                           'scans_sent': node.scans_sent,
                                           'scan_callbacks_confirmed': len(node.callback_stamps),
-                                          'completed_scans': node.completed_scans,
+                                           'completed_scans': node.completed_scans,
+                                           'sacrificial_scan_stamps': sorted(node.sacrificial_stamps),
                                           **node.accounting.summary()}) + '\n')
         node.destroy_node()
         rclpy.shutdown()

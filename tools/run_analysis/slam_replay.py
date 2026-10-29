@@ -99,6 +99,46 @@ def exact_feed_order(scan_stamps_ns, pose_stamps_ns):
     return [(stamp, stamp in planned) for stamp in scans]
 
 
+def forced_scan_plan(scan_stamps_ns, pose_stamps_ns):
+    """First planned scan, three startup sacrifices, then remaining planned scans.
+
+    2.8.5 src/slam_toolbox_common.cpp:795 shouldProcessScan rejects callback counts
+    below 5 after accepting the first measurement. The three recorded scans
+    immediately before the second pose consume those callbacks without adding
+    nodes to the map. A false flag means sacrificial, not a pose checkpoint.
+    """
+    scans = list(scan_stamps_ns)
+    planned = exact_scan_plan(scans, pose_stamps_ns)
+    if len(planned) < 2:
+        return [(stamp, True) for stamp in planned]
+    second = scans.index(planned[1])
+    if second < 3:
+        raise ReplayRefused(f'need three recorded sacrificial scans before second planned stamp {planned[1]}')
+    return ([(planned[0], True)]
+            + [(stamp, False) for stamp in scans[second - 3:second]]
+            + [(stamp, True) for stamp in planned[1:]])
+
+
+def exact_admission_parameters(params, exact_mode, recorded=None):
+    """Apply admission-only overrides in forced mode, with an audit of recorded values.
+
+    Every planned scan already passed the car's travel/time filters relative
+    to its previous processed pose. With identical inputs it passes again;
+    forcing these gates open removes timing/callback-dependent rejections,
+    while leaving the scan matching, map and solver configuration unchanged.
+    """
+    body = dict(params['slam_toolbox']['ros__parameters'])
+    audit = {}
+    if exact_mode == 'forced':
+        source = body if recorded is None else recorded
+        overrides = dict(throttle_scans=1, minimum_time_interval=0.0,
+                         minimum_travel_distance=0.0, minimum_travel_heading=0.0)
+        audit = {key: {'recorded': source.get(key), 'override': value}
+                 for key, value in overrides.items()}
+        body.update(overrides)
+    return {'slam_toolbox': {'ros__parameters': body}}, audit
+
+
 def exact_feed_steps(odom_stamps_ns, scan_stamps_ns, pose_stamps_ns):
     """(scan stamp, wait for pose, odometry end index, bracket available), in bag order.
 
@@ -501,7 +541,9 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--rate', type=_positive_float, default=None, help='playback speed (default 1.0)')
     mode.add_argument('--exact', action='store_true',
-                      help='feed every scan to synchronous SLAM, waiting at recorded pose checkpoints')
+                      help='replay with synchronous SLAM and recorded pose checkpoints')
+    parser.add_argument('--exact-mode', choices=('forced', 'all-scans'), default='forced',
+                        help='exact admission: forced (default) or the all-scans timing experiment')
     parser.add_argument('--out-root', type=Path, default=None, help='output parent (default ~/.ros/racerbot_runs)')
     parser.add_argument('--label', default='default', help='names the output folder (default "default")')
     return parser
@@ -666,7 +708,8 @@ def _slam_version(env: dict[str, str]) -> str | None:
     return done.stdout.strip() or None
 
 
-def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label: str) -> int:
+def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label: str,
+         exact_mode: str = 'forced') -> int:
     out = plan.out_dir
     out.mkdir(parents=True)
     log = _Log(out / 'replay.log')
@@ -674,10 +717,17 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     env = {**child_env(os.environ), 'PYTHONUNBUFFERED': '1'}  # so the logs are complete if a child dies
     git_commit = _git_commit()
     slam_version = _slam_version(env)
+    exact = rate is None
+    run_params, admission_overrides = plan.params, {}
+    if exact:
+        settings = plan.run_dir / 'metadata' / 'params' / 'slam_toolbox.yaml'
+        recorded = _parameters(_load_yaml(settings, 'recorded settings'), 'recorded settings', settings)
+        run_params, admission_overrides = exact_admission_parameters(plan.params, exact_mode, recorded)
     params_file = out / 'slam_params.yaml'
-    file_params = loadable(plan.params)
+    file_params = loadable(run_params)
     params_file.write_text(yaml.safe_dump(file_params, sort_keys=False), encoding='utf-8')
-    log(f'replaying {plan.run_dir} on {plan.odom_topic} (frame {plan.odom_frame}) at rate {rate}; '
+    pace = f'exact mode {exact_mode}' if exact else f'rate {rate}'
+    log(f'replaying {plan.run_dir} on {plan.odom_topic} (frame {plan.odom_frame}) at {pace}; '
         f'slam_toolbox {slam_version or "version unknown"}; slam_replay at {git_commit or "unknown commit"}')
     left_out = sorted(set(plan.params['slam_toolbox']['ros__parameters'])
                       - set(file_params['slam_toolbox']['ros__parameters']))
@@ -689,7 +739,6 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     status, error = 'ok', None
     map_saved = posegraph_saved = False
     map_save_exhausted = False
-    exact = rate is None
     try:
         relay = _start(children, 'odom_tf_relay',
                        [sys.executable, str(RELAY), '--topic', plan.odom_topic,
@@ -726,7 +775,7 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
         if exact:
             name, argv, feed_env = exact_specs[1]
             play = _start(children, name, [*argv, '--result', str(out / 'exact_feed.json'),
-                                          '--slam-params', str(params_file)],
+                                          '--slam-params', str(params_file), '--exact-mode', exact_mode],
                           feed_env, out / 'exact_feed.log', log)
         else:
             play = _start(children, 'bag_play',
@@ -796,6 +845,8 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
             feed_result = out / 'exact_feed.json'
             summary['exact'] = json.loads(feed_result.read_text()) if feed_result.exists() else {
                 'lookahead_samples': 0}
+            summary['exact']['feed_mode'] = exact_mode
+            summary['exact']['admission_overrides'] = admission_overrides
         (out / 'replay.json').write_text(json.dumps(summary, indent=2, default=str) + '\n', encoding='utf-8')
         if (plan.run_dir / 'metadata').is_dir():
             shutil.copytree(plan.run_dir / 'metadata', out / 'metadata')
@@ -820,13 +871,17 @@ def main(argv=None) -> int:
             raise ReplayRefused('--exact does not allow profile overrides of sync/async mode')
         if args.exact:
             scan_plan = bag_exact_plan(plan.run_dir / 'bag')
+            if args.exact_mode == 'forced':
+                source_scans = [stamp_ns(msg) for _, msg in bag_messages(plan.run_dir / 'bag', ['/scan'])]
+                feed_plan = forced_scan_plan(source_scans, scan_plan)
+                scan_plan = [stamp for stamp, _ in feed_plan]
             odometry_brackets(sorted(stamp_ns(msg) for _, msg in
                               bag_messages(plan.run_dir / 'bag', [plan.odom_topic])), scan_plan)
     except ReplayRefused as exc:
         print(f'refusing: {exc}', file=sys.stderr)
         return 2
     if args.exact:
-        return _run(plan, None, args.profile, args.label)
+        return _run(plan, None, args.profile, args.label, args.exact_mode)
     return _run(plan, args.rate if args.rate is not None else 1.0, args.profile, args.label)
 
 
