@@ -47,6 +47,9 @@ race.json and recordings: /tmp/oc-part-b1-r7/<track>-<normal|swapped>/.
 
 R7 review step 2: forcing car 2's hold false failed
 test_team_a_deadman_isolated[True] at the movement assertion (peak 0 m/s).
+Review step 3: removing the brake remap failed test_team_a_graph_is_isolated
+waiting for the required endpoint; changing the referee lap target to 0.1
+failed test_team_a_short_race_writes_result at its 0.2-lap assertion.
 """
 
 import contextlib
@@ -324,17 +327,46 @@ def team_a_packages():
             pytest.skip(f'{package} is not installed; install it to run the team A integration tests')
 
 
-def test_team_a_graph_and_short_race(tmp_path, probe, team_a_packages):
+def test_team_a_graph_is_isolated(tmp_path, probe, team_a_packages):
     with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=0.2',
-                      'record:=false', 'timeout_s:=60', f'output_dir:={tmp_path}') as proc:
+                      'record:=false', 'car1_hold_deadman:=false', 'car2_hold_deadman:=false',
+                      'timeout_s:=60', f'output_dir:={tmp_path}') as proc:
         graph = Graph(probe)
         safety = ('/car2', 'safety_node')
         disparity = ('/car2', 'disparity_extender_node')
-        assert graph.spin_until(lambda: proc.poll() is not None or
-                                (disparity in graph.publishers('/car2/drive')
-                                 and safety in graph.publishers('/car2/safety/brake')), 90), _tail(tmp_path / 'launch.log')
+        required_subs = (('/car2/scan', safety), ('/car2/scan', disparity),
+                         ('/car2/joy', safety), ('/car2/odom', safety),
+                         ('/car2/safety/brake', disparity))
+        def snapshot():
+            return (
+                tuple((t, tuple(graph.publishers(t))) for t in
+                      ('/drive', '/car2/drive', '/safety/brake', '/car2/safety/brake')),
+                tuple((t, tuple(graph.subscribers(t))) for t in
+                      ('/car2/scan', '/car2/joy', '/car2/odom', '/car2/safety/brake',
+                       '/scan', '/joy', '/ego_racecar/odom')),
+                tuple((name, tuple(sorted(probe.get_publisher_names_and_types_by_node(name, namespace))))
+                      for namespace, name in (safety, disparity)),
+            )
+        def ready():
+            return (('/', 'gap_follow_node') in graph.publishers('/drive')
+                    and disparity in graph.publishers('/car2/drive')
+                    and safety in graph.publishers('/car2/safety/brake')
+                    and all(node in graph.subscribers(topic) for topic, node in required_subs))
+        assert graph.spin_until(lambda: proc.poll() is not None or ready(), 45), _tail(tmp_path / 'launch.log')
         assert proc.poll() is None, _tail(tmp_path / 'launch.log')
-        graph.spin_for(2)
+        # oracle: endpoint graph must be identical in two observations at least
+        # 0.5 s apart, after all required endpoints have appeared.
+        deadline = time.monotonic() + 15
+        previous = snapshot()
+        stable = False
+        while time.monotonic() < deadline and proc.poll() is None:
+            graph.spin_for(0.5)
+            current = snapshot()
+            if current == previous and ready():
+                stable = True
+                break
+            previous = current
+        assert stable, f'graph did not stabilize: {previous!r}\n{_tail(tmp_path / "launch.log")}'
         # oracle: race isolation contract: only car 1 publishes root drive and
         # every team A publisher belongs to car 2, except ROS infrastructure.
         assert graph.publishers('/drive') == [('/', 'gap_follow_node')]
@@ -343,16 +375,23 @@ def test_team_a_graph_and_short_race(tmp_path, probe, team_a_packages):
         for namespace, name in (safety, disparity):
             topics = {topic for topic, _ in probe.get_publisher_names_and_types_by_node(name, namespace)}
             assert all(t.startswith('/car2/') or t in ('/rosout', '/parameter_events') for t in topics), topics
-        for topic, node in (('/car2/scan', safety), ('/car2/scan', disparity),
-                            ('/car2/joy', safety), ('/car2/odom', safety),
-                            ('/car2/safety/brake', disparity)):
+        for topic, node in required_subs:
             assert node in graph.subscribers(topic), (topic, graph.subscribers(topic))
         for topic in ('/scan', '/joy', '/ego_racecar/odom'):
             assert safety not in graph.subscribers(topic)
             assert disparity not in graph.subscribers(topic)
-        assert proc.wait(timeout=150) == 0, _tail(tmp_path / 'launch.log')
+
+
+def test_team_a_short_race_writes_result(tmp_path, probe, team_a_packages):
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=0.2',
+                      'record:=false', 'timeout_s:=60', f'output_dir:={tmp_path}') as proc:
+        graph = Graph(probe)
+        assert graph.spin_until(lambda: proc.poll() is not None, 150), _tail(tmp_path / 'launch.log')
+        assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
     race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
     # oracle: referee contract: both cars are scored and no steps are lost.
+    assert race['track'] == 'indoor_oval'
+    assert race['race_laps'] == 0.2
     assert len(race['laps']) == 2
     assert race['missed_steps'] == 0
 

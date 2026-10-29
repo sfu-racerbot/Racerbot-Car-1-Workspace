@@ -90,7 +90,7 @@ def _setup(context):
         ])
     referee = Node(package='racerbot_sim', executable='race_referee_node', name='race_referee_node',
                    parameters=[{'track': track, 'track_directory': track_directory,
-                                 'laps': ParameterValue(LaunchConfiguration('laps'), value_type=float),
+                                  'laps': ParameterValue(LaunchConfiguration('laps'), value_type=float),
                                  'controlled_cars': 2,
                                  'reverse': LaunchConfiguration('reverse'),
                                  'timeout_s': ParameterValue(LaunchConfiguration('timeout_s'), value_type=float),
