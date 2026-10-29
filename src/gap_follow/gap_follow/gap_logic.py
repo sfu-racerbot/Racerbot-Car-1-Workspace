@@ -1242,6 +1242,30 @@ def grip_ratio(yaw_rate: float, speed: float, steering: float,
     return yaw_rate * speed / demanded
 
 
+def understeer_ratio(measured_steering, commanded_steering, speed,
+                     min_steering=0.05, min_speed=1.0) -> float:
+    """Measured/commanded turn, or NaN when the turn cannot be judged.
+
+    Opposite-sign measured steering at or above the steering floor means
+    counter-steering, not understeer. Tiny opposite-sign readings are noise.
+    """
+    if not all(math.isfinite(v) for v in
+               (measured_steering, commanded_steering, speed)):
+        return math.nan
+    if abs(commanded_steering) < min_steering or speed < min_speed:
+        return math.nan
+    if measured_steering * commanded_steering < 0 and abs(measured_steering) >= min_steering:
+        return math.nan
+    return math.tan(measured_steering) / math.tan(commanded_steering)
+
+
+def understeer_speed_cap(engaged, measured_speed, factor) -> float:
+    """A ceiling from fresh measured speed; infinity means no ceiling."""
+    if not engaged or not math.isfinite(measured_speed):
+        return math.inf
+    return max(0.0, measured_speed * factor)
+
+
 class LowPass:
     """First-order low-pass over a stream of samples, with time constant
     ``time_constant_s``.
@@ -1274,6 +1298,55 @@ class LowPass:
             alpha = 1.0 - math.exp(-dt / self.time_constant_s)
             self.value += alpha * (float(sample) - self.value)
         return self.value
+
+
+class UndersteerCheck:
+    """Hysteresis and hold time over a low-passed measured turn ratio.
+
+    Missing judgements preserve state briefly, but never justify a cap at the
+    caller. A gap longer than hold_sec forgets both state and filter.
+    """
+
+    def __init__(self, engage_ratio, release_ratio, hold_sec,
+                 tau_sec=GRIP_RATIO_TAU_SEC):
+        if not (math.isfinite(engage_ratio) and math.isfinite(release_ratio)
+                and 0.0 < engage_ratio < release_ratio <= 1.5):
+            raise ValueError('understeer ratios must satisfy 0 < engage < release <= 1.5')
+        if not (math.isfinite(hold_sec) and hold_sec > 0.0):
+            raise ValueError('understeer hold_sec must be finite and positive')
+        self.engage_ratio = engage_ratio
+        self.release_ratio = release_ratio
+        self.hold_sec = hold_sec
+        self.ratio_filter = LowPass(tau_sec)
+        self.reset()
+
+    def reset(self) -> None:
+        self.engaged = False
+        self.low_sec = 0.0
+        self.missing_sec = 0.0
+        self.ratio_filter.reset()
+
+    def update(self, ratio, dt) -> bool:
+        if not (math.isfinite(dt) and dt >= 0.0):
+            raise ValueError('dt must be finite and non-negative')
+        if not math.isfinite(ratio):
+            self.missing_sec += dt
+            self.low_sec = 0.0
+            if self.missing_sec > self.hold_sec:
+                self.reset()
+            return self.engaged
+        self.missing_sec = 0.0
+        filtered = self.ratio_filter.update(ratio, dt)
+        if filtered > self.release_ratio:
+            self.engaged = False
+        if filtered < self.engage_ratio:
+            self.low_sec += dt
+            # Control intervals accumulate floating-point roundoff.
+            if self.low_sec + 1e-12 >= self.hold_sec:
+                self.engaged = True
+        else:
+            self.low_sec = 0.0
+        return self.engaged
 
 
 @dataclass
