@@ -19,12 +19,13 @@ class ImuNoise:
     accel_std: float  # m/s^2, per axis
 
 
-# Measured run 20261026-194514, bag-relative 2.296746016..4.313826323 s.
-# /odom: 102 samples, max |v| = 0 m/s. Population std after axis-mean removal,
-# averaged across the three axes. /imu/bno/data: 530 samples (gyro constant
-# throughout this window); /imu/vesc/data: 75 samples.
-BNO_NOISE = ImuNoise(0.0, 0.0212891782443367)
-VESC_NOISE = ImuNoise(0.00130242474454961, 0.0131795356723403)
+# Measured run 20261026-194514, bag-relative 16.0..18.0 s, within the
+# initial wheel-stationary stretch (/odom: 100 samples, max |v| = 0 m/s).
+# Population std after axis-mean removal, averaged across the three axes.
+# /imu/bno/data: 505 samples; /imu/vesc/data: 100 samples. This later
+# stationary window avoids the initial constant BNO gyro readings.
+BNO_NOISE = ImuNoise(0.00190187904182856, 0.0217090362070021)
+VESC_NOISE = ImuNoise(0.0012783737292913, 0.0138812011098596)
 
 
 def ideal_reading(speed, prev_speed, yaw_rate, prev_yaw_rate, dt, x_offset):
