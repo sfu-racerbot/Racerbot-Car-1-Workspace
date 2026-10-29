@@ -538,10 +538,6 @@ def test_mirror_matches_the_node_through_a_drop_and_hold():
             odom.twist.twist.linear.x = speed
             node.odom_callback(odom)
             node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
-            # The scene is drawn for a car that does not turn: keep the rack (and so
-            # both dead-reckoned poses) straight on both sides, as the awareness
-            # parity test above does. Otherwise the parked car drifts sideways.
-            node.steering_basis = mirror.steering_basis = 0.0
             node.scan_callback(scan)
             steering, expected = mirror.command(np.asarray(scan.ranges), speed, step)
             drive = published[-1].drive
