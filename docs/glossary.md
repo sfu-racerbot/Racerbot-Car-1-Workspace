@@ -151,3 +151,19 @@ How far ahead on the path the controller aims. A short lookahead follows the lin
 ### Follow-the-gap
 
 The reactive method `gap_follow` uses: look at the LiDAR scan, find the widest open gap, steer at it. It needs no map, which is why it's the starting point both for new drivers and for new code.
+
+---
+
+## Several cars
+
+### Follow cap
+
+The top speed this car is allowed while another car is ahead of it on its path. It comes from the gap: `(gap − 0.5 m) ÷ 1.0 s`, where the gap runs from this car's front bumper to the other car. A follow cap only ever lowers speed. It never steers or stops the car. See [Several cars at once](gap-follow.md#several-cars-at-once).
+
+### Deadlock
+
+A state the car cannot leave by itself. Here it means the controller has no forward command that its own safety rules allow, so it holds the car still. `gap_follow` never reverses, so once its nose is pressed against something, it has no way out on its own. See [Several cars at once](gap-follow.md#several-cars-at-once).
+
+### Stall
+
+In the simulator's counts, a car below 0.05 m/s for more than 1 second while another car on the track moves at 0.05 m/s or more. A stall is not a crash. It is what it looks like when one car stops and the other keeps going.
