@@ -111,11 +111,21 @@ class ProcSampler:
         return records
 
 
+def _set_parent_death_signal() -> bool:
+    """Ask Linux to SIGTERM the calling process when its parent dies."""
+    if not sys.platform.startswith('linux'):
+        return False
+    libc = ctypes.CDLL(None, use_errno=True)
+    return libc.prctl(1, signal.SIGTERM, 0, 0, 0) == 0  # PR_SET_PDEATHSIG
+
+
 def start_tegrastats(out_path, binary='tegrastats', interval_ms=1000, log=print):
     """Start tegrastats, warning once rather than failing the recording."""
+    preexec_fn = _set_parent_death_signal if sys.platform.startswith('linux') else None
     try:
         with open(out_path, 'a') as output:
-            return subprocess.Popen([binary, '--interval', str(interval_ms)], stdout=output)
+            return subprocess.Popen([binary, '--interval', str(interval_ms)], stdout=output,
+                                    preexec_fn=preexec_fn)
     except OSError as exc:
         log(f'Warning: could not start {binary}: {exc}')
         return None
@@ -141,8 +151,7 @@ def main(argv=None) -> int:
     # Linux delivers SIGTERM if that parent dies, including during setup.
     parent = os.getppid()
     if sys.platform.startswith('linux'):
-        libc = ctypes.CDLL(None, use_errno=True)
-        if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+        if not _set_parent_death_signal():
             print('Warning: cannot register parent-death signal', file=sys.stderr, flush=True)
         if os.getppid() != parent:
             stop.set()

@@ -320,6 +320,12 @@ class NodeWatch:
     success does not advance the suffix. Colliding names receive the first
     free ~2, ~3, ... stem, retained across retries and restarts. Successful
     continuously present nodes are not returned again.
+
+    A node that does not answer is backed off rather than retried every
+    poll: after the k-th consecutive failure of one appearance, update()
+    skips it for the next min(2**(k-1), 32) - 1 polls. A node that keeps
+    failing is therefore returned on polls 1, 2, 4, 8, 16, 32, 64, 96, ...
+    done() and an absence (a restart) reset the failure count.
     """
 
     def __init__(self, ignore=()):
@@ -329,11 +335,15 @@ class NodeWatch:
         self._owners = {}
         self._versions = {}
         self._done = set()
+        self._failures = {}
+        self._skip_polls = {}
 
     def update(self, names) -> list:
         """Return sorted (full_name, file_name) pairs needing a snapshot."""
         present = set(names) - self.ignore
         for name in self._present - present:
+            self._failures.pop(name, None)
+            self._skip_polls.pop(name, None)
             if name in self._done:
                 self._done.remove(name)
                 self._versions[name] += 1
@@ -350,12 +360,28 @@ class NodeWatch:
                 self._stems[name] = stem
                 self._owners[stem] = name
                 self._versions[name] = 0
-            if name not in self._done:
-                version = self._versions[name]
-                suffix = f'.{version}' if version else ''
-                result.append((name, f'{self._stems[name]}{suffix}.yaml'))
+            if name in self._done:
+                continue
+            skip = self._skip_polls.get(name, 0)
+            if skip:
+                self._skip_polls[name] = skip - 1
+                continue
+            version = self._versions[name]
+            suffix = f'.{version}' if version else ''
+            result.append((name, f'{self._stems[name]}{suffix}.yaml'))
         return result
 
     def done(self, full_name) -> None:
         """Mark the current appearance successfully snapshotted."""
         self._done.add(full_name)
+        self._failures.pop(full_name, None)
+        self._skip_polls.pop(full_name, None)
+
+    def failed(self, full_name) -> None:
+        """Record a failed snapshot of the current appearance and back off.
+
+        The k-th consecutive failure skips min(2**(k-1), 32) - 1 polls.
+        """
+        count = self._failures.get(full_name, 0) + 1
+        self._failures[full_name] = count
+        self._skip_polls[full_name] = min(2 ** (count - 1), 32) - 1
