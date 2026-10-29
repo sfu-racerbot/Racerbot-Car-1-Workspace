@@ -285,3 +285,20 @@ def test_detection_requires_consecutive_trusted_samples(failure):
         _imu(n, h)
         _tick(n)
         assert commands[-1].drive.speed == 0
+
+
+@pytest.mark.parametrize('latched', [False, True])
+@pytest.mark.parametrize('state', ['released', 'never', 'stale'])
+def test_deadman_refusal_command_without_intent_oracle(state, latched):
+    """Command-only evidence: the two-gate mutation cannot hide behind intent."""
+    with _node() as n:
+        commands = _capture(n)
+        _imu(n, n.imu_impact_threshold + 1 if latched else 0)
+        if state != 'never':
+            _joy(n, state != 'released')
+        if state == 'stale':
+            n.last_joy_time -= Duration(seconds=n.joy_timeout_sec + 0.1)
+        _tick(n)
+        # oracle: spec CLAUDE.md: every deadman refusal publishes zero speed,
+        # irrespective of latch state. Assert the actual drive message only.
+        assert commands[-1].drive.speed == 0.0
