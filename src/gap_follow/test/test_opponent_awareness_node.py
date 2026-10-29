@@ -110,7 +110,8 @@ def test_shipped_config_has_it_on_and_lists_every_field_at_its_default():
 
 def test_off_builds_no_layer_and_reads_none_of_its_values():
     # Values the layer would refuse: with it off they must not even be read.
-    node, published = _make('-p', 'opponent_alpha:=5.0', '-p', 'opponent_gate:=-1.0')
+    node, published = _make('-p', 'enable_opponent_awareness:=false',
+                            '-p', 'opponent_alpha:=5.0', '-p', 'opponent_gate:=-1.0')
     try:
         assert node.opponents is None
         _drive(node, published, ticks=5)
@@ -142,7 +143,7 @@ def _speeds(*extra, **kw):
 
 def test_on_follows_a_slower_car_ahead_at_the_follow_cap():
     on, mode = _speeds('-p', 'enable_opponent_awareness:=true')
-    off, _ = _speeds()
+    off, _ = _speeds('-p', 'enable_opponent_awareness:=false')
     assert mode == 'follow'       # 2 m corridor, car dead ahead: no room to pass
     # Once the track is confirmed (8 consecutive scans) and its velocity has
     # settled, the published speed is held to the closed-form follow cap.
@@ -160,7 +161,7 @@ def test_on_without_scan_stamps_does_nothing():
     # Unstamped scans give no valid interval, so the tracker resets every
     # scan and never confirms a mover: the commands match the layer off.
     on, mode = _speeds('-p', 'enable_opponent_awareness:=true', stamped=False)
-    off, _ = _speeds()
+    off, _ = _speeds('-p', 'enable_opponent_awareness:=false')
     assert mode is None
     assert [s for _x, _y, s in on] == pytest.approx([s for _x, _y, s in off], abs=1e-9)
 
@@ -173,7 +174,7 @@ def test_on_in_a_static_world_commands_exactly_what_off_commands():
     saved, OPP_SPEED = OPP_SPEED, 0.0
     try:
         on, mode = _speeds('-p', 'enable_opponent_awareness:=true', ticks=30, rear_x0=3.5)
-        off, _ = _speeds(ticks=30, rear_x0=3.5)
+        off, _ = _speeds('-p', 'enable_opponent_awareness:=false', ticks=30, rear_x0=3.5)
     finally:
         OPP_SPEED = saved
     assert mode is None
