@@ -262,10 +262,12 @@ class GapController:
 
     ``params`` is node_params() (optionally with overrides); ``lidar`` needs
     ``angle_min``, ``angle_increment`` and ``range_min``. ``command(scan,
-    measured_speed, step, yaw_rate=None, measured_steering=None)`` returns
+    measured_speed, step, yaw_rate=None, measured_steering=None,
+    fused_speed=None)`` returns
     ``(steering, speed)`` for one
     40 Hz tick; ``yaw_rate`` is read when steering damping or the adaptive grip
-    is on, and None means no healthy IMU sample this tick.
+    is on, and None means no healthy IMU sample this tick. Traction also requires
+    a finite fused_speed supplied by the caller; None means no fresh fused input.
 
     Holds parameters as attributes and reproduces the node's per-scan chain:
     sanitize -> side walls/adaptive width -> footprint/TTC -> disparity extend
@@ -642,14 +644,15 @@ class GapController:
             else:
                 self.traction_hold.reset()
         tel['imu_traction_holding'] = holding
-        ramp_basis = max(self.last_commanded_speed, min(basis_speed, p['max_speed']))
-        accel_ceiling = ramp_basis + p["max_acceleration"] * dt
-        speed = min(desired_speed, accel_ceiling)
-        if accel_ceiling < desired_speed:
-            binding = 'accel'
         if holding:
             speed = gap_logic.traction_limited_speed(desired_speed, self.last_commanded_speed, True)
             binding = 'traction'
+        else:
+            ramp_basis = max(self.last_commanded_speed, min(basis_speed, p['max_speed']))
+            accel_ceiling = ramp_basis + p["max_acceleration"] * dt
+            speed = min(desired_speed, accel_ceiling)
+            if accel_ceiling < desired_speed:
+                binding = 'accel'
         self.binding_cap = binding
         tel.update(target_angle=target_angle, target_distance=target_distance,
                    gap_width=(gap_end - gap_start + 1) * self.lidar.angle_increment,

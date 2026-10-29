@@ -146,6 +146,7 @@ def test_untrusted_input_publishes_exact_feature_off_command(failure, reason):
 
 
 def test_dropout_while_holding_restores_feature_off_on_next_tick():
+    feature_off, _ = _one(False, failure='fault')
     with _node() as n:
         commands, intents = _capture(n), _capture_intent(n)
         n.last_commanded_speed = 1.5
@@ -157,7 +158,7 @@ def test_dropout_while_holding_restores_feature_off_on_next_tick():
         _tick(n, 1)
         expected = 2.0 + 5.0 * DT
         # oracle: closed form: dropout restores wheel basis on that same tick.
-        assert commands[-1].drive.speed == expected
+        assert commands[-1].drive.speed == feature_off == expected
         assert 'imu_traction_off: imu fault' in intents[-1]['reason']
 
 

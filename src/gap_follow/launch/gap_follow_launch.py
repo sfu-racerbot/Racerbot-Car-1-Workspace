@@ -111,8 +111,8 @@ def generate_launch_description(imu_probe=None):
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
                          'enable_adaptive_grip': grip,
-                          'enable_imu_understeer': understeer,
-                          'enable_imu_traction': traction},
+                         'enable_imu_understeer': understeer,
+                         'enable_imu_traction': traction},
                         speed,
                         {'odom_topic': FUSED_ODOM} if fused else {}],
         )]

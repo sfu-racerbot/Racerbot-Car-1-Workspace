@@ -1766,18 +1766,20 @@ class GapFollowNode(Node):
         # a car that never actually slowed. Fresh odometry closes that gap. It
         # only ever raises the basis, is clamped to max_speed so a bad reading
         # cannot inflate it, and every ceiling above still applies.
-        ramp_basis = self.last_commanded_speed
         traction_holding, fused_basis, traction_off = self._traction_step(command_dt)
-        if fused_basis is not None:
-            ramp_basis = max(ramp_basis, min(fused_basis, self.max_speed))
-        elif self._odom_fresh():
-            ramp_basis = max(
-                ramp_basis, min(abs(self.current_speed), self.max_speed))
-        acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
-        speed = min(desired_speed, acceleration_ceiling)
         if traction_holding:
+            acceleration_ceiling = self.last_commanded_speed
             speed = gap_logic.traction_limited_speed(
                 desired_speed, self.last_commanded_speed, True)
+        else:
+            ramp_basis = self.last_commanded_speed
+            if fused_basis is not None:
+                ramp_basis = max(ramp_basis, min(fused_basis, self.max_speed))
+            elif self._odom_fresh():
+                ramp_basis = max(
+                    ramp_basis, min(abs(self.current_speed), self.max_speed))
+            acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
+            speed = min(desired_speed, acceleration_ceiling)
 
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
@@ -1917,7 +1919,8 @@ class GapFollowNode(Node):
             intent_factors.append(schema.factor('follow cap', follow_cap))
         if near_bearing is not None:
             intent_factors.append(schema.factor('anticipation cap', anticipated_speed))
-        intent_factors.append(schema.factor('accel ceiling', acceleration_ceiling))
+        intent_factors.append(schema.factor(
+            'traction hold' if traction_holding else 'accel ceiling', acceleration_ceiling))
         self._publish_intent(
             gap_mode,
             decision_detail,

@@ -94,7 +94,7 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 ### Going back
 
-- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term and the IMU stack off. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
+- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off. The IMU stack stops only when all five IMU features are off: steering damping, adaptive grip, fused speed, understeer and traction. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
 - **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
   - `enable_steering_damping: false`, `steering_damping_gain: 0.03` and `enable_corner_setup: true`.
   - `max_speed: 3.5`, `min_speed: 1.0`, `corner_speed: 1.5`, `corner_speed_wide: 1.9`, `narrow_corridor_speed: 2.5` and `max_acceleration: 3.0`.
@@ -210,7 +210,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `narrow_corridor_speed` | `3.571` (since 2026-10-27; was `2.5`) | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
-| `enable_steering_damping` | `true` (since 2026-10-27; was `false`) | No gyro term: the steering is what it was before 2026-10-27. Turn it off with `steering_damping:=false` on the launch line, which also skips the IMU stack. See [Steering damping (gyro)](#steering-damping-gyro). |
+| `enable_steering_damping` | `true` (since 2026-10-27; was `false`) | No gyro term: the steering is what it was before 2026-10-27. Turn it off with `steering_damping:=false` on the launch line. The stack is skipped only when every IMU feature is off. See [Steering damping (gyro)](#steering-damping-gyro). |
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 | `enable_opponent_awareness` (launch: `opponent_awareness`) | `true` (since 2026-10-28; was `false`) | The other-car layer is off, and the node's commands are what they were before the layer existed (2026-10-22). Launch with `opponent_awareness:=false`. See [Several cars at once](#several-cars-at-once). |
 | `opponent_follow_memory_sec` | `1.0` s (since 2026-10-28; was none) | The follow cap is dropped the moment its car is lost, with the layer still on. Set it to `0.0` to get that. |
@@ -742,7 +742,9 @@ ros2 launch gap_follow gap_follow_launch.py
 
 **Working when:** the decision lines name a `steering damping` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
 
-To run without the gyro term, and without the IMU stack, add `steering_damping:=false` to the launch line.
+To turn the gyro term off, add `steering_damping:=false` to the launch line.
+The IMU stack starts when any of `steering_damping`, `adaptive_grip`, `fused_speed`,
+`imu_understeer` or `imu_traction` is on, and stops only when all five are off.
 
 Do not also run `map_course`. It starts the same IMU stack, and two copies would fight over the sensor. Do not run `teleop_launch.py` beside it either: its `/teleop` always wins the mux, as in [Recording a floor run](#recording-a-floor-run).
 
@@ -870,7 +872,13 @@ TODO(verify): the simulator's results for the adaptive grip are not written in t
 
 `fused_speed:=true` makes `gap_follow` read its speed from `/odom/fused` instead of `/odom`. The fused speed combines wheel speed with the BNO085 IMU's forward acceleration, so it can account for wheelspin. It stays within 0.3 m/s of wheel speed. Position and heading remain the wheel odometry's own.
 
-The flag starts `vehicle_state_launch.py`, the IMU stack that publishes `/odom/fused`. Steering damping, adaptive grip and fused speed share one copy of that stack, even with all three on.
+The flag starts `vehicle_state_launch.py`, the IMU stack that publishes `/odom/fused`.
+All five IMU features share one copy of that stack, even when enabled together.
+
+When the IMU is untrusted, `gap_follow` drives on raw `/odom` instead, including its
+speed checks, acceleration ramp, time-to-collision brake and stale-odometry stop.
+On `/drive_intent`, `fused_speed_imu: ok` means fused speed is in use; `waiting`,
+`fault`, `stale` or `no imu` names the reason for using raw wheel odometry.
 
 The shared `imu_hardware` argument defaults to `auto`: it uses simulated IMU topics when `gym_bridge_node` is running, otherwise real hardware. `true` explicitly selects real hardware; `false` selects simulated inputs.
 
@@ -886,7 +894,11 @@ ros2 launch gap_follow gap_follow_launch.py fused_speed:=true max_speed:=1.0
 
 If no usable accelerometer samples arrive, `/odom/fused` carries **exactly the wheel speed**. This includes missing, stale or non-finite BNO samples; previously accepted acceleration expires after `imu_timeout` (0.1 s). Given that same speed, `gap_follow` publishes the same commands as with `fused_speed:=false`.
 
-If `vehicle_state_node` dies, `/odom/fused` goes silent. The shipped stale-odometry check then commands zero speed once `odom_timeout_sec` (0.5 s) is reached, even with LB held. The [imu_bridge README](../src/imu_bridge/README.md#fused-speed-and-measured-steering) explains the estimator and its fallback.
+If `vehicle_state_node` dies while the IMU remains trusted, `/odom/fused` goes
+silent and the stale-odometry check commands zero after `odom_timeout_sec` (0.5 s),
+even with LB held. When the IMU is untrusted, the same check instead watches raw
+`/odom`. The [imu_bridge README](../src/imu_bridge/README.md#fused-speed-and-measured-steering)
+explains the estimator and its fallback.
 
 ### Limitations
 
@@ -1020,6 +1032,106 @@ These results support keeping the feature off pending a recorded floor trial.
 Traction control holds the speed command briefly when the driven wheels appear to
 spin faster than the car is moving. It ships **off** (`enable_imu_traction: false`);
 the launch flag is `imu_traction:=true`.
+
+### How it changes acceleration
+
+Wheel odometry (`/odom`) estimates speed from motor revolutions. The fused speed
+(`/odom/fused`) combines that estimate with the IMU's forward accelerometer.
+Their difference, wheel speed minus fused speed, is called **slip** here.
+
+When slip exceeds 0.246 m/s, the node holds the last commanded speed. A lower
+clearance or cornering speed limit still takes effect immediately. The hold
+lasts at most 0.5 s, then acceleration resumes even if the slip persists.
+
+After expiry, another hold needs at least one tick below the release threshold,
+0.123 m/s. Falling below that threshold during a hold also releases it. If either
+speed is below 0.3 m/s, or negative, the check makes no judgement and applies no
+hold; standstill and reversing retain the feature-off acceleration ramp.
+
+With trusted inputs above that speed floor and no hold, the acceleration ramp
+starts from the larger of the last command and fused speed, limited to top speed.
+The wheel reading cannot raise that starting point. For example, with wheels at
+2.0 m/s and fused speed at 1.8 m/s, a last command of 1.5 m/s ramps from 1.8 m/s.
+
+### When it falls back
+
+Traction needs the shared IMU trust check: status `ok`, fresh `/imu/data` and a
+finite yaw rate. Fused odometry must also be finite and less than 0.2 s old.
+Missing or untrusted inputs reset the hold and restore the feature-off ramp on
+that same tick, including when the IMU drops out during a hold.
+
+The decision reason on `/drive_intent` names an active hold as
+`imu traction hold (slip 0.30m/s)` for a 0.30 m/s difference. An unusable input
+appears as `imu_traction_off: imu fault`, `imu stale`, `no imu`,
+`no fused odometry`, `fused odometry stale` or `fused speed not finite`.
+Status `waiting` appears as `imu_traction_off: imu waiting`.
+
+Turning traction off removes its fused-odometry subscription and its intent text.
+Driving on fused speed is a separate option: with `fused_speed:=true`, the raw-wheel
+fallback described in [Fused speed](#fused-speed-imu) still applies.
+
+<details>
+<summary><b>Threshold measurements and parameters</b>: skip unless tuning traction.</summary>
+
+The 2026-10-29 measurement paired `/odom` and `/odom/fused` by identical message
+header timestamps in copied bags from runs `20261026-194514` and `20261026-194913`.
+
+It used the latest positive `/drive` command, no more than 0.2 s old. A rising
+command counted as accelerating; an unchanged command counted as cruising.
+Only positive finite wheel-minus-fused differences enter these percentiles.
+
+| Run / phase | Positive samples | P50 (m/s) | P90 (m/s) | P95 (m/s) | P99 (m/s) |
+|---|---:|---:|---:|---:|---:|
+| `20261026-194514`, accelerating | 531 | 0.02252 | 0.11675 | 0.14857 | 0.19874 |
+| `20261026-194514`, cruising | 645 | 0.01635 | 0.06021 | 0.07860 | 0.14848 |
+| `20261026-194913`, accelerating | 485 | 0.04812 | 0.12719 | 0.15089 | 0.17340 |
+| `20261026-194913`, cruising | 1,269 | 0.00812 | 0.05125 | 0.07155 | 0.11661 |
+| Both runs, accelerating | 1,016 | 0.03117 | 0.12436 | 0.15048 | 0.18259 |
+| Both runs, cruising | 1,914 | 0.00994 | 0.05458 | 0.07387 | 0.12698 |
+
+Pooling both phases and runs gives P99 = 0.163902809 m/s. The default is
+`max(0.15, 1.5 × P99)` = 0.245854213 m/s, rounded to **0.246 m/s**.
+It stays below the estimator's 0.3 m/s divergence clamp so engagement is reachable.
+
+| YAML parameter | Default | Meaning |
+|---|---|---|
+| `fused_odom_topic` | `/odom/fused` | Separate fused-speed input for traction; also identifies fused-speed driving. |
+| `wheel_odom_topic` | `/odom` | Raw-wheel fallback when driving on fused speed. |
+| `imu_traction_slip_threshold` | 0.246 m/s | Hold when wheel minus fused speed exceeds this. |
+| `imu_traction_release_slip` | 0.123 m/s | Release and rearm only below this difference. |
+| `imu_traction_min_speed` | 0.3 m/s | Both speeds must reach this floor to judge slip. |
+| `imu_traction_max_hold_sec` | 0.5 s | Maximum continuous hold. |
+| `imu_traction_timeout_sec` | 0.2 s | Fused-input freshness limit. |
+
+Numeric settings accept live changes through ROS parameter services. Invalid
+values are refused at startup and on live change; all must be finite and positive,
+and release slip must stay below engagement slip. An accepted change resets the
+hold. Feature flags and topic settings (ROS channel names) require a restart.
+
+</details>
+
+### Floor-trial order
+
+**Test with the wheels off the ground first, then on the floor at low speed in
+open space. Hold LB whenever the car moves; releasing it stops the car.**
+Keep recording on as in [Validation](#validation), so wheel speed, fused speed
+and commands can be compared afterwards.
+
+In **Terminal 2**, with ROS and the workspace sourced and bringup already running
+in **Terminal 1**, start the wheels-off check at 1.0 m/s:
+
+```bash
+ros2 launch gap_follow gap_follow_launch.py imu_traction:=true max_speed:=1.0
+```
+
+**Working when:** the IMU stack starts once and `/imu/status` reaches `ok` after
+the car has stayed still for startup. A hold reason appears only when both speeds
+reach 0.3 m/s and their difference exceeds 0.246 m/s. Missing inputs name the
+fallback reason instead; a stationary car should not be held by traction.
+
+After the wheels-off check, make a short, low-speed floor run in open space.
+If the hold behaves unexpectedly, release LB, relaunch with `imu_traction:=false`
+and compare the recordings before raising speed.
 
 ### Simulator evidence and limitations
 
