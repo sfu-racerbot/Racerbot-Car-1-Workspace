@@ -50,6 +50,10 @@ test_team_a_deadman_isolated[True] at the movement assertion (peak 0 m/s).
 Review step 3: removing the brake remap failed test_team_a_graph_is_isolated
 waiting for the required endpoint; changing the referee lap target to 0.1
 failed test_team_a_short_race_writes_result at its 0.2-lap assertion.
+Review steps 1 and 5: swapping the hold arguments failed
+test_team_a_car1_deadman_does_not_gate_car2 (car 1 peaked at 4.8927 m/s);
+forcing car 2's hold true failed test_team_a_deadman_isolated[False] (3.0 m/s).
+All review mutations were restored and all five team A cases passed together.
 """
 
 import contextlib
