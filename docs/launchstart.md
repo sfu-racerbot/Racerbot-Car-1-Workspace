@@ -158,7 +158,8 @@ Options, added to the end of the command:
 | `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
 | `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. It also loads `slam_gyro.yaml`: a tighter loop-closure search for good odometry. A loop closure is SLAM noticing it has come back to a place it already mapped. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
 | `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
-| `imu:=false` | no IMU side (the BNO085 bridge, `imu_bridge`, `vehicle_state`). Added for you in the simulator |
+| `imu:=false` | explicitly turn off the IMU stack, including the estimator |
+| `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
 
 **If it says `the hardware is not running`:** start Terminal 1 first.
 

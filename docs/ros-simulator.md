@@ -184,6 +184,29 @@ this estimator. In the simulator it chooses the simulated IMU by itself:
 neither `imu_bridge_node` nor the BNO085 bridge. `imu_hardware:=false` forces
 the simulated IMU.
 
+`map_course` also uses the simulated IMU. With `sim_bringup_launch.py`
+running, the wrapper adds `imu_hardware:=false` for you, so the estimator
+runs without starting the real sensor readers. You can use `gyro_odom:=true`
+to give SLAM the gyro's heading. `imu:=false` explicitly disables the estimator.
+
+In the first comparison on 2026-10-29, three-lap runs on
+`car1_course_2026_10_26` at a 2.0 m/s cap
+used a deliberately wrong yaw-rate scale of 1.1. Wheel odometry (heading
+estimated from speed and steering, [glossary](glossary.md#odometry--odom)) drifted
+43°, 93° and 128° after successive revolutions; gyro heading stayed within
+0.36°. All runs saved maps, including a scale-1.0 control. Only the gyro-mapping
+run generated a racing profile, but it still reported steering and wall-clearance
+problems. This demonstrates the heading benefit, not a clean map.
+
+The comparison used `diagnostics:=false` because the recorder include
+overrides the map output directory when enabled.
+
+Steering damping is active in the simulator: `/drive_intent` reports a
+non-zero correction against the gyro's turn rate while cornering. With
+`imu_fault:=stale`, its reason changes to `steering_damping_off: imu stale`
+while driving continues; setting the fault back to `none` restores damping.
+Reasons appear periodically, so some messages omit that field.
+
 **All simulated IMU output sits behind the hardware interlock.**
 The simulator refuses to send readings beside `imu_bridge_node`, including in
 other namespaces, because mixing real and simulated gyros would mislead
@@ -279,6 +302,7 @@ that depends on a thousandth of a radian will vary with it.
 | `hold_deadman` | `true` | `false` proves the car stays stopped with LB released |
 | `release_after_sec` | `-1` | Release the synthetic LB this far into the run |
 | `odom_speed_scale` | `1.0` | Odometry scale error, as a miscalibrated `speed_to_erpm_gain` would give |
+| `odom_yaw_rate_scale` | `1.0` | Scale the turn rate used by dead-reckoned `/odom`, modelling a miscalibrated steering model. The simulated gyro still measures the true turn rate. |
 | `seed` | `12345` | LiDAR noise and odometry noise |
 | `dashboard` | `false` | Also start `web_dashboard` |
 
