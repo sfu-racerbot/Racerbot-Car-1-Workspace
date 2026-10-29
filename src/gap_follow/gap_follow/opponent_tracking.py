@@ -746,8 +746,26 @@ class OpponentAwareness:
         return room
 
     def follow_cap(self, passing: bool = True) -> float:
-        """Moving cars use the pass-dependent band; held cars always use the
+        """min(follow_law_cap(passing), alongside_cap(passing)), in m/s."""
+        return min(self.follow_law_cap(passing), self.alongside_cap(passing))
+
+    def follow_law_cap(self, passing: bool = True) -> float:
+        """The gap-only follow law over cars ahead of our bumper, in m/s.
+
+        Moving cars use the pass-dependent band; held cars always use the
         full relevance band, regardless of another car permitting a pass.
+        This is the part FollowCapMemory may hold after the car is lost.
+        """
+        moving_cap = follow_speed_cap(
+            [(m[4], m[1]) for m in self.moving_body()], self.front_x, self.params,
+            lateral=None if passing else self.params.relevant_lateral)
+        held_cap = follow_speed_cap(
+            [(m[4], m[1]) for m in self._held_body()], self.front_x, self.params,
+            lateral=self.params.relevant_lateral)
+        return min(moving_cap, held_cap)
+
+    def alongside_cap(self, passing: bool = True) -> float:
+        """The alongside-abort ceiling, in m/s; inf when it does not apply.
 
         When passing is refused, each relevant moving or held car whose
         observed rear/nearest face is at or behind our front bumper, and
@@ -763,19 +781,17 @@ class OpponentAwareness:
         their rear cutoff), not an unbounded region behind us. With passing
         permitted, or no alongside car, this adds no ceiling. All ceilings
         combine by minimum and can only lower the commanded speed.
+
+        It applies only on scans that see the alongside car, and is never
+        held by FollowCapMemory: a wall segment briefly tracked as a mover
+        beside the car would otherwise brake it for the whole memory window
+        (measured 2026-10-29: two ticks of a false mover held for 1 s, and
+        3 of 36 two-car runs on car 1's course ended wedged).
         """
-        moving = self.moving_body()
-        held = self._held_body()
-        moving_cap = follow_speed_cap(
-            [(m[4], m[1]) for m in moving], self.front_x, self.params,
-            lateral=None if passing else self.params.relevant_lateral)
-        held_cap = follow_speed_cap(
-            [(m[4], m[1]) for m in held], self.front_x, self.params,
-            lateral=self.params.relevant_lateral)
         abort_cap = math.inf
         if not passing:
-            for m in moving + held:
+            for m in self.moving_body() + self._held_body():
                 if m[4] <= self.front_x and m[0] > self.centre_x:
                     abort_cap = min(abort_cap, max(
                         0.0, math.hypot(m[2], m[3]) - self.params.abort_speed_margin))
-        return min(moving_cap, held_cap, abort_cap)
+        return abort_cap

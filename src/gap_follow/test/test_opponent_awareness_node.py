@@ -630,3 +630,48 @@ def test_the_memory_clock_runs_through_a_no_safe_gap_stop(aware_node):
     # the memory.
     assert open_modes == ['follow_memory'] * 10, open_modes
     assert all(v <= cap + 0.01 for v in open_speeds), (open_speeds, cap)
+
+
+def _alongside_scan_car_gone(step):
+    # The narrowing corridor of _alongside_scan, with the other car gone.
+    walls = [((-10.0, s * 2.0), (0.3, s * 2.0)) for s in (-1, 1)]
+    walls += [((0.3, s * 2.0), (0.6, 0.30 + s * 0.53)) for s in (-1, 1)]
+    walls += [((0.6, 0.30 + s * 0.53), (20.0, 0.30 + s * 0.53)) for s in (-1, 1)]
+    scan = _raycast(walls)
+    ns = round((100.0 + step * DT) * 1e9)
+    scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+    return scan
+
+
+def test_the_follow_memory_never_holds_the_alongside_abort(aware_node):
+    node, published = aware_node
+    for step in range(44):
+        _alongside_tick(node, published, step)
+    abort_speed = _alongside_tick(node, published, 44, narrow=True)
+    # oracle: invariant -- the abort binds on the narrow tick and nothing else
+    # does: no car is ahead of the bumper, so the follow law is uncapped.
+    assert node.opponent_mode == 'follow' and 0.0 < abort_speed < OPP_SPEED
+    assert node.opponents.follow_law_cap(False) == math.inf
+    assert node.opponents.alongside_cap(False) < OPP_SPEED
+    joy = Joy()
+    joy.buttons = [0, 0, 0, 0, 1]
+    # The car leaves the scan; its track coasts (and still aborts) for up to
+    # opponent_max_misses scans, then is dropped. Stop at the first scan with
+    # no tracked car at all.
+    for step in range(45, 45 + 40):
+        node.joy_callback(joy)
+        odom = Odometry()
+        odom.twist.twist.linear.x = EGO_SPEED
+        node.odom_callback(odom)
+        node.steering_basis = 0.0
+        node.last_commanded_speed = abort_speed
+        node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+        node.scan_callback(_alongside_scan_car_gone(step))
+        if not node.opponents.followed_body():
+            break
+    assert not node.opponents.followed_body()
+    # oracle: invariant -- on the first scan with no tracked car, the abort
+    # ceiling is gone: the memory holds only the follow law (uncapped here),
+    # so the command rises above the abort speed instead of being held at it.
+    assert node.opponent_mode != 'follow_memory', node.opponent_mode
+    assert published[-1].drive.speed > abort_speed, (published[-1].drive.speed, abort_speed)

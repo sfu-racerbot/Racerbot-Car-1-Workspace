@@ -391,6 +391,7 @@ class GapController:
                 switch_margin=p["gap_switch_margin"])
 
         follow_cap = math.inf
+        alongside_cap = math.inf
         self.opponent_mode = None
         if self.opponents is not None and self.opponents.moving_body():
             avoid = select(self.opponents.augment(window, beam_angles))
@@ -414,22 +415,26 @@ class GapController:
             else:
                 processed, gap_start, gap_end, used_fallback = plain
                 self.opponent_mode = "follow"
-            follow_cap = self.opponents.follow_cap(passing)
-            tel["follow_cap"] = follow_cap
+            follow_cap = self.opponents.follow_law_cap(passing)
+            alongside_cap = self.opponents.alongside_cap(passing)
+            tel["follow_cap"] = min(follow_cap, alongside_cap)
         else:
             processed, gap_start, gap_end, used_fallback = select(window)
 
         if (self.opponents is not None and self.opponent_mode is None
                 and self.opponents.followed_body()):
             self.opponent_mode = "follow"
-            follow_cap = self.opponents.follow_cap(passing=False)
-            tel["follow_cap"] = follow_cap
+            follow_cap = self.opponents.follow_law_cap(passing=False)
+            alongside_cap = self.opponents.alongside_cap(passing=False)
+            tel["follow_cap"] = min(follow_cap, alongside_cap)
 
         # The follow cap outlives its car for opponent_follow_memory_sec, as in
         # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
+        # The alongside-abort ceiling is added after the memory, never held by it.
         if self.opponents is not None:
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, step * CONTROL_DT)
+            follow_cap = min(follow_cap, alongside_cap)
             if held:
                 self.opponent_mode = "follow_memory"
                 tel["follow_cap"] = follow_cap

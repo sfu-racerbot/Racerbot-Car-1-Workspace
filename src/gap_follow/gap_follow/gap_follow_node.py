@@ -1253,6 +1253,7 @@ class GapFollowNode(Node):
         # model the body's own width themselves.
         raw_window = window
         follow_cap = math.inf
+        alongside_cap = math.inf
         if self.opponents is not None and self.opponents.moving_body():
             # Another car is moving nearby. Search twice: once with its
             # predicted footprint inflated (opponent_tracking.inflate_
@@ -1274,7 +1275,8 @@ class GapFollowNode(Node):
             self.opponent_mode = 'clear' if passing else 'follow'
             (window, closest_dist, gap_start, gap_end, used_fallback,
              target_idx_in_window, near_bearing) = avoid if passing else plain
-            follow_cap = self.opponents.follow_cap(passing)
+            follow_cap = self.opponents.follow_law_cap(passing)
+            alongside_cap = self.opponents.alongside_cap(passing)
         else:
             (window, closest_dist, gap_start, gap_end, used_fallback,
              target_idx_in_window, near_bearing) = self._select_gap(
@@ -1283,18 +1285,21 @@ class GapFollowNode(Node):
         if (self.opponents is not None and self.opponent_mode is None
                 and self.opponents.followed_body()):
             self.opponent_mode = 'follow'
-            follow_cap = self.opponents.follow_cap(passing=False)
+            follow_cap = self.opponents.follow_law_cap(passing=False)
+            alongside_cap = self.opponents.alongside_cap(passing=False)
 
         # The follow cap outlives its car: it is held for opponent_follow_memory_sec
         # after the car was last seen (opponent_tracking.FollowCapMemory). Only the
         # speed ceiling is held, never a steering command or a stop, and the scan
         # stamp is its clock, as it is for the tracker. It comes before the
-        # no_safe_gap stop below.
+        # no_safe_gap stop below. The alongside-abort ceiling is added after the
+        # memory, so it binds only on scans that see the alongside car.
         if self.opponents is not None:
             follow_cap, held = self.opponents.follow_memory.update(
                 follow_cap, self.opponent_last_stamp)
             if held:
                 self.opponent_mode = 'follow_memory'
+            follow_cap = min(follow_cap, alongside_cap)
 
         if gap_start is None:
             if emergency_tripped or ttc_tripped:

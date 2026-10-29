@@ -203,6 +203,47 @@ def test_mirror_matches_alongside_wide_to_narrow_abort(node):
     assert 0.0 < actual < OPP_SPEED
 
 
+def test_mirror_matches_the_node_when_the_alongside_car_vanishes(node):
+    """Through the abort and on until the vanished car's track is dropped:
+    both must let the abort ceiling go with the car, not hold it in memory."""
+    from test_opponent_awareness_node import (
+        _alongside_scan, _alongside_scan_car_gone, _alongside_tick, OPP_SPEED)
+    params = gap_mirror.node_params()
+    params['command_slew_max_dt'] = DT
+    node.command_slew_max_dt = DT
+    mirror = gap_mirror.GapController(params, _Lidar(_alongside_scan(0)))
+    published = []
+    node.drive_pub.publish = published.append
+    dropped_at = None
+    for step in range(45 + 40):
+        mirror.steering_basis = 0.0
+        mirror.last_commanded_speed = 2.5
+        mirror.last_command_time = step - 1
+        mirror.previous_target_idx = node.previous_target_idx
+        if step <= 44:
+            scan = _alongside_scan(step, step == 44)
+            actual = _alongside_tick(node, published, step, narrow=step == 44)
+        else:
+            scan = _alongside_scan_car_gone(step)
+            node.steering_basis = 0.0
+            node.last_commanded_speed = 2.5
+            node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+            node.scan_callback(scan)
+            actual = published[-1].drive.speed
+        steer, speed = mirror.command(np.asarray(scan.ranges), 2.5, step)
+        # oracle: invariant -- independent node and mirror command paths agree.
+        assert actual == pytest.approx(speed, abs=TOLERANCE), step  # m/s
+        assert node.opponent_mode == mirror.opponent_mode, step
+        if step > 44 and not node.opponents.followed_body():
+            dropped_at = step
+            break
+    # oracle: invariant -- the scenario really reached a dropped track, and
+    # neither path held the abort ceiling past it.
+    assert dropped_at is not None
+    assert node.opponent_mode != 'follow_memory'
+    assert actual > OPP_SPEED - params['opponent_abort_speed_margin']
+
+
 def test_mirror_matches_the_node_with_opponent_awareness_on():
     """The same comparison with enable_opponent_awareness on and another car
     in the scene: ahead in a 2 m corridor, closing, drifting sideways, so the
