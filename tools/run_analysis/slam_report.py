@@ -329,7 +329,8 @@ def build_report(run):
     grid = slam.get('map')
     if no_slam:
         lines.append('  no SLAM')
-    elif grid is None or len(pose) < 2 or not len(scan_t):
+    elif (grid is None or len(pose) < 2 or not len(scan_t) or not len(scans)
+          or any(run.get(key) is None for key in ('angle_min', 'angle_increment', 'range_max'))):
         lines.append('  missing final map, SLAM pose, or scans')
     else:
         def score(mask):

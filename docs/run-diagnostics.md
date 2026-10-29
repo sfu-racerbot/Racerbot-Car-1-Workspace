@@ -380,6 +380,85 @@ invisible unless you read that one field.
 
 ---
 
+## SLAM report
+
+After the car has stopped and the recording has finished, use this report to
+check how [SLAM](glossary.md#slam) built the map. It reads the recorded bag and
+does its analysis afterwards, so do not run it while the car is driving or
+mapping.
+
+In a terminal, from the workspace root, replace `RUN_DIR` with the path to the
+recorded run. The first read needs ROS sourced; later reads use cached data in
+the run's `analysis/` directory.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 tools/run_analysis/slam_report.py RUN_DIR
+```
+
+The command prints seven sections and writes `slam_report.txt`, `summary.json`
+and available PNG plots under `RUN_DIR/analysis/slam_report/`. To count loop
+closures, add `--log LOG_PATH` with the path to the launch terminal log. Without
+that log, the loop-closure count is unknown. The command uses `launch.log` in
+the run directory when it exists. Add `--refresh` to reread the bag, or
+`--no-plots` to skip PNGs.
+
+To compare two runs, replace `RUN_A`, `RUN_B` and `OUTPUT_DIR` with paths in
+this terminal command:
+
+```bash
+python3 tools/run_analysis/slam_report.py --compare RUN_A RUN_B --out OUTPUT_DIR
+```
+
+The comparison prints the numbers side by side and writes overlay plots to the
+output directory. It does not write into either run.
+
+### Reading the seven sections
+
+1. **Setup** compares SLAM's configured odometry frame with the frame in the
+   recorded transforms. A mismatch is flagged. It also gives wheel
+   [odometry](glossary.md#odometry--odom) distance and mean and maximum speed
+   while moving faster than 0.3 m/s.
+2. **Heading drift** shows how far two heading estimates drift apart after
+   starting at the same difference. Smaller differences are generally better,
+   but SLAM uses the odometry it was given, so agreement alone does not prove
+   either estimate is correct.
+3. **Corrections and loop closures** counts changes SLAM made to its map
+   transform, the largest movement and turn, and jumps over 0.3 m and 1.5 m.
+   A Ceres solve in the launch log is used as a proxy for a loop closure.
+4. **Laps** lists each closed lap's distance, closest approach to its start,
+   corrections absorbed and any quality failure. A missing quality message is
+   reported as unknown, not as a pass.
+5. **Map consistency** is the percentage of finite LiDAR endpoints that land
+   on or within one grid cell of an occupied wall in the final map. A higher
+   percentage means more of what the LiDAR saw lines up with those walls. It
+   is shown for the whole run and for each lap window.
+6. **Scan drops** counts dropped scan messages recorded on `/rosout`. The
+   10-second bins also show slam_toolbox CPU use when a system log exists;
+   100% means one full CPU core. A missing system log leaves CPU unknown.
+7. **Wheel vs scan-matched distance** compares the wheel path with SLAM's
+   map-frame path over the same time span. A ratio near 1 means their lengths
+   agree, though it does not establish that either path is accurate.
+
+For example, run `20261026-194913` used `odom_imu` in both the parameter
+snapshot and the transforms. The final heading difference between `/odom/imu`
+and SLAM was −16.44°, compared with 102.61° for `/odom` and SLAM. The report
+found 32 scan drops, but that older recording has no system log, so CPU use
+cannot be checked. Its map consistency was 34.1% overall, and three corrections
+moved the estimated car position by more than 1.5 m. Those low agreement and
+large corrections are reasons to investigate, rather than a healthy-map
+verdict. Laps 3 and 4 failed their heading quality check at 29.5° and 29.2°
+against a 15° limit; the run did not save a map.
+
+### Limitations
+
+The final map and SLAM poses are estimates, so consistency is not independent
+proof of map accuracy. Missing inputs are labelled in the report. If SLAM did
+not map the run, the report says so and still shows the other available data.
+
+---
+
 ## Safety notes for anyone (or anything) changing this code
 
 Read [architecture.md](architecture.md) and
