@@ -1262,8 +1262,9 @@ sample, h reached 14.158056 m/s² and speed fell from 2.469307 to 0.590842 m/s.
 In `20261026-180228`, at 83.419 s, h reached 11.036402 m/s² and speed fell from
 2.444059 to 0.644802 m/s. Neither establishes a clear impact stopping the car.
 
-The largest spike, 22.48381983126393 m/s² in `20261029-132902` at 11.048 s,
-was followed by speed 3.711633 → 2.210027 m/s, rather than falling toward zero.
+The provisional threshold comes from the 22.48381983126393 m/s² event in
+`20261029-132902` at 18.693069 s from bag start, with `/odom` speed
+4.215129 m/s at −0.5 s and 2.210027 m/s at +0.5 s, rather than a fall toward zero.
 
 With no clear impact identified, the controller's 2026-10-29 ruling gives
 `max(15.0, 1.5 × 22.48381983126393)` = **33.7257297468959 m/s²**.
