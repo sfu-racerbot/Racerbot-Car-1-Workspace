@@ -472,6 +472,125 @@ not map the run, the report says so and still shows the other available data.
 
 ---
 
+## Replaying SLAM with the car parked
+
+`tools/run_analysis/slam_replay.py` runs SLAM again on a recorded bag and
+writes its results into a new run folder. Use it to compare settings or check
+whether SLAM can reproduce the recorded poses without another drive.
+
+**Highlights**
+
+- Starts SLAM with the recording's parameter snapshot, plus optional profile overrides.
+- Rebuilds odometry transforms instead of playing the car's recorded map corrections.
+- Offers exact scan selection and lockstep feeding for stamp-by-stamp comparison.
+- Saves a replay bag, logs, map files when available, and a `replay.json` summary.
+
+**Stop bringup before replaying.** The command refuses while a
+[VESC](glossary.md#vesc) motor-controller, LiDAR or joystick driver process is
+alive. Simulator joystick processes also match this
+check. Every replay child uses ROS domain 77 with localhost discovery, keeping
+the replay's messages on a separate ROS graph from the car.
+
+### Run an exact replay
+
+In one terminal at the workspace root, replace `RUN_DIR` with the recorded run
+folder. This example uses `odom_imu`, the wheel-and-gyro odometry used by run
+`20261026-194913`. Use `--odom odom` for a recording mapped on wheel odometry.
+
+```bash
+RB_WS="$(git rev-parse --show-toplevel)" rb python3 tools/run_analysis/slam_replay.py \
+  RUN_DIR --exact --odom odom_imu --label exact
+```
+
+The machine's `rb` wrapper loads the ROS environment. The replay prints its
+output folder on success. Open that folder's `replay.json` to check `status`
+and `pose_sequence_error`; a timeout prints the failed scan stamp and keeps the
+logs. See the measured limitation below before trying the 19:49 recording.
+
+Output defaults to
+`~/.ros/racerbot_runs/RUN_NAME-replay-odom_imu-exact/`. Existing output folders
+are refused, so use a different `--label` for another attempt. Add
+`--out-root /tmp/slam-replays` to put results in a scratch directory instead.
+The source run is read without being modified.
+
+### What exact mode feeds
+
+SLAM stamps each `/pose` with the scan it processed. Exact mode selects only
+the recorded `/scan` messages whose header stamps equal those pose stamps,
+in recorded pose order. It starts `sync_slam_toolbox_node` and waits for each
+scan's matching `/pose` before sending the next scan. This is **lockstep**:
+SLAM sets the pace, rather than a playback rate.
+
+Before a scan, the feeder publishes odometry through the first sample at or
+after its stamp, so [TF](glossary.md#tf--transform--frame) can interpolate the car's
+pose at that time. The car's SLAM message filter normally waits for this same
+sample.
+
+`/clock` advances to the scan stamp, not to the future odometry
+sample. `exact.lookahead_samples` in `replay.json` counts odometry messages
+sent beyond the current scan's stamp; normally there is one per scan sent.
+
+Exact mode refuses before starting if a pose's matching scan was not recorded,
+if scan stamps are duplicated, or if a scan has no odometry sample at or after
+its stamp. The error names the missing stamp.
+
+A missing processed scan means
+the recording cannot reproduce that run; even the first pose has no exception.
+`--exact` also refuses `--rate` and mode-related profile overrides.
+
+Without `--exact`, the command uses asynchronous SLAM and plays all scans at
+`--rate` (default `1.0`). A YAML file passed with `--profile` overrides the
+recorded settings. Rate replay is useful for tuning, but an overloaded SLAM
+node can drop different scans, so its pose sequence is not a tick-for-tick
+reproduction.
+
+### Limitations: measured result on the 19:49 run
+
+Run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
+matches a distinct recorded scan. The SLAM report's **314 updates** count
+changes between successive `map → odom_imu` corrections; the initial
+correction is identity. That count does not mean a pose lacks its scan.
+
+With slam_toolbox **2.8.5**, exact replay matched the first pose with position
+error **2.38 × 10⁻¹⁴ m** and yaw error **0°**, then timed out waiting for the
+second pose at stamp **1793069379768709386 ns**. The comparison reports
+`matched: 1`, `missing_in_replay: 314`, `extra_in_replay: 0`, and
+`first_over_bar: null`. Two future odometry samples were sent, one for each
+attempted scan.
+
+**The complete 1 mm / 0.1° reproduction bar was not met.** A null
+`first_over_bar` only says that the matched pose was within the bar.
+
+The synchronous node still applies an input filter: its
+[`shouldProcessScan()`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_common.cpp)
+accepts the first scan but rejects callback counts 2–4 for initial
+stabilisation. The
+[synchronous callback](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_sync.cpp)
+uses that filter too. On the car, additional incoming scans advance the
+counter before the second accepted pose.
+
+Feeding only the accepted scans
+therefore stops at the second scan. This is a scan-admission limitation,
+rather than evidence of solver numerical error.
+
+### When map saving fails
+
+Both modes try SLAM's map-saving service up to three times. If no `map.yaml`
+appears, replay closes and flushes its bag, then writes `map.pgm` and
+`map.yaml` from the bag's last `/map`. This converts the recorded occupancy
+grid, whose cells mark free, occupied or unknown space, into map files.
+
+`replay.json` distinguishes `map_saved: true` for a service save,
+`map_saved: "from_bag"` for this fallback, and `map_saved: false` if neither
+produced a map. A forced service failure on the 19:49 recording at rate `2.0`
+produced `map_saved: "from_bag"`, a 272,967-byte `map.pgm` and a 166-byte
+`map.yaml`.
+
+If a replay fails before reaching its save step, the summary can
+still report `map_saved: false` even when an earlier map exists in the bag.
+
+---
+
 ## Safety notes for anyone (or anything) changing this code
 
 Read [architecture.md](architecture.md) and

@@ -178,3 +178,39 @@ def test_fallback_without_map(tmp_path):
     out = tmp_path / 'out'
     assert replay.save_map_from_bag(bag, out) is False
     assert not out.exists()
+
+
+def test_map_threshold_boundaries(tmp_path):
+    # oracle: spec nav2 map_io.cpp: valid <=25 free, >=65 occupied; other values unknown.
+    pgm, _ = replay.map_from_bag_files([[-2, -1, 0, 25, 26, 64, 65, 100, 101]], 1, (0, 0), tmp_path)
+    assert pgm.read_bytes() == b'P5\n9 1\n255\n' + bytes([205, 205, 254, 254, 205, 205, 0, 0, 205])
+
+
+@pytest.mark.parametrize('resolution', [0, -.1, math.nan, math.inf])
+def test_invalid_map_resolution(tmp_path, resolution):
+    # oracle: invariant - a grid cannot have zero, negative or nonfinite cell size.
+    with pytest.raises(ValueError, match='resolution.*positive'):
+        replay.map_from_bag_files([[0]], resolution, (0, 0), tmp_path)
+
+
+@pytest.mark.parametrize('grid', [[], [[]]])
+def test_empty_map_refused(tmp_path, grid):
+    # oracle: invariant - no raster can be saved from an empty grid.
+    with pytest.raises(ValueError, match='nonempty 2D'):
+        replay.map_from_bag_files(grid, 1, (0, 0), tmp_path)
+
+
+@pytest.mark.parametrize('key', ['mode', 'sync', 'async', 'synchronous', 'slam_mode'])
+def test_exact_profile_mode_override_refused(tmp_path, monkeypatch, capsys, key):
+    from .test_slam_replay import make_run
+    # oracle: spec - the synchronous choice cannot be changed by a profile.
+    run = make_run(tmp_path / 'source')
+    profile = tmp_path / 'profile.yaml'
+    profile.write_text(yaml.safe_dump({key: 'async'}))
+    proc = tmp_path / 'proc'
+    proc.mkdir()
+    monkeypatch.setattr(replay, 'PROC_ROOT', proc)
+    assert replay.main([str(run), '--exact', '--profile', str(profile),
+                        '--out-root', str(tmp_path / 'out')]) == 2
+    assert 'profile overrides of sync/async mode' in capsys.readouterr().err
+    assert not (tmp_path / 'out').exists()
