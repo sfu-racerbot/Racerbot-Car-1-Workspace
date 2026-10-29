@@ -1,4 +1,8 @@
-"""Evaluate launch actions without starting hardware; pytest / colcon test."""
+"""Evaluate launch actions without starting hardware; pytest / colcon test.
+
+Seen failing when hardware=false still starts imu_bridge_node, and against
+an empty action-builder stub (including true-stack and invalid-value cases).
+"""
 
 import importlib.util
 from pathlib import Path

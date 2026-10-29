@@ -1,4 +1,10 @@
-"""True-state IMU physics; run with python3 -m pytest src/racerbot_sim/test/."""
+"""True-state IMU physics; run with python3 -m pytest src/racerbot_sim/test/.
+
+Mutation checks: removing the forward lever arm fails the circle's forward
+mean; subtracting bias fails test_fault_outputs[bias]; using previous speed
+in v*r fails test_accelerating_turn_uses_current_speed. Constant ideal readings,
+a step stub, a 10% gravity change and an unchecked fault setter also fail.
+"""
 
 import json
 from pathlib import Path
@@ -190,6 +196,9 @@ def test_fault_outputs(fault):
         assert imu.status() == dict(state=state, reason=reason, imu='bno')
     elif fault == 'zero':
         assert actual.bno_acc == actual.bno_gyro == actual.vesc_acc == actual.vesc_gyro == (0.0,)*3
+        # oracle: zero bypasses configured noise, not just noiseless physics.
+        noisy_zero = SimImu(np.random.default_rng(7), fault='zero').step(2.0, 0.5, 0.025)
+        assert noisy_zero == actual
         health = ImuHealth('bno')
         health.sample(0.0, (0,)*3, (0,)*3, (0,)*3, (0,)*3, 0.0, True)
         assert imu.status()['reason'] == health.status(0.0)[1]

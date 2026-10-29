@@ -1,4 +1,8 @@
-"""ROS IMU wiring/interlock: pytest with rb in an isolated localhost domain."""
+"""ROS IMU wiring/interlock: pytest with rb in an isolated localhost domain.
+
+Seen failing against pre-interlock publication, removal of the real IMU guard,
+car 2 routed to root topics, ignored runtime faults, and ignored publish_imu.
+"""
 
 import json
 import os
@@ -160,7 +164,7 @@ def test_car2_imu_reaches_only_car2(ros_context):
     # oracle: no sensor_msgs/Imu exists outside the specified per-car trees.
     imu_topics = [t for t, types in node.get_topic_names_and_types() if 'sensor_msgs/msg/Imu' in types]
     assert imu_topics
-    assert all(re.fullmatch(r'(?:/car[2-9][0-9]*)?/imu/(?:bno/data|vesc/data|data)', t)
+    assert all(re.fullmatch(r'(?:/car(?:[2-9]|[1-9][0-9]+))?/imu/(?:bno/data|vesc/data|data)', t)
                for t in imu_topics), imu_topics
     # oracle: imu_bridge format and primary=BNO, matched by shared stamp.
     assert bno and vesc and scans and status
