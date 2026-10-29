@@ -285,11 +285,21 @@ Without the layer, every remaining failure is one pattern. A fast car starts to 
 
 #### Opponent awareness: what it does
 
+TODO(R2b/R4): Update the opponent-awareness behaviour description when those tasks are settled.
+
 It's a switch, off by default. **With it off nothing below runs**, and the node's commands are exactly what they were before it existed.
 
 Two checks back that up. With the layer off, the benchmark above reproduces the 2026-10-20 numbers exactly. And a node test runs the same scans with the layer on and off, in a world where nothing moves, and requires identical commands.
 
 Leaving it on with only one car costs nothing measurable either. In the single-car sweep (11 tracks, 6 seeds, both directions) it passes 111 of 132 runs, against 108 of 132 with it off, and every track does at least as well.
+
+#### Recognition measurements
+
+Recognition means identifying the other visible car as a moving object in the scan. A false mover is an object identified as moving when only one car is on the track. [The metric definitions](run-analysis.md#testing-several-cars-at-once) explain how these are counted.
+
+A simulator sweep tried `opponent_min_hits` of 3, 4, 6 and 8 with `opponent_moving_speed` of 0.4 and 0.6 m/s. No setting recognised cars faster without extra false movers. At 3–4 hits, car 1's course had up to 180 false-mover ticks. The defaults remain 8 hits and 0.6 m/s.
+
+Across the races, about 49% of ticks when the other car was visible were recognised; on car 1's course it was about 35%. The limit was the other car being close to walls, rather than `opponent_min_hits`. These are simulation measurements, not proof of recognition on the physical car.
 
 **Terminal 2**, instead of the usual `gap_follow` launch, on **every** car on the track:
 
@@ -344,6 +354,25 @@ python3 tools/f1tenth_sim/eval_gap_multi.py --track indoor_oval,indoor_wide,asb_
 ```
 
 **Working when:** every line reads `pass 4/4  wall 0  car-car 0`.
+
+### Racing team A in the simulator
+
+Four simulated races compared team A's shipped controller and safety parameters with car 1's shipped `gap_follow.yaml`. Each was set to 3 laps. These results are simulation only; they do not predict a physical race.
+
+Team A's car touched a wall in every race, ending it before either car finished. The times and progress below come from the four `race.json` files under `/tmp/oc-part-b1-r7/`; progress is rounded to three decimal places.
+
+| Track | Start order | Contact time (simulated seconds) | Car 1 laps | Team A laps |
+|---|---|---:|---:|---:|
+| `car1_course_2026_10_26` | normal | 4.950 | 0.470 | 0.212 |
+| `car1_course_2026_10_26` | swapped | 2.925 | 0.142 | 0.206 |
+| `indoor_wide` | normal | 4.050 | 0.302 | 0.182 |
+| `indoor_wide` | swapped | 2.850 | 0.146 | 0.162 |
+
+Normal starts put car 1 first; swapped starts put team A first. In all four files, car 2 has wall contact, neither car has car contact, both finish times are `null`, and `winner` is `null`.
+
+The measured cause was team A's disparity extender turning in late at 3.0 m/s, then asking for 0.56–0.67 rad of steering. The simulator limits steering to car 1's measured 0.509 rad left and 0.448 rad right (`STEERING_MAX_LEFT/RIGHT` in `sim_bridge.py`), so the car runs wide.
+
+Team A's shipped settings are tuned for its own car: `wheelbase` 0.33 m, `max_speed` 3.0 m/s and `max_lateral_acc` 3.5 m/s². See [how to launch the race](ros-simulator.md#race-team-a).
 
 ## Checking it in the simulator
 

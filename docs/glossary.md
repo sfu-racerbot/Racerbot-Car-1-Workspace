@@ -18,6 +18,14 @@ One running program that does one job. `urg_node` reads the LiDAR. `gap_follow_n
 
 A named channel that nodes use to send messages to each other, like `/scan` or `/drive`. Nodes in this workspace never call each other directly — everything goes over topics.
 
+### Namespace
+
+A prefix that groups ROS names. For example, `/car2/scan` belongs to the `car2` namespace, separate from car 1's `/scan`.
+
+### Race referee
+
+The program that scores a simulated race from simulator status, including lap progress and contact. It is separate from the mux that selects drive commands.
+
 ### Publish / subscribe
 
 Publishing means putting messages onto a topic. Subscribing means asking to receive them. A publisher doesn't know or care who is listening, which is why you can add a dashboard without touching the driving code.
