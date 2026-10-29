@@ -1242,6 +1242,53 @@ def grip_ratio(yaw_rate: float, speed: float, steering: float,
     return yaw_rate * speed / demanded
 
 
+def horizontal_force(ax, ay) -> float:
+    """Horizontal specific force in car axes (m/s²); invalid input is unknown."""
+    if not (math.isfinite(ax) and math.isfinite(ay)):
+        return math.nan
+    return math.hypot(ax, ay)
+
+
+class ImpactLatch:
+    """Stop on consecutive spikes; only a post-impact LB release/press clears."""
+
+    def __init__(self, threshold, min_samples):
+        self.validate(threshold, min_samples)
+        self.threshold = threshold
+        self.min_samples = min_samples
+        self.latched = False
+        self._count = 0
+        self._released = False
+
+    @staticmethod
+    def validate(threshold, min_samples):
+        if not math.isfinite(threshold) or threshold <= 0:
+            raise ValueError('imu_impact_threshold must be finite and positive')
+        if type(min_samples) is not int or min_samples < 1:
+            raise ValueError('imu_impact_min_samples must be an integer >= 1')
+
+    def on_sample(self, ax, ay, trusted) -> bool:
+        h = horizontal_force(ax, ay)
+        if trusted and math.isfinite(h) and h > self.threshold:
+            self._count += 1
+            if self._count >= self.min_samples and not self.latched:
+                self.latched = True
+                self._released = False
+        else:
+            self._count = 0
+        return self.latched
+
+    def on_lb(self, pressed) -> bool:
+        if self.latched and pressed is not None:
+            if not pressed:
+                self._released = True
+            elif self._released:
+                self.latched = False
+                self._released = False
+                self._count = 0
+        return self.latched
+
+
 def understeer_ratio(measured_steering, commanded_steering, speed,
                      min_steering=0.05, min_speed=1.0) -> float:
     """Measured/commanded turn, or NaN when the turn cannot be judged.
