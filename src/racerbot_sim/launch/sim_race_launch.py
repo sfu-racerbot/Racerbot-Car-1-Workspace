@@ -1,4 +1,4 @@
-"""Launch two real gap-follow nodes, the simulator, referee, and recorder."""
+"""Launch two real controllers, the simulator, referee, and recorder."""
 
 from __future__ import annotations
 
@@ -47,11 +47,6 @@ def _setup(context):
     gap_share = get_package_share_directory('gap_follow')
     default_yaml = os.path.join(gap_share, 'config', 'gap_follow.yaml')
     car1_yaml = LaunchConfiguration('car1_params').perform(context) or default_yaml
-    car2_yaml = LaunchConfiguration('car2_params').perform(context) or default_yaml
-    car2 = _params(car2_yaml)
-    car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom', drive_topic='/car2/drive',
-                joy_topic='/car2/joy', intent_topic='/car2/drive_intent',
-                imu_topic='/car2/imu/data', imu_status_topic='/car2/imu/status')
     offsets = ('-3.0,0.0' if LaunchConfiguration('swap_starts').perform(context).lower() == 'true'
                else '0.0,-3.0')
     bringup = IncludeLaunchDescription(
@@ -64,9 +59,17 @@ def _setup(context):
         }.items())
     car1 = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
                 parameters=[car1_yaml], output='screen')
-    car2_node = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
-                     namespace='car2', parameters=[car2], output='screen')
-    if opponent == 'team_a':
+    if opponent == 'ours':
+        car2_yaml = LaunchConfiguration('car2_params').perform(context) or default_yaml
+        car2 = _params(car2_yaml)
+        car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom', drive_topic='/car2/drive',
+                    joy_topic='/car2/joy', intent_topic='/car2/drive_intent',
+                    imu_topic='/car2/imu/data', imu_status_topic='/car2/imu/status')
+        car2_node = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
+                         namespace='car2', parameters=[car2], output='screen')
+    else:
+        car2 = {'controller': 'disparity_extender', 'safety': 'safety_node',
+                'parameters': 'upstream launch defaults'}
         includes = []
         for package, launch_file in (('disparity_extender', 'disparity_extender_launch.py'),
                                      ('safety_node', 'launch_safety.py')):
