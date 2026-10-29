@@ -30,13 +30,10 @@ Everything in Part A's Global Constraints applies unchanged, plus these decision
 
 | Item | Starts when | Why this order |
 |---|---|---|
-| B1 SLAM observability | Part A Tasks 1-3 merged, and the bringup datalogger (another session) has a branch to read | Every later SLAM change is judged with it |
-| B2 `map_course` IMU flags | B1's `slam_report` exists | Its effect is measured with B1 |
-| B3 Simulated IMU | Any time after Part A | B4's closed-loop tests need it |
-| B4 `gap_follow` IMU features | B3 merged | Each feature is proven in the simulator first |
-| **B6 Overtaking: priority 1** | Part A done. The team confirmed on 2026-10-27 that the course has room to pass | Races are lost behind the other car today |
+| **B6 Overtaking** and **B9 Two controlled cars, racing team A** | **Done 2026-10-29** on branch `part-b1-racing` ([the B-1 plan](2026-10-27-part-b1-racing.md), "Outcome and lessons") | |
+| B1 SLAM observability, B2 `map_course` IMU flags, B3 Simulated IMU, B4 `gap_follow` IMU features | B-1 merged to `main`. **Now one plan, two parallel tracks:** [the combined B-2/3 plan](2026-10-29-part-b23-slam-imu.md) | Disjoint code, one shared join (the IMU flags); B3's simulated IMU also closes a simulator gap B-1 found |
+| B10 B-1 follow-ups | When the race schedule needs them; the floor test (R9) first | See B10 below |
 | B7 Car 1's course in the simulator | **Done 2026-10-27** (`car1_course_2026_10_26`, commit `a343d44`) | |
-| **B9 Two controlled cars in `racerbot_sim`, and racing team A: priority 2** | Part A done. Can run beside B6 | The real nodes, and team A's real code, race ours |
 
 B5 (recording every run) is done: the **bringup datalogger** (`auto_record`) merged to `main` on 2026-10-26. The SLAM-specific additions it still lacks are listed under B1.
 
@@ -248,6 +245,15 @@ So B6 is now a tuning-and-behaviour task, not a policy question.
 - the full-ROS result for ours-vs-ours agrees in ranking with `eval_gap_multi.py` on the same settings.
 
 **Keep in mind:** a simulator win is evidence, not a verdict. The real races, now recorded by bringup's `auto_record`, are the check.
+
+## B10. B-1 follow-ups (added 2026-10-29)
+
+Found while building B-1; none blocks B-2/3. Details in the B-1 plan's "Outcome and lessons".
+- **Floor test (R9):** two-car wheels-off check, a slow two-car floor run with `max_speed:=1.0` recorded by `auto_record`, then the race. Opponent awareness is now **on by default for racing** and has never run on the floor.
+- **Standing-start acquisition:** two cars side by side before either track is confirmed (8 scans) touched 0.875 s in.
+- **Passing is rare with the follow memory on.** Revisit with floor data.
+- **Track confirmation is lost when a track is deleted and re-created** (deferred: inheriting it by position could confirm a wall).
+- **R1's minor findings** in `eval_gap_multi.py`.
 
 ## Coverage of every request (2026-10-26/27)
 

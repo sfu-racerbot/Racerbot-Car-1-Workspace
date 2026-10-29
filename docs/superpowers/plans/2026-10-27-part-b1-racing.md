@@ -178,3 +178,33 @@ Only if R7 shows that tuning against team A needs many races.
 ### Task R9: Floor test hand-over
 
 Give the team the order: two-car wheels-off check, then a slow two-car floor run with `max_speed:=1.0`, recorded by bringup's `auto_record`, then the race. Show how to read the recording with the R1 score where possible.
+
+## Outcome and lessons (2026-10-29)
+
+**Status:** R1-R7 done on `oc/part-b1-racing`, merged into `part-b1-racing`. R8 dropped. R9 handed to the team (outline item B10). The ledger with every ruling is `.oc-runs/part-b1-racing/progress.md` on the dev box.
+
+### What changed from the plan
+
+- **R2 grew three sub-tasks.**
+  - **R2b (diagnosis).** It absorbed R6b, the ROS-against-fast-simulator disagreement. Across 616 fast-simulator runs, the stall behind a slower car is a controller-policy deadlock: gap_follow never reverses, so once its stop rules hold it at zero beside the other car, it stays there. With awareness on, the main way in is a track expiring while the cars are close. A deadlock-escape design was rejected, because emergency clearance holds the stuck car and any escape would touch the safety model.
+  - **R2c (follow-cap memory).** The follow cap is held for `opponent_follow_memory_sec` (1.0 s) after its track disappears. It gave 32 of 32 runs with 0 stalls and 0 contacts. **User decision:** awareness **on by default for racing**, with the memory, and switchable off (`opponent_awareness:=false`).
+  - **R2d (mapping launches).** **User decision:** mapping is always one car, so `map_course`, `auto_map_race` and `autonomous_mapping` default awareness **off**, with an `opponent_awareness` argument.
+- **R3:** no recognition setting was faster without adding false movers. `min_hits` 8 and `moving_speed` 0.6 stay. About 49% of passes are recognised (35% on car 1's course).
+- **R4:** the outline is a 0.58 × 0.31 m rectangle, with its centre recovered from the near face. Margin 0.15 was the only setting with 0 stalls, so the margins (0.15, 0.10) stay.
+- **The final review added an alongside abort:** when the narrow-section rule refuses a pass with the other car alongside, cap the speed at `max(0, v_other − 0.5)` so this car drops back. Before, the cap there was infinite.
+- **R7:** team A's `disparity_extender` hits the wall within 3-5 s in `racerbot_sim`. It turns in late at 3.0 m/s and asks for 0.56-0.67 rad, while car 1's servo stops at 0.45-0.51 rad. Car 1 ran those races with awareness off.
+- **R8 dropped** (user, 2026-10-28): no copy or edit of team A's code. They run from their own launch files under a `/car2` namespace with remaps, with their own deadman on, fed a forged `/car2/joy`.
+
+### Lessons, carried into the combined B-2/3 plan
+
+1. **Make sure the scenario exercises the behaviour.** The first R2 and R4 acceptance runs used a 2.5 m/s "slow" leader. A 5.0 m/s-capped car only averages about 2.4 m/s on car 1's course, so the follower never caught up, and the results said nothing. Size the speeds to the course, and report a measure that proves the behaviour happened.
+2. **Hard rule 1 for deadman tests:** flipping an expectation proves nothing. Monkeypatch the deadman gate in memory in a scratch process, and require every deny test to fail.
+3. **Simulator ROS tests:** use `/test_only/...` drive chains, plus a conftest guard that fails fast without an isolated domain.
+4. **Two simulators, two steering laws:** `racerbot_sim` has no IMU, so steering damping is inert there. B-2/3's simulated IMU fixes it.
+5. **Parallel tracks work:** sibling worktrees on separate ROS domains (78 and 79), merged at the end, with no conflicts.
+6. **Dev-box hazards:**
+   - Duplicate package names (team A's and team B's `safety_node`) leave a stale CMake cache.
+   - `pytest --basetemp` needs an existing parent directory.
+   - The box is shared: `--workers 2`, and hold sweeps while a real-time race runs.
+7. **Models:** OpenAI, tokenzap and Haiku all hit usage limits during the run. Small checkpoint commits and the ledger made every hand-over between models a resume, not a restart.
+8. **Good implementers stop on contradictions** (NEEDS_CONTEXT 9 times). Most of those stops were errors in the controller's own briefs: "and" written for "or", wrong test geometry, a missing file. Check each brief against the plan before sending it.
