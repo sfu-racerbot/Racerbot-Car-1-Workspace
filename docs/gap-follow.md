@@ -101,7 +101,8 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 - `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
 - `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does, so do not run the two together.
-- The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file. So the other-car layer is on in their mapping laps too, since 2026-10-28. None of them has an `opponent_awareness:` argument. Their switch is `enable_opponent_awareness` in the YAML.
+- The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read. TODO(verify-R2d): the pass is in the separate code change.
+- Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run. TODO(verify-R2d): the argument is in the same separate code change; check the three launch files against these two bullets once it lands.
 
 ### Before the first run on the car
 
@@ -387,15 +388,19 @@ A run passes when no car touches anything and every car finishes. A [stall](glos
 | On, follow memory 0.0 s | 30/32 | 4 | not given |
 | **On, follow memory 1.0 s (shipped)** | **32/32** | **0** | **0** |
 
-Single-car laps were unchanged with the memory on: 24 of 24. The accepted cost is that the faster car rarely passes on wide tracks. The YAML comment records "1 overtake against 8 before" the memory. TODO(verify): the result files are not checked into the repo, so confirm which configuration the 8 comes from.
+Single-car laps were unchanged with the memory on: 24 of 24. The accepted cost is that the faster car rarely passes on wide tracks.
+
+The 8 in the YAML comment ("1 overtake against 8 before") is the awareness-on, no-memory configuration in the same 32-run matrix. All 8 of its overtakes were on indoor_wide, against a leader at 1.0–1.5 m/s. With the 1 s memory on, the same matrix gave 1 overtake.
 
 **The margin sweep, 2026-10-28 (R4).** Leaders at 1.0, 1.5 and 2.0 m/s, on `car1_course_2026_10_26`, `indoor_wide` and `asb_10000`, both directions, 2 seeds, 3 laps. That is 36 runs per setting.
 
 A margin of 0.15 m was the only one with 0 stalls at every steering limit tried (0.10, 0.20 and 0.33 rad). Each of those three settings gave 36 of 36 finished, 0 contacts and 1 overtake. Margins of 0.05 m and 0.10 m overtook up to 4 times, but stalled 1 to 5 times.
 
-The rule for choosing: most overtakes with 0 contacts and 0 stalls, and ties go to the larger time gained by the faster car. At 0.15 m, the shipped 0.10 rad gained +21.56 s. The 0.33 rad setting gained +21.34 s, and 0.20 rad gained +16.05 s.
+The rule for choosing: most overtakes with 0 contacts and 0 stalls, and ties go to the larger time gained by the faster car.
 
-TODO(verify): the sweep's raw results are not checked in, and this doc does not define how the time-gained figure is totalled.
+Time gained is the sum, over 18 cells (3 tracks × 3 leader speeds × 2 directions), of the faster car's mean time gained in each cell. Each cell has 2 seeds. eval_gap_multi prints a `mean time gained` figure for each car on the aggregate line under each track, and the faster car's figure is the one summed.
+
+At 0.15 m, the shipped 0.10 rad gained +21.56 s. The 0.33 rad setting gained +21.34 s, and 0.20 rad gained +16.05 s. The raw sweep output is not checked into this repo.
 
 **The follow hold (R2).** Holds of 1, 2 and 3 s each passed all 40 two-car races and 8 solo runs, with no contacts or stalls. The 1 s hold was shipped because the stuck follower in seed 12346 finished in 27.62 s at 1 s, against 29.18 s at 2 and 3 s.
 
@@ -457,8 +462,6 @@ Four simulated races compared team A's shipped controller and safety parameters 
 
 Team A's car touched a wall in every race, ending it before either car finished. These results were measured on 2026-10-28 with team A at commit `6bef23d`. Progress is rounded to three decimal places.
 
-TODO(verify): car 1's side reads `gap_follow.yaml`, where the other-car layer turned on on 2026-10-28. This table does not record whether these four races ran before or after that change. Re-run them on the current file, and record the setting, before quoting them as the shipped behaviour.
-
 To repeat all four races, complete the [simulator and team A setup](ros-simulator.md#race-team-a) first. Run the commands one at a time; each race ends before the next starts.
 
 **Terminal 1 — races**, from the workspace root, with ROS and the workspace sourced and no real drivers running:
@@ -478,6 +481,8 @@ ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a 
 | `car1_course_2026_10_26` | swapped | 2.925 | 0.142 | 0.206 |
 | `indoor_wide` | normal | 4.050 | 0.302 | 0.182 |
 | `indoor_wide` | swapped | 2.850 | 0.146 | 0.162 |
+
+**Car 1's awareness setting in these four races: off.** They ran before the default changed on 2026-10-28, so car 1's `gap_follow` had `enable_opponent_awareness` off in all four.
 
 Normal starts put car 1 first; swapped starts put team A first. In all four files, car 2 has wall contact, neither car has car contact, both finish times are `null`, and `winner` is `null`.
 
