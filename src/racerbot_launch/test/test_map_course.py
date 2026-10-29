@@ -168,15 +168,19 @@ def test_the_recorder_gets_its_own_folder_not_the_map_run_folder():
         assert "'output_directory': '~/.ros/racerbot_runs'" in text, name
 
 
-def test_simulator_runs_get_imu_false_unless_imu_was_given():
-    # oracle: spec -- map_course_launch.py docstring: no IMU in the simulator.
-    assert mc.launch_arguments(['laps:=4'], simulated=True) == ['laps:=4', 'imu:=false']
-    assert mc.launch_arguments(['imu:=true'], simulated=True) == ['imu:=true']
+def test_simulator_runs_get_imu_hardware_false_unless_imu_hardware_was_given():
+    # oracle: spec -- map_course.launch_arguments docstring; approved 2026-10-29
+    # (I1 part b): simulated IMU stays on, only its hardware readers stay off.
+    assert mc.launch_arguments(['laps:=4'], simulated=True) == ['laps:=4', 'imu_hardware:=false']
+    assert mc.launch_arguments(['imu_hardware:=true'], simulated=True) == ['imu_hardware:=true']
+    assert mc.launch_arguments(['imu:=false'], simulated=True) == ['imu:=false', 'imu_hardware:=false']
     assert mc.launch_arguments(['laps:=4'], simulated=False) == ['laps:=4']
     assert mc.launch_arguments([], simulated=False) == []
 
 
-def test_main_in_the_simulator_launches_without_the_imu(tmp_path, monkeypatch, capsys):
+def test_main_in_the_simulator_launches_without_imu_hardware(tmp_path, monkeypatch, capsys):
+    # oracle: spec -- map_course.launch_arguments docstring; approved 2026-10-29
+    # (I1 part b): the real launch receives imu_hardware:=false, keeping the IMU.
     monkeypatch.setattr(mc, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
     out = tmp_path / 'runs'
     args_file = tmp_path / 'args'
@@ -186,4 +190,4 @@ def test_main_in_the_simulator_launches_without_the_imu(tmp_path, monkeypatch, c
     assert mc.main([f'output_directory:={out}']) == 0
     assert args_file.read_text().split() == [
         'launch', 'racerbot_launch', 'map_course_launch.py',
-        f'output_directory:={out}', 'imu:=false']
+        f'output_directory:={out}', 'imu_hardware:=false']
