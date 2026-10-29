@@ -119,9 +119,16 @@ def _set_parent_death_signal() -> bool:
     return libc.prctl(1, signal.SIGTERM, 0, 0, 0) == 0  # PR_SET_PDEATHSIG
 
 
+def _prepare_tegrastats_child(expected_parent):
+    _set_parent_death_signal()
+    if os.getppid() != expected_parent:
+        os._exit(1)
+
+
 def start_tegrastats(out_path, binary='tegrastats', interval_ms=1000, log=print):
     """Start tegrastats, warning once rather than failing the recording."""
-    preexec_fn = _set_parent_death_signal if sys.platform.startswith('linux') else None
+    parent = os.getpid()
+    preexec_fn = (lambda: _prepare_tegrastats_child(parent)) if sys.platform.startswith('linux') else None
     try:
         with open(out_path, 'a') as output:
             return subprocess.Popen([binary, '--interval', str(interval_ms)], stdout=output,
