@@ -11,6 +11,9 @@ from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
 from gap_follow.launch_imu import select_imu_hardware
 
 
+FUSED_ODOM = '/odom/fused'   # vehicle_state.yaml's fused_odom_topic
+
+
 def _flag(name, value):
     """A launch boolean, read the way racerbot_launch's map_course_launch.py reads its own."""
     text = str(value).strip().lower()
@@ -64,6 +67,12 @@ def generate_launch_description(imu_probe=None):
                     'simulator-validated only, not yet run on the floor '
                     '(docs/gap-follow.md#adaptive-grip-imu).')
 
+    fused_speed_arg = DeclareLaunchArgument(
+        'fused_speed', default_value='false',
+        description='true: read speed from /odom/fused (wheels plus BNO forward acceleration). '
+                    'Starts the shared IMU stack once, including with either gyro feature on. '
+                    'Ships off; floor trial needed (docs/gap-follow.md#fused-speed-imu).')
+
     def node(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
@@ -73,6 +82,8 @@ def generate_launch_description(imu_probe=None):
                         LaunchConfiguration('steering_damping').perform(context))
         grip = _flag('adaptive_grip',
                      LaunchConfiguration('adaptive_grip').perform(context))
+        fused = _flag('fused_speed',
+                      LaunchConfiguration('fused_speed').perform(context))
         speed = speed_cap_overrides(
             yaml_parameters(gap_follow_config),
             LaunchConfiguration('max_speed').perform(context))
@@ -85,12 +96,13 @@ def generate_launch_description(imu_probe=None):
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
                          'enable_adaptive_grip': grip},
-                        speed],
+                        speed,
+                        {'odom_topic': FUSED_ODOM} if fused else {}],
         )]
-        if damping or grip:
-            # Either gyro feature needs the estimator, but simulated IMUs
+        if damping or grip or fused:
+            # All IMU features share one estimator, but simulated IMUs
             # already come from gym_bridge_node. Start real readers only
-            # when selected; both gyro features together still include once.
+            # when selected; any combination of features still includes once.
             hardware, reason = select_imu_hardware(
                 LaunchConfiguration('imu_hardware').perform(context), probe=imu_probe)
             source = 'real IMU hardware' if hardware == 'true' else 'simulated IMU topics'
@@ -102,4 +114,5 @@ def generate_launch_description(imu_probe=None):
         return actions
 
     return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
-                              adaptive_grip_arg, imu_hardware_arg, OpaqueFunction(function=node)])
+                              adaptive_grip_arg, fused_speed_arg, imu_hardware_arg,
+                              OpaqueFunction(function=node)])
