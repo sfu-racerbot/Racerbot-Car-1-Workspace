@@ -11,6 +11,9 @@ from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
 from gap_follow.launch_imu import select_imu_hardware
 
 
+FUSED_ODOM = '/odom/fused'   # vehicle_state.yaml's fused_odom_topic
+
+
 def _flag(name, value):
     """A launch boolean, read the way racerbot_launch's map_course_launch.py reads its own."""
     text = str(value).strip().lower()
@@ -64,6 +67,31 @@ def generate_launch_description(imu_probe=None):
                     'simulator-validated only, not yet run on the floor '
                     '(docs/gap-follow.md#adaptive-grip-imu).')
 
+    fused_speed_arg = DeclareLaunchArgument(
+        'fused_speed', default_value='false',
+        description='true: read speed from /odom/fused (wheels plus BNO forward acceleration). '
+                    'Starts the shared IMU stack once, including with either gyro feature on. '
+                    'Ships off; floor trial needed (docs/gap-follow.md#fused-speed-imu).')
+
+    understeer_arg = DeclareLaunchArgument(
+        'imu_understeer', default_value='false',
+        description='true: cap speed when measured steering shows sustained understeer. '
+                    'Starts the shared IMU stack once. Ships off; floor trial needed '
+                    '(docs/gap-follow.md#understeer-check-imu).')
+
+    traction_arg = DeclareLaunchArgument(
+        'imu_traction', default_value='false',
+        description='true: hold acceleration briefly when wheel speed exceeds fused speed. '
+                    'Starts the shared IMU stack once. Ships off; floor trial needed '
+                    '(docs/gap-follow.md#traction-control-imu).')
+
+    impact_arg = DeclareLaunchArgument(
+        'imu_impact_stop', default_value='false',
+        description='true: latch a zero-speed command on a trusted horizontal acceleration '
+                    'spike. Release LB and press it again to resume. Ships off; threshold '
+                    'is provisional until a recorded wheels-off bump. Shares the IMU stack '
+                    '(docs/gap-follow.md#impact-stop-imu).')
+
     def node(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
@@ -73,6 +101,12 @@ def generate_launch_description(imu_probe=None):
                         LaunchConfiguration('steering_damping').perform(context))
         grip = _flag('adaptive_grip',
                      LaunchConfiguration('adaptive_grip').perform(context))
+        fused = _flag('fused_speed',
+                      LaunchConfiguration('fused_speed').perform(context))
+        understeer = _flag('imu_understeer',
+                          LaunchConfiguration('imu_understeer').perform(context))
+        traction = _flag('imu_traction', LaunchConfiguration('imu_traction').perform(context))
+        impact = _flag('imu_impact_stop', LaunchConfiguration('imu_impact_stop').perform(context))
         speed = speed_cap_overrides(
             yaml_parameters(gap_follow_config),
             LaunchConfiguration('max_speed').perform(context))
@@ -84,13 +118,17 @@ def generate_launch_description(imu_probe=None):
             parameters=[gap_follow_config,
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
-                         'enable_adaptive_grip': grip},
-                        speed],
+                         'enable_adaptive_grip': grip,
+                         'enable_imu_understeer': understeer,
+                         'enable_imu_traction': traction,
+                         'enable_imu_impact_stop': impact},
+                        speed,
+                        {'odom_topic': FUSED_ODOM} if fused else {}],
         )]
-        if damping or grip:
-            # Either gyro feature needs the estimator, but simulated IMUs
+        if damping or grip or fused or understeer or traction or impact:
+            # All IMU features share one estimator, but simulated IMUs
             # already come from gym_bridge_node. Start real readers only
-            # when selected; both gyro features together still include once.
+            # when selected; any combination of features still includes once.
             hardware, reason = select_imu_hardware(
                 LaunchConfiguration('imu_hardware').perform(context), probe=imu_probe)
             source = 'real IMU hardware' if hardware == 'true' else 'simulated IMU topics'
@@ -102,4 +140,6 @@ def generate_launch_description(imu_probe=None):
         return actions
 
     return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
-                              adaptive_grip_arg, imu_hardware_arg, OpaqueFunction(function=node)])
+                              adaptive_grip_arg, fused_speed_arg, understeer_arg,
+                              traction_arg, impact_arg, imu_hardware_arg,
+                              OpaqueFunction(function=node)])
