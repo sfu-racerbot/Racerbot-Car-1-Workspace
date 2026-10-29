@@ -72,3 +72,17 @@ def test_reset_clears_expired_hold_lockout():
 def test_traction_limited_speed_closed_forms(desired, last, holding, expected):
     # oracle: closed form: min(desired,last) on hold, otherwise desired.
     assert gap_logic.traction_limited_speed(desired, last, holding) == expected
+
+
+@pytest.mark.parametrize('standstill_wheel', [0.0, 0.2])
+def test_expired_hold_rearms_at_standstill_only_after_below_release_tick(standstill_wheel):
+    hold = _hold()
+    # oracle: spec task-I5-brief.md controller ruling: expiry locks out until
+    # one below-release tick, including at standstill; low speed never holds.
+    assert hold.update(1.5, 1.0, 0.25)
+    assert not hold.update(1.5, 1.0, 0.25)
+    assert not hold.update(standstill_wheel, 0.0, 0.025)
+    if standstill_wheel > hold.release_slip:
+        assert not hold.update(1.5, 1.0, 0.025)
+        assert not hold.update(0.0, 0.0, 0.025)
+    assert hold.update(1.5, 1.0, 0.025)

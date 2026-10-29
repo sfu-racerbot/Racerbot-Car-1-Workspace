@@ -1291,13 +1291,13 @@ class TractionHold:
         if not all(math.isfinite(v) for v in (wheel_speed, fused_speed, dt)) or dt < 0:
             self.reset()
             return False
-        if wheel_speed < self.min_speed or fused_speed < self.min_speed:
-            self.holding = False
-            self.held_sec = 0.0
-            return False
         slip = wheel_speed - fused_speed
         if slip < self.release_slip:
             self.reset()
+            return False
+        if wheel_speed < self.min_speed or fused_speed < self.min_speed:
+            self.holding = False
+            self.held_sec = 0.0
             return False
         if self.armed and slip > self.slip_threshold:
             self.holding = True
