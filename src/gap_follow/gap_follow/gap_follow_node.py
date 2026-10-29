@@ -1285,6 +1285,17 @@ class GapFollowNode(Node):
             self.opponent_mode = 'follow'
             follow_cap = self.opponents.follow_cap(passing=False)
 
+        # The follow cap outlives its car: it is held for opponent_follow_memory_sec
+        # after the car was last seen (opponent_tracking.FollowCapMemory). Only the
+        # speed ceiling is held, never a steering command or a stop, and the scan
+        # stamp is its clock, as it is for the tracker. It comes before the
+        # no_safe_gap stop below.
+        if self.opponents is not None:
+            follow_cap, held = self.opponents.follow_memory.update(
+                follow_cap, self.opponent_last_stamp)
+            if held:
+                self.opponent_mode = 'follow_memory'
+
         if gap_start is None:
             if emergency_tripped or ttc_tripped:
                 # Tripped, directional, and genuinely boxed in: an escape

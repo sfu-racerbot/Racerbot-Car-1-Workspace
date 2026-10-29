@@ -170,6 +170,7 @@ REQUIRED_PARAMS = frozenset((
     "opponent_steer_delay",
     "opponent_steer_gain",
     "opponent_steer_rate_max",
+    "opponent_follow_memory_sec",
 ))
 
 
@@ -205,6 +206,8 @@ LEGACY_VALUES = {
     "enable_opponent_awareness": False,
     **{f"opponent_{name}": getattr(opponent_tracking.OpponentParams(), name)
        for name in opponent_tracking.OpponentParams.__dataclass_fields__},
+    # The follow-cap memory (2026-10-28) did not exist: 0 is no hold, the old behaviour.
+    "opponent_follow_memory_sec": 0.0,
 }
 
 
@@ -420,6 +423,15 @@ class GapController:
             self.opponent_mode = "follow"
             follow_cap = self.opponents.follow_cap(passing=False)
             tel["follow_cap"] = follow_cap
+
+        # The follow cap outlives its car for opponent_follow_memory_sec, as in
+        # gap_follow_node: speed only, on the same tick, before the no_safe_gap stop.
+        if self.opponents is not None:
+            follow_cap, held = self.opponents.follow_memory.update(
+                follow_cap, step * CONTROL_DT)
+            if held:
+                self.opponent_mode = "follow_memory"
+                tel["follow_cap"] = follow_cap
 
         if gap_start is None:
             return self._stop(step, "no_safe_gap")

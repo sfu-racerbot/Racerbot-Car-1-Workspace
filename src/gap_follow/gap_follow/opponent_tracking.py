@@ -64,6 +64,7 @@ class OpponentParams:
     max_misses: int = 6              # scans unseen before a track is dropped
     moving_speed: float = 0.6        # m/s, world-frame speed to count as moving
     stopped_release_sec: float = 1.0  # s, follow-only hold after moving releases
+    follow_memory_sec: float = 1.0    # s, the follow cap held after its car is lost (0: off)
     radius: float = 0.30             # m, rear relevance cutoff only (not a footprint)
     length: float = 0.58             # m, padded opponent length
     width: float = 0.31              # m, tire width plus 5 mm padding per side
@@ -107,7 +108,7 @@ class OpponentParams:
             if not (math.isfinite(value) and value > 0.0):
                 raise ValueError(f'opponent_{name} must be positive and finite, got {value!r}')
         for name in ('passing_margin', 'prediction_horizon', 'follow_min_gap',
-                     'steer_delay'):
+                     'steer_delay', 'follow_memory_sec'):
             value = getattr(self, name)
             if not (math.isfinite(value) and value >= 0.0):
                 raise ValueError(f'opponent_{name} must be >= 0 and finite, got {value!r}')
@@ -521,12 +522,71 @@ def avoidance_usable(avoid, plain, *, gap_width=math.inf, required_width=0.0) ->
     return a_start <= p_end and p_start <= a_end
 
 
+# A step between two calls that is longer than this, or not forward, starts a
+# new clock: the same staleness rule OpponentAwareness.observe applies to a
+# scan interval.
+_MAX_STEP_SEC = 0.5
+
+# Roundoff allowance on the hold's inclusive end, in seconds. The same allowance
+# _held_body makes for its release tick, against a 0.025 s scan period.
+_HOLD_TOLERANCE_SEC = 1e-12
+
+
+class FollowCapMemory:
+    """Holds the last finite follow cap for ``memory_sec`` after the follow cap
+    disappears (the followed car's track was dropped or left the relevant band).
+    Speed-only: it can only lower the commanded speed. 0 disables it.
+
+    ``update(follow_cap, t_s)`` takes this tick's cap (inf for no cap; NaN is
+    no cap too) and the time in seconds: the scan stamp in the node, the step
+    count times CONTROL_DT in the simulator. It returns ``(cap, from_memory)``.
+    A finite cap is stored with its time and returned as it is. An infinite cap
+    within ``memory_sec`` (inclusive) of the stored time comes back as the stored
+    cap, with from_memory True. Otherwise the answer is ``(inf, False)``. NaN
+    clears the memory, and so does a time that is not finite, or a step since
+    the last call that is not in (0, 0.5] s.
+    """
+
+    def __init__(self, memory_sec: float):
+        self.memory_sec = memory_sec
+        self.reset()
+
+    def reset(self):
+        self._cap = math.inf      # the last finite cap stored
+        self._cap_t = None        # when it was stored; None: nothing is held
+        self._last_t = None       # the time of the previous call
+
+    def update(self, follow_cap: float, t_s: float) -> tuple:
+        if self.memory_sec == 0.0:
+            return follow_cap, False
+        if not math.isfinite(t_s):
+            self.reset()
+            return (math.inf if math.isnan(follow_cap) else follow_cap), False
+        if self._last_t is not None and not (0.0 < t_s - self._last_t <= _MAX_STEP_SEC):
+            self._cap, self._cap_t = math.inf, None
+        self._last_t = t_s
+        if math.isnan(follow_cap):
+            self._cap, self._cap_t = math.inf, None
+            return math.inf, False
+        if follow_cap != math.inf:
+            # A finite cap is stored. -inf is not a cap at all and is passed
+            # through untouched: the memory must never raise a speed.
+            if math.isfinite(follow_cap):
+                self._cap, self._cap_t = follow_cap, t_s
+            return follow_cap, False
+        if self._cap_t is not None and t_s - self._cap_t <= self.memory_sec + _HOLD_TOLERANCE_SEC:
+            return self._cap, True
+        return math.inf, False
+
+
 class OpponentAwareness:
     """The whole layer for one car: what gap_follow_node and the mirror call.
 
     Per scan: ``observe(...)`` once, then ``augment(window, beam_angles)``
     for the gap search, ``may_pass(steering)`` and ``follow_cap(passing)``
-    for the speed chain.
+    for the speed chain, then ``follow_memory.update(follow_cap, t_s)`` on the
+    follow cap before the stops that come after it. ``reset`` clears the
+    memory with the rest of the layer's state.
     """
 
     def __init__(self, params: OpponentParams, wheelbase: float,
@@ -544,12 +604,14 @@ class OpponentAwareness:
         self.steer = SteeringEstimate(params.steer_delay, params.steer_gain,
                                       params.steer_rate_max)
         self.detections = []
+        self.follow_memory = FollowCapMemory(params.follow_memory_sec)
 
     def reset(self, steering: float = 0.0):
         self.ego = EgoPose()
         self.tracker.reset()
         self.steer.reset(steering)
         self.detections = []
+        self.follow_memory.reset()
 
     def observe(self, ranges, valid, angles, speed: float, steering: float, dt: float):
         """Advance the ego pose over ``dt`` and fold this scan in.
