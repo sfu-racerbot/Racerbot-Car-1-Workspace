@@ -30,6 +30,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 17. [Adaptive grip (IMU)](#adaptive-grip-imu)
 18. [Fused speed (IMU)](#fused-speed-imu)
 19. [Understeer check (IMU)](#understeer-check-imu)
+20. [Traction control (IMU)](#traction-control-imu)
 
 ## Highlights
 
@@ -1013,6 +1014,54 @@ ratio. This is synthetic understeer, not measured tyre slip.
 The largest lap-time cost was on reversed `asb_sharp`: mean lap 16.44 s off versus
 17.09 s on. Its closest body clearance with the check on was 0.009 m.
 These results support keeping the feature off pending a recorded floor trial.
+
+## Traction control (IMU)
+
+Traction control holds the speed command briefly when the driven wheels appear to
+spin faster than the car is moving. It ships **off** (`enable_imu_traction: false`);
+the launch flag is `imu_traction:=true`.
+
+### Simulator evidence and limitations
+
+The 2026-10-29 wiring sweep used `eval_gap.py` with the shipped settings and
+opponent awareness on: five indoor tracks and car 1's course, both directions,
+seeds 12345 and 12346, with two workers. The comparison changed only
+`enable_imu_traction=true`. All 24 enabled runs and all 24 feature-off runs completed.
+
+The scenario check found holds on **980 of 11,672 enabled ticks (8.40%)**, rather
+than the near-zero fraction expected from gym's tyres. The `car` profile adds wheel
+speed noise with standard deviation 5% of speed (`sim_fidelity/sensing.py`,
+`OdomSensor`); the fused input here is the true speed. That noise can exceed the
+0.246 m/s threshold without wheelspin.
+
+These runs therefore check wiring and cost, not real traction. Gym cannot spin a
+driven wheel, and this input pair does not reproduce the real estimator's 0.3 m/s
+divergence clamp. The feature remains off pending a recorded floor trial.
+
+Each row averages lap time and steering reversals over two seeds. Contacts are
+chassis-contact ticks from the simulator's own geometry checks, and stops are
+control ticks that commanded a stop; those columns sum the two seeds. Holding is
+the fraction of enabled control ticks with the traction hold engaged.
+
+| Track | Direction | Lap off / on (s) | Contacts off / on | Stop ticks off / on | Reversals/s off / on | Holding on |
+|---|---|---:|---:|---:|---:|---:|
+| `indoor_oval` | forward | 9.790 / 9.775 | 0 / 0 | 4 / 4 | 0.819 / 0.821 | 6.39% |
+| `indoor_tight` | forward | 9.540 / 9.590 | 0 / 0 | 4 / 4 | 0.841 / 0.837 | 4.43% |
+| `indoor_wide` | forward | 12.075 / 12.080 | 0 / 0 | 4 / 4 | 0.664 / 0.664 | 11.18% |
+| `asb_10000` | forward | 14.030 / 14.080 | 0 / 0 | 4 / 4 | 0.571 / 0.569 | 11.72% |
+| `asb_sharp` | forward | 15.215 / 15.240 | 0 / 0 | 4 / 4 | 0.527 / 0.526 | 9.84% |
+| `car1_course_2026_10_26` | forward | 12.900 / 12.200 | 0 / 0 | 4 / 4 | 0.467 / 0.493 | 4.82% |
+| `indoor_oval` | reverse | 9.650 / 9.690 | 0 / 0 | 4 / 4 | 0.831 / 0.828 | 7.74% |
+| `indoor_tight` | reverse | 9.500 / 9.540 | 0 / 0 | 4 / 4 | 0.845 / 0.841 | 4.72% |
+| `indoor_wide` | reverse | 11.980 / 12.000 | 0 / 0 | 4 / 4 | 0.669 / 0.668 | 11.04% |
+| `asb_10000` | reverse | 14.040 / 14.090 | 0 / 0 | 4 / 4 | 0.571 / 0.569 | 12.16% |
+| `asb_sharp` | reverse | 16.440 / 15.590 | 0 / 0 | 4 / 4 | 0.491 / 0.515 | 9.14% |
+| `car1_course_2026_10_26` | reverse | 11.900 / 12.050 | 0 / 0 | 4 / 4 | 0.505 / 0.540 | 3.73% |
+
+Across all tracks, mean lap time was 12.255 s off and 12.160 s on, with zero chassis
+contacts and 48 stop ticks in each configuration. Mean steering reversals were
+0.650/s off and 0.656/s on. The longest commanded-motion standstill was five ticks
+(0.125 s) in either configuration; neither added a sustained stall.
 
 ## See also
 
