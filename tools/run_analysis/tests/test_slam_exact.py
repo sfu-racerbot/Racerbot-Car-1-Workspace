@@ -273,3 +273,17 @@ def test_late_pose_resolves_final_missing_but_retains_timeout():
     assert accounting.summary() == {
         'matched_planned': 1, 'missing_planned_stamps': [],
         'extra_pose_stamps': [], 'timed_out_stamps': [20]}
+
+
+def test_unplanned_boundary_scans_sent_without_brackets():
+    # oracle: controller boundary ruling - include both edges, never invent odometry.
+    assert replay.exact_feed_steps([10, 20], [5, 10, 15, 20, 25], [15]) == [
+        (5, False, 1, False), (10, False, 1, True), (15, True, 2, True),
+        (20, False, 2, True), (25, False, 2, False)]
+
+
+@pytest.mark.parametrize('stamp', [5, 25])
+def test_planned_boundary_scans_refused(stamp):
+    # oracle: controller ruling - ONLY unplanned scans may lack an interpolation bracket.
+    with pytest.raises(replay.StampMismatch, match=f'bracket.*{stamp}'):
+        replay.exact_feed_steps([10, 20], [5, 15, 25], [stamp])

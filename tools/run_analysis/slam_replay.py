@@ -99,6 +99,23 @@ def exact_feed_order(scan_stamps_ns, pose_stamps_ns):
     return [(stamp, stamp in planned) for stamp in scans]
 
 
+def exact_feed_steps(odom_stamps_ns, scan_stamps_ns, pose_stamps_ns):
+    """(scan stamp, wait for pose, odometry end index, bracket available), in bag order.
+
+    Only unplanned scans may lack brackets. Send available odometry through
+    the first sample at/after the scan (or the end of the bag for a tail scan).
+    """
+    odoms = list(odom_stamps_ns)
+    steps = []
+    for stamp, planned in exact_feed_order(scan_stamps_ns, pose_stamps_ns):
+        bracketed = bool(odoms) and odoms[0] <= stamp <= odoms[-1]
+        if planned and not bracketed:
+            raise StampMismatch(f'no odometry interpolation bracket for planned scan {stamp}')
+        end = min(bisect_left(odoms, stamp) + 1, len(odoms))
+        steps.append((stamp, planned, end, bracketed))
+    return steps
+
+
 class ExactPoseAccounting:
     """Track all observed poses and planned timeouts without making extras fatal."""
 
@@ -258,7 +275,7 @@ def odometry_brackets(odom_stamps_ns, scan_stamps_ns):
     ends = []
     for stamp in scan_stamps_ns:
         index = bisect_left(odoms, stamp)
-        if index == len(odoms):
+        if index == len(odoms) or stamp < odoms[0]:
             raise StampMismatch(f'no odometry interpolation bracket for scan {stamp}')
         ends.append(index + 1)
     return ends
@@ -707,7 +724,8 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
         _check_alive(relay, recorder)
         if exact:
             name, argv, feed_env = exact_specs[1]
-            play = _start(children, name, [*argv, '--result', str(out / 'exact_feed.json')],
+            play = _start(children, name, [*argv, '--result', str(out / 'exact_feed.json'),
+                                          '--slam-params', str(params_file)],
                           feed_env, out / 'exact_feed.log', log)
         else:
             play = _start(children, 'bag_play',

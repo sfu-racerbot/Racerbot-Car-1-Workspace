@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""Feed only scans answered by recorded SLAM, waiting for each new pose.
+"""Feed every recorded scan; wait for poses only at recorded pose checkpoints.
 
 Before each scan, send odometry through the first sample at or after its
 stamp. On the car, SLAM's message filter likewise holds a scan until this
 sample arrives and TF can interpolate at the scan stamp. Advance /clock to
-the scan stamp, never to its future bracket; then wait for that stamp's pose.
+the scan stamp, never to its future bracket. Unplanned scans outside odometry
+coverage are sent without complete brackets, leaving their fate to SLAM's TF
+message filter; planned scans without brackets refuse before publication.
+
+slam_toolbox 2.8.5 has an unbounded processing FIFO (slam_toolbox_sync.hpp:54;
+slam_toolbox_sync.cpp:47-53,118-120), but its earlier TF message filter is
+bounded by scan_queue_size (slam_toolbox_common.cpp:472-475). For bracketed
+scans, wait for the map->odom TF header that proves laserCallback received
+this scan (sync.cpp:100; common.cpp:507). This is a receipt barrier, not a
+pose wait: rejected scans still update scan_header. It prevents the feeder
+from overrunning the sensor-data subscription or TF filter. Boundary scans
+cannot have callback receipts and are sent with a wall-clock discovery yield.
 """
 import argparse
 import json
@@ -13,43 +24,60 @@ import time
 from pathlib import Path
 
 import rclpy
+import yaml
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
 from tf2_msgs.msg import TFMessage
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
-from slam_replay import bag_messages, exact_scan_plan, odometry_brackets, stamp_ns
+from slam_replay import ExactPoseAccounting, bag_messages, exact_feed_steps, stamp_ns
+
+
+class FeedTimeout(RuntimeError):
+    """A wall-clock wait expired; pose-checkpoint timeouts may be nonfatal."""
 
 
 class ExactFeed(Node):
-    def __init__(self, odom_topic):
+    def __init__(self, odom_topic, params):
         super().__init__('slam_exact_feed')
+        self.params = params
+        self.transform_timeout_ns = round(params.get('transform_timeout', .5) * 1_000_000_000)
+        self.map_frame = params.get('map_frame', 'map')
+        self.odom_frame = params['odom_frame']
+        self.boundary_yield_s = max(.02, params.get('transform_publish_period', .05))
         self.clock_pub = self.create_publisher(Clock, '/clock', 10)
         self.static_pub = self.create_publisher(
             TFMessage, '/tf_static', QoSProfile(depth=100, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.odom_pub = self.create_publisher(Odometry, odom_topic, 100)
-        self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
-        self.answered = set()
+        self.scan_pub = self.create_publisher(
+            LaserScan, '/scan', QoSProfile(history=HistoryPolicy.KEEP_ALL, depth=1))
+        self.accounting = ExactPoseAccounting([])
         self.tf_stamps = set()
+        self.callback_stamps = set()
         self.lookahead_samples = 0
         self.completed_scans = 0
+        self.scans_sent = 0
+        self.unbracketed_scans = 0
         self.create_subscription(PoseWithCovarianceStamped, '/pose',
-                                 lambda msg: self.answered.add(stamp_ns(msg)), 100)
+                                 lambda msg: self.accounting.observe(stamp_ns(msg)), 100)
         self.create_subscription(TFMessage, '/tf', self.on_tf, 100)
 
     def on_tf(self, msg):
         for transform in msg.transforms:
             if transform.child_frame_id == 'base_link':
                 self.tf_stamps.add(stamp_ns(transform))
+            if (transform.header.frame_id == self.map_frame
+                    and transform.child_frame_id == self.odom_frame):
+                self.callback_stamps.add(stamp_ns(transform) - self.transform_timeout_ns)
 
     def wait(self, predicate, description, timeout=10.0, tick=None):
         deadline = time.monotonic() + timeout
         while not predicate():
             if time.monotonic() >= deadline:
-                raise RuntimeError(f'timeout waiting for {description}')
+                raise FeedTimeout(f'timeout waiting for {description}')
             if tick is not None:
                 tick()
             rclpy.spin_once(self, timeout_sec=.02)
@@ -70,23 +98,24 @@ class ExactFeed(Node):
                 odoms.append(msg)
             else:
                 statics.extend(msg.transforms)
-        plan = exact_scan_plan([stamp_ns(msg) for msg in scans], poses)
-        by_stamp = {stamp_ns(msg): msg for msg in scans}
+        if self.params.get('restamp_tf', False) or self.params.get('transform_publish_period', .05) <= 0:
+            raise RuntimeError('scan receipt barrier requires restamp_tf=false and transform_publish_period>0')
+        self.accounting = ExactPoseAccounting(poses)
         odoms.sort(key=stamp_ns)
-        ends = odometry_brackets([stamp_ns(msg) for msg in odoms], plan)
+        steps = exact_feed_steps([stamp_ns(msg) for msg in odoms], [stamp_ns(msg) for msg in scans], poses)
         self.wait(lambda: self.scan_pub.get_subscription_count() > 0
                   and self.odom_pub.get_subscription_count() > 0
                   and self.clock_pub.get_subscription_count() > 0,
                   'SLAM, relay and clock subscribers')
         self.static_pub.publish(TFMessage(transforms=statics))
-        if plan:
+        if scans:
             # rosbag2 --use-sim-time defers topic discovery until its first clock.
             # Repeat that same time until the recorder can capture the first pose.
             self.wait(lambda: any(info.node_name.startswith('rosbag2_recorder')
                                   for info in self.get_subscriptions_info_by_topic('/pose')),
-                      'recorder /pose subscription', tick=lambda: self.clock(plan[0]))
+                      'recorder /pose subscription', tick=lambda: self.clock(stamp_ns(scans[0])))
         index = 0
-        for stamp, end in zip(plan, ends):
+        for scan, (stamp, planned, end, bracketed) in zip(scans, steps):
             while index < end:
                 odom = odoms[index]
                 self.odom_pub.publish(odom)
@@ -95,11 +124,28 @@ class ExactFeed(Node):
                 self.lookahead_samples += stamp_ns(odom) > stamp
                 index += 1
             self.clock(stamp)
-            self.scan_pub.publish(by_stamp[stamp])
-            self.wait(lambda: stamp in self.answered, f'/pose at scan stamp {stamp}')
-            self.completed_scans += 1
-            print(f'answered {stamp}', flush=True)
-        print(f'finished {len(plan)} planned scans', flush=True)
+            self.scan_pub.publish(scan)
+            self.scans_sent += 1
+            if bracketed:
+                self.wait(lambda: stamp in self.callback_stamps, f'SLAM scan callback at {stamp}')
+            else:
+                self.unbracketed_scans += 1
+                deadline = time.monotonic() + self.boundary_yield_s
+                while time.monotonic() < deadline:
+                    rclpy.spin_once(self, timeout_sec=.005)
+            if planned:
+                try:
+                    self.wait(lambda: stamp in self.accounting.observed, f'/pose at scan stamp {stamp}')
+                except FeedTimeout:
+                    print(f'missing planned pose {stamp}; continuing', flush=True)
+                if self.accounting.checkpoint(stamp):
+                    self.completed_scans += 1
+                    print(f'answered {stamp}', flush=True)
+        # Capture final unplanned poses while the synchronous FIFO drains.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=.02)
+        print(f'finished {self.scans_sent} scans, {self.completed_scans} planned poses answered', flush=True)
 
 
 def main():
@@ -107,9 +153,11 @@ def main():
     parser.add_argument('bag')
     parser.add_argument('--odom-topic', required=True)
     parser.add_argument('--result', type=Path, required=True)
+    parser.add_argument('--slam-params', type=Path, required=True)
     args = parser.parse_args()
     rclpy.init()
-    node = ExactFeed(args.odom_topic)
+    params = yaml.safe_load(args.slam_params.read_text())['slam_toolbox']['ros__parameters']
+    node = ExactFeed(args.odom_topic, params)
     try:
         node.feed(args.bag, args.odom_topic)
     except RuntimeError as exc:
@@ -117,7 +165,11 @@ def main():
         return 1
     finally:
         args.result.write_text(json.dumps({'lookahead_samples': node.lookahead_samples,
-                                          'completed_scans': node.completed_scans}) + '\n')
+                                          'unbracketed_scans': node.unbracketed_scans,
+                                          'scans_sent': node.scans_sent,
+                                          'scan_callbacks_confirmed': len(node.callback_stamps),
+                                          'completed_scans': node.completed_scans,
+                                          **node.accounting.summary()}) + '\n')
         node.destroy_node()
         rclpy.shutdown()
     return 0
