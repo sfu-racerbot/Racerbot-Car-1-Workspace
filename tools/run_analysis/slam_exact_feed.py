@@ -7,15 +7,21 @@ before the second planned scan, then only the remaining planned scans. In
 stabilisation. Sacrifices must produce no pose. Admission overrides open the
 throttle/time/travel gates: each planned scan already passed these on the car
 relative to the same previous processed pose, so identical inputs pass again.
-Scan matching and solver settings are preserved. All-scans mode retains the
-recorded admission parameters and sends every recorded scan.
+Scan matching and solver settings are preserved. Forced mode publishes the
+recorded /tf message payloads in recorded order, dropping ONLY transforms
+whose parent is map (including the map entries of mixed messages). Its
+dynamic chain is derived from the recorded tree and configured odom/base
+frames. Each pair gets its own at/before and at/after interpolation bracket;
+no composed odometry interpolation or odom_tf_relay is used in this mode.
 
-Before each scan, send odometry through the first sample at or after its
-stamp. On the car, SLAM's message filter likewise holds a scan until this
-sample arrives and TF can interpolate at the scan stamp. Advance /clock to
-the scan stamp, never to its future bracket. Unplanned scans outside odometry
-coverage are sent without complete brackets, leaving their fate to SLAM's TF
-message filter; planned scans without brackets refuse before publication.
+All-scans mode retains the recorded admission parameters, sends every scan
+and keeps the odometry relay, preserving the round-1 timing experiment.
+
+In all-scans mode, send odometry through the first sample at or after each
+scan. In both modes, advance /clock to the scan stamp, never to its future
+bracket. Only all-scans unplanned inputs may lack complete brackets, leaving
+their fate to SLAM's TF filter; forced inputs and planned all-scans inputs
+without brackets refuse before publication.
 
 slam_toolbox 2.8.5 has an unbounded processing FIFO (slam_toolbox_sync.hpp:54;
 slam_toolbox_sync.cpp:47-53,118-120), but its earlier TF message filter is
@@ -40,10 +46,11 @@ from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
 from tf2_msgs.msg import TFMessage
 from rclpy.node import Node
+from rclpy.duration import Duration
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
 from slam_replay import (ExactPoseAccounting, bag_messages, exact_feed_steps,
-                         forced_scan_plan, odometry_brackets, stamp_ns)
+                         forced_scan_plan, prepare_recorded_tf, stamp_ns)
 
 
 class FeedTimeout(RuntimeError):
@@ -62,7 +69,10 @@ class ExactFeed(Node):
         self.clock_pub = self.create_publisher(Clock, '/clock', 10)
         self.static_pub = self.create_publisher(
             TFMessage, '/tf_static', QoSProfile(depth=100, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.odom_pub = self.create_publisher(Odometry, odom_topic, 100)
+        self.recorded_tf_pub = self.create_publisher(
+            TFMessage, '/tf', QoSProfile(history=HistoryPolicy.KEEP_ALL, depth=1)
+        ) if exact_mode == 'forced' else None
+        self.odom_pub = self.create_publisher(Odometry, odom_topic, 100) if exact_mode == 'all-scans' else None
         self.scan_pub = self.create_publisher(
             LaserScan, '/scan', QoSProfile(history=HistoryPolicy.KEEP_ALL, depth=1))
         self.accounting = ExactPoseAccounting([])
@@ -73,6 +83,9 @@ class ExactFeed(Node):
         self.scans_sent = 0
         self.unbracketed_scans = 0
         self.sacrificial_stamps = set()
+        self.tf_seen = set()
+        self.tf_messages_sent = 0
+        self.tf_info = {}
         self.create_subscription(PoseWithCovarianceStamped, '/pose',
                                  self.on_pose, 100)
         self.create_subscription(TFMessage, '/tf', self.on_tf, 100)
@@ -85,6 +98,7 @@ class ExactFeed(Node):
 
     def on_tf(self, msg):
         for transform in msg.transforms:
+            self.tf_seen.add((transform.header.frame_id, transform.child_frame_id, stamp_ns(transform)))
             if transform.child_frame_id == 'base_link':
                 self.tf_stamps.add(stamp_ns(transform))
             if (transform.header.frame_id == self.map_frame
@@ -106,14 +120,17 @@ class ExactFeed(Node):
         self.clock_pub.publish(msg)
 
     def feed(self, bag, odom_topic):
-        scans, poses, odoms, statics = [], [], [], []
-        for topic, msg in bag_messages(bag, ['/scan', '/pose', '/tf_static', odom_topic]):
+        scans, poses, odoms, statics, tf_messages = [], [], [], [], []
+        source_topic = '/tf' if self.exact_mode == 'forced' else odom_topic
+        for topic, msg in bag_messages(bag, ['/scan', '/pose', '/tf_static', source_topic]):
             if topic == '/scan':
                 scans.append(msg)
             elif topic == '/pose':
                 poses.append(stamp_ns(msg))
             elif topic == odom_topic:
                 odoms.append(msg)
+            elif topic == '/tf':
+                tf_messages.append(msg)
             else:
                 statics.extend(msg.transforms)
         if self.params.get('restamp_tf', False) or self.params.get('transform_publish_period', .05) <= 0:
@@ -123,16 +140,20 @@ class ExactFeed(Node):
         odom_stamps = [stamp_ns(msg) for msg in odoms]
         if self.exact_mode == 'forced':
             forced = forced_scan_plan([stamp_ns(msg) for msg in scans], poses)
-            ends = odometry_brackets(odom_stamps, [stamp for stamp, _ in forced])
+            tf_messages, ends, self.tf_info = prepare_recorded_tf(
+                tf_messages, statics, self.odom_frame, self.params.get('base_frame', 'base_footprint'),
+                [stamp for stamp, _ in forced])
             by_stamp = {stamp_ns(msg): msg for msg in scans}
             scans = [by_stamp[stamp] for stamp, _ in forced]
             steps = [(stamp, planned, end, True) for (stamp, planned), end in zip(forced, ends)]
         else:
             steps = exact_feed_steps(odom_stamps, [stamp_ns(msg) for msg in scans], poses)
         self.wait(lambda: self.scan_pub.get_subscription_count() > 0
-                  and self.odom_pub.get_subscription_count() > 0
+                  and ((self.recorded_tf_pub is not None
+                        and self.recorded_tf_pub.get_subscription_count() > 1)
+                       or (self.odom_pub is not None and self.odom_pub.get_subscription_count() > 0))
                   and self.clock_pub.get_subscription_count() > 0,
-                  'SLAM, relay and clock subscribers')
+                  'SLAM, transform and clock subscribers')
         self.static_pub.publish(TFMessage(transforms=statics))
         if scans:
             # rosbag2 --use-sim-time defers topic discovery until its first clock.
@@ -143,11 +164,22 @@ class ExactFeed(Node):
         index = 0
         for scan, (stamp, planned, end, bracketed) in zip(scans, steps):
             while index < end:
-                odom = odoms[index]
-                self.odom_pub.publish(odom)
-                self.wait(lambda: stamp_ns(odom) in self.tf_stamps,
-                          f'relay TF at {stamp_ns(odom)}')
-                self.lookahead_samples += stamp_ns(odom) > stamp
+                if self.exact_mode == 'forced':
+                    transforms = tf_messages[index]
+                    self.recorded_tf_pub.publish(TFMessage(transforms=transforms))
+                    if not self.recorded_tf_pub.wait_for_all_acked(Duration(seconds=10.0)):
+                        raise FeedTimeout(f'recorded TF delivery at scan {stamp}')
+                    keys = [(tf.header.frame_id, tf.child_frame_id, stamp_ns(tf)) for tf in transforms]
+                    self.wait(lambda: all(key in self.tf_seen for key in keys),
+                              f'recorded TF receipt at scan {stamp}')
+                    self.tf_messages_sent += 1
+                    self.lookahead_samples += sum(stamp_ns(tf) > stamp for tf in transforms)
+                else:
+                    odom = odoms[index]
+                    self.odom_pub.publish(odom)
+                    self.wait(lambda: stamp_ns(odom) in self.tf_stamps,
+                              f'relay TF at {stamp_ns(odom)}')
+                    self.lookahead_samples += stamp_ns(odom) > stamp
                 index += 1
             self.clock(stamp)
             if self.exact_mode == 'forced' and not planned:
@@ -214,6 +246,8 @@ def main():
                                           'scan_callbacks_confirmed': len(node.callback_stamps),
                                           'completed_scans': node.completed_scans,
                                           'sacrificial_scan_stamps': sorted(node.sacrificial_stamps),
+                                          'tf_messages_sent': node.tf_messages_sent,
+                                          **node.tf_info,
                                           **node.accounting.summary()}) + '\n')
         node.destroy_node()
         rclpy.shutdown()

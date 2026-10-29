@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 from bisect import bisect_left
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -319,6 +320,81 @@ def odometry_brackets(odom_stamps_ns, scan_stamps_ns):
             raise StampMismatch(f'no odometry interpolation bracket for scan {stamp}')
         ends.append(index + 1)
     return ends
+
+
+def filter_tf_transforms(transforms):
+    """Keep original non-map transforms, in message order; never mutate the input."""
+    return [tf for tf in transforms if tf.header.frame_id != 'map']
+
+
+def needed_tf_pairs(dynamic_pairs, static_pairs, odom_frame, base_frame):
+    """Derive the dynamic interpolation pairs along the recorded odom/base TF chain."""
+    dynamic, static = set(dynamic_pairs), set(static_pairs)
+    graph, parents = {}, {}
+    for parent, child in sorted(dynamic | static):
+        if child in parents and parents[child] != parent:
+            raise ReplayRefused(f'ambiguous recorded TF parents for {child}: {parents[child]}, {parent}')
+        parents[child] = parent
+        graph.setdefault(parent, []).append((child, (parent, child)))
+        graph.setdefault(child, []).append((parent, (parent, child)))
+    pending, seen = deque([(odom_frame, [])]), {odom_frame}
+    while pending:
+        frame, path = pending.popleft()
+        if frame == base_frame:
+            return [pair for pair in path if pair not in static]
+        for neighbor, pair in graph.get(frame, []):
+            if neighbor not in seen:
+                seen.add(neighbor)
+                pending.append((neighbor, [*path, pair]))
+    raise ReplayRefused(f'no recorded TF chain from {odom_frame} to {base_frame}')
+
+
+def tf_bracket_plan(messages, needed_pairs, scan_stamps_ns):
+    """Exclusive recorded-message prefixes covering every required pair at each scan.
+
+    messages contains rows (parent, child, header_stamp_ns), grouped exactly
+    as recorded. Cover a sample at/before and the first at/after the scan for
+    each pair, without sorting or regrouping the original message stream.
+    """
+    samples = {pair: [] for pair in needed_pairs}
+    for index, message in enumerate(messages):
+        for parent, child, stamp in message:
+            if (parent, child) in samples:
+                samples[parent, child].append((stamp, index + 1))
+    ends = []
+    for stamp in scan_stamps_ns:
+        end = 0
+        for pair, rows in samples.items():
+            before = next((index for time_ns, index in rows if time_ns <= stamp), None)
+            after = next((index for time_ns, index in rows if time_ns >= stamp), None)
+            if before is None or after is None:
+                raise StampMismatch(f'no recorded TF bracket for {pair[0]} -> {pair[1]} at scan {stamp}')
+            end = max(end, before, after)
+        ends.append(end)
+    return ends
+
+
+def prepare_recorded_tf(messages, statics, odom_frame, base_frame, scan_stamps_ns):
+    """Filter correction payloads, derive the chain and plan prefixes; ROS-free data access."""
+    filtered, rows = [], []
+    dropped = mixed = 0
+    for message in messages:
+        kept = filter_tf_transforms(message.transforms)
+        removed = len(message.transforms) - len(kept)
+        dropped += removed
+        mixed += bool(removed and kept)
+        if kept:
+            filtered.append(kept)
+            rows.append([(tf.header.frame_id, tf.child_frame_id, stamp_ns(tf)) for tf in kept])
+    pairs = needed_tf_pairs(
+        [(parent, child) for message in rows for parent, child, _ in message],
+        [(tf.header.frame_id, tf.child_frame_id) for tf in statics], odom_frame, base_frame)
+    ends = tf_bracket_plan(rows, pairs, scan_stamps_ns)
+    return filtered, ends, {
+        'needed_tf_pairs': [list(pair) for pair in pairs],
+        'map_transforms_dropped': dropped, 'mixed_tf_messages': mixed,
+        'tf_messages_available': len(filtered),
+    }
 
 
 class ServiceError(RuntimeError):
@@ -739,11 +815,13 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     status, error = 'ok', None
     map_saved = posegraph_saved = False
     map_save_exhausted = False
+    relay = None
     try:
-        relay = _start(children, 'odom_tf_relay',
-                       [sys.executable, str(RELAY), '--topic', plan.odom_topic,
-                        '--ros-args', '-p', 'use_sim_time:=true'],
-                       env, out / 'relay.log', log)
+        if not exact or exact_mode == 'all-scans':
+            relay = _start(children, 'odom_tf_relay',
+                           [sys.executable, str(RELAY), '--topic', plan.odom_topic,
+                            '--ros-args', '-p', 'use_sim_time:=true'],
+                           env, out / 'relay.log', log)
         exact_specs = exact_children(params_file, plan.run_dir / 'bag', plan.odom_topic, env) if exact else []
         slam_argv = exact_specs[0][1] if exact else ['ros2', 'launch', 'racerbot_launch', 'slam_launch.py',
                         f'slam_params_file:={params_file}', f'slam_tracking_file:={params_file}',
@@ -771,7 +849,9 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
             # Playing into a SLAM that never came up would spend the whole bag producing nothing.
             raise ReplayFailed(f'/map was not listed within {MAP_WAIT_S:g} s, so slam_toolbox did not come '
                                'up; see slam_toolbox.log')
-        _check_alive(relay, recorder)
+        if relay is not None:
+            _check_alive(relay)
+        _check_alive(recorder)
         if exact:
             name, argv, feed_env = exact_specs[1]
             play = _start(children, name, [*argv, '--result', str(out / 'exact_feed.json'),
@@ -831,7 +911,8 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
             'status': status, 'error': error, 'label': label,
             'source_run': str(plan.run_dir), 'out_dir': str(out),
             'odom_frame': plan.odom_frame, 'odom_topic': plan.odom_topic,
-            'play_topics': plan.play_topics, 'rate': rate,
+            'play_topics': ['/scan', '/tf_static', '/tf'] if exact and exact_mode == 'forced'
+                           else plan.play_topics, 'rate': rate,
             'profile_path': str(profile_path) if profile_path is not None else None,
             'profile': plan.profile,
             'git_commit': git_commit, 'slam_toolbox_version': slam_version,
@@ -847,6 +928,7 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
                 'lookahead_samples': 0}
             summary['exact']['feed_mode'] = exact_mode
             summary['exact']['admission_overrides'] = admission_overrides
+            summary['exact']['tf_source'] = 'recorded' if exact_mode == 'forced' else 'odom_relay'
         (out / 'replay.json').write_text(json.dumps(summary, indent=2, default=str) + '\n', encoding='utf-8')
         if (plan.run_dir / 'metadata').is_dir():
             shutil.copytree(plan.run_dir / 'metadata', out / 'metadata')
@@ -878,8 +960,15 @@ def main(argv=None) -> int:
                 source_scans = [stamp_ns(msg) for _, msg in bag_messages(plan.run_dir / 'bag', ['/scan'])]
                 feed_plan = forced_scan_plan(source_scans, scan_plan)
                 scan_plan = [stamp for stamp, _ in feed_plan]
-            odometry_brackets(sorted(stamp_ns(msg) for _, msg in
-                              bag_messages(plan.run_dir / 'bag', [plan.odom_topic])), scan_plan)
+                tf_messages = [msg for _, msg in bag_messages(plan.run_dir / 'bag', ['/tf'])]
+                statics = [tf for _, msg in bag_messages(plan.run_dir / 'bag', ['/tf_static'])
+                           for tf in msg.transforms]
+                prepare_recorded_tf(tf_messages, statics, plan.odom_frame,
+                                    plan.params['slam_toolbox']['ros__parameters'].get(
+                                        'base_frame', 'base_footprint'), scan_plan)
+            else:
+                odometry_brackets(sorted(stamp_ns(msg) for _, msg in
+                                  bag_messages(plan.run_dir / 'bag', [plan.odom_topic])), scan_plan)
     except ReplayRefused as exc:
         print(f'refusing: {exc}', file=sys.stderr)
         return 2
