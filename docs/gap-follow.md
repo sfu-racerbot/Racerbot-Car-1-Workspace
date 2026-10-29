@@ -361,7 +361,20 @@ python3 tools/f1tenth_sim/eval_gap_multi.py --track indoor_oval,indoor_wide,asb_
 
 Four simulated races compared team A's shipped controller and safety parameters with car 1's shipped `gap_follow.yaml`. Each was set to 3 laps. These results are simulation only; they do not predict a physical race.
 
-Team A's car touched a wall in every race, ending it before either car finished. The times and progress below come from the four `race.json` files under `/tmp/oc-part-b1-r7/`; progress is rounded to three decimal places.
+Team A's car touched a wall in every race, ending it before either car finished. These results were measured on 2026-10-28 with team A at commit `6bef23d`. Progress is rounded to three decimal places.
+
+To repeat all four races, complete the [simulator and team A setup](ros-simulator.md#race-team-a) first. Run the commands one at a time; each race ends before the next starts.
+
+**Terminal 1 — races**, from the workspace root, with ROS and the workspace sourced and no real drivers running:
+
+```bash
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300
+```
+
+**Working when:** each race prints a standings table and writes a `race.json` under `~/.ros/racerbot_sim/races/`. A wall contact ends the race early. **If it doesn't:** check the terminal for missing team A packages or a hardware interlock message. Timing can vary between runs.
 
 | Track | Start order | Contact time (simulated seconds) | Car 1 laps | Team A laps |
 |---|---|---:|---:|---:|
