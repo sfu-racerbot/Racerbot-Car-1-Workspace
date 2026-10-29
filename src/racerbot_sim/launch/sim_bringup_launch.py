@@ -62,6 +62,9 @@ def generate_launch_description():
         car2_mux_config = yaml.safe_load(handle)['ackermann_mux']['ros__parameters']
 
     arguments = [
+        DeclareLaunchArgument('publish_imu', default_value='true'),
+        DeclareLaunchArgument('imu_fault', default_value='none'),
+        DeclareLaunchArgument('car2_imu_fault', default_value='none'),
         DeclareLaunchArgument('drive_topic_prefix', default_value='',
                               description='Optional drive-chain topic prefix for isolated tests.'),
         DeclareLaunchArgument(
@@ -105,6 +108,9 @@ def generate_launch_description():
         name='gym_bridge_node',
         output='screen',
         parameters=[{
+            'publish_imu': ParameterValue(LaunchConfiguration('publish_imu'), value_type=bool),
+            'imu_fault': ParameterValue(LaunchConfiguration('imu_fault'), value_type=str),
+            'car2_imu_fault': ParameterValue(LaunchConfiguration('car2_imu_fault'), value_type=str),
             'track': LaunchConfiguration('track'),
             'track_directory': LaunchConfiguration('track_directory'),
             'seed': LaunchConfiguration('seed'),
