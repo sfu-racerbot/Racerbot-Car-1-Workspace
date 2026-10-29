@@ -143,3 +143,52 @@ def node_file_name(full_name):
     """'/ns/node' -> 'ns__node.yaml' (a file name, never a path)."""
     cleaned = full_name.strip('/').replace('/', '__') or 'unnamed'
     return ''.join(c if c.isalnum() or c in '_-.' else '_' for c in cleaned) + '.yaml'
+
+
+class NodeWatch:
+    """Track snapshots across successive samples of full ROS node names.
+
+    First appearances use node_file_name; after a successful snapshot, an
+    absence and reappearance adds .1, .2, ... before .yaml. Absence before
+    success does not advance the suffix. Colliding names receive the first
+    free ~2, ~3, ... stem, retained across retries and restarts. Successful
+    continuously present nodes are not returned again.
+    """
+
+    def __init__(self, ignore=()):
+        self.ignore = set(ignore)
+        self._present = set()
+        self._stems = {}
+        self._owners = {}
+        self._versions = {}
+        self._done = set()
+
+    def update(self, names) -> list:
+        """Return sorted (full_name, file_name) pairs needing a snapshot."""
+        present = set(names) - self.ignore
+        for name in self._present - present:
+            if name in self._done:
+                self._done.remove(name)
+                self._versions[name] += 1
+        self._present = present
+        result = []
+        for name in sorted(present):
+            if name not in self._stems:
+                base = node_file_name(name)[:-5]
+                stem = base
+                k = 2
+                while stem in self._owners:
+                    stem = f'{base}~{k}'
+                    k += 1
+                self._stems[name] = stem
+                self._owners[stem] = name
+                self._versions[name] = 0
+            if name not in self._done:
+                version = self._versions[name]
+                suffix = f'.{version}' if version else ''
+                result.append((name, f'{self._stems[name]}{suffix}.yaml'))
+        return result
+
+    def done(self, full_name) -> None:
+        """Mark the current appearance successfully snapshotted."""
+        self._done.add(full_name)
