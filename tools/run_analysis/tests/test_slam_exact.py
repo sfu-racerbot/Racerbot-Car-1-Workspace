@@ -18,6 +18,12 @@ Round-2 step 4, observed failing separately, reverted and rerun green:
   b. override all-scans admission -> test_all_scans_keeps_recorded_admission
 Forced-plan/override stubs failed the remaining new cases; using profile values
 instead of the snapshot failed test_admission_audit_uses_snapshot_not_profile.
+
+Round-3 step 4, observed failing separately, reverted and rerun green:
+  a. retain map-parented TF -> test_tf_filter_drops_only_map_parented_transforms
+  b. bracket only the first pair -> test_tf_brackets_cover_every_needed_pair_in_recorded_order
+Chain/preparation stubs and a constant bracket result failed the remaining new
+TF edge and integration tests. All original assertions remain in place.
 """
 import math
 import os
