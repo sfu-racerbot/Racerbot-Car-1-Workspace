@@ -73,6 +73,12 @@ def generate_launch_description(imu_probe=None):
                     'Starts the shared IMU stack once, including with either gyro feature on. '
                     'Ships off; floor trial needed (docs/gap-follow.md#fused-speed-imu).')
 
+    understeer_arg = DeclareLaunchArgument(
+        'imu_understeer', default_value='false',
+        description='true: cap speed when measured steering shows sustained understeer. '
+                    'Starts the shared IMU stack once. Ships off; floor trial needed '
+                    '(docs/gap-follow.md#understeer-check-imu).')
+
     def node(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
@@ -84,6 +90,8 @@ def generate_launch_description(imu_probe=None):
                      LaunchConfiguration('adaptive_grip').perform(context))
         fused = _flag('fused_speed',
                       LaunchConfiguration('fused_speed').perform(context))
+        understeer = _flag('imu_understeer',
+                          LaunchConfiguration('imu_understeer').perform(context))
         speed = speed_cap_overrides(
             yaml_parameters(gap_follow_config),
             LaunchConfiguration('max_speed').perform(context))
@@ -95,11 +103,12 @@ def generate_launch_description(imu_probe=None):
             parameters=[gap_follow_config,
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
-                         'enable_adaptive_grip': grip},
+                          'enable_adaptive_grip': grip,
+                          'enable_imu_understeer': understeer},
                         speed,
                         {'odom_topic': FUSED_ODOM} if fused else {}],
         )]
-        if damping or grip or fused:
+        if damping or grip or fused or understeer:
             # All IMU features share one estimator, but simulated IMUs
             # already come from gym_bridge_node. Start real readers only
             # when selected; any combination of features still includes once.
@@ -114,5 +123,5 @@ def generate_launch_description(imu_probe=None):
         return actions
 
     return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
-                              adaptive_grip_arg, fused_speed_arg, imu_hardware_arg,
+                              adaptive_grip_arg, fused_speed_arg, understeer_arg, imu_hardware_arg,
                               OpaqueFunction(function=node)])
