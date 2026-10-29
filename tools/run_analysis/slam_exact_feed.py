@@ -126,21 +126,30 @@ class ExactFeed(Node):
             self.clock(stamp)
             self.scan_pub.publish(scan)
             self.scans_sent += 1
+            receipt_timed_out = False
             if bracketed:
-                self.wait(lambda: stamp in self.callback_stamps, f'SLAM scan callback at {stamp}')
+                try:
+                    self.wait(lambda: stamp in self.callback_stamps, f'SLAM scan callback at {stamp}')
+                except FeedTimeout:
+                    if not planned:
+                        raise
+                    receipt_timed_out = True
             else:
                 self.unbracketed_scans += 1
                 deadline = time.monotonic() + self.boundary_yield_s
                 while time.monotonic() < deadline:
                     rclpy.spin_once(self, timeout_sec=.005)
             if planned:
-                try:
-                    self.wait(lambda: stamp in self.accounting.observed, f'/pose at scan stamp {stamp}')
-                except FeedTimeout:
-                    print(f'missing planned pose {stamp}; continuing', flush=True)
+                if not receipt_timed_out:
+                    try:
+                        self.wait(lambda: stamp in self.accounting.observed, f'/pose at scan stamp {stamp}')
+                    except FeedTimeout:
+                        pass  # checkpoint below records the timeout and enforces the consecutive limit
                 if self.accounting.checkpoint(stamp):
                     self.completed_scans += 1
                     print(f'answered {stamp}', flush=True)
+                else:
+                    print(f'missing planned pose {stamp}; continuing', flush=True)
         # Capture final unplanned poses while the synchronous FIFO drains.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:

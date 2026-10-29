@@ -551,27 +551,36 @@ matches a distinct recorded scan. The SLAM report's **314 updates** count
 changes between successive `map → odom_imu` corrections; the initial
 correction is identity. That count does not mean a pose lacks its scan.
 
-With slam_toolbox **2.8.5**, exact replay matched the first pose with position
-error **2.38 × 10⁻¹⁴ m** and yaw error **0°**, then timed out waiting for the
-second pose at stamp **1793069379768709386 ns**. The comparison reports
-`matched: 1`, `missing_in_replay: 314`, `extra_in_replay: 0`, and
-`first_over_bar: null`. Two future odometry samples were sent, one for each
-attempted scan.
+The all-scan replay with slam_toolbox **2.8.5** sent **973 scans**, then stopped
+after **11 consecutive planned-pose timeouts**. Its bag contains **12 extra
+poses and no matching pose stamps**: `matched: 0`, `missing_in_replay: 315`,
+`extra_in_replay: 12`, `max_position_m: 0.0`, `max_yaw_deg: 0.0`, and
+`first_over_bar: null`.
 
-**The complete 1 mm / 0.1° reproduction bar was not met.** A null
-`first_over_bar` only says that the matched pose was within the bar.
+**The 1 mm / 0.1° reproduction bar was not met.** With no matched stamps,
+the zero numeric errors and null `first_over_bar` provide no accuracy
+measurement. The first missing planned stamp is **1793069360801010451 ns**.
 
-The synchronous node still applies an input filter: its
-[`shouldProcessScan()`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_common.cpp)
-accepts the first scan but rejects callback counts 2–4 for initial
-stabilisation. The
-[synchronous callback](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_sync.cpp)
-uses that filter too. On the car, additional incoming scans advance the
-counter before the second accepted pose.
+Replay first diverges by admitting scan **1793069359721058241 ns** (zero-based
+bag scan index 98), which produced no pose on the car. The car's first pose
+instead used scan index 141, at **1793069360801010451 ns**. The car's `/rosout`
+records TF-filter queue-full drops, including scan time **1793069360.650 s**,
+before that first pose.
 
-Feeding only the accepted scans
-therefore stops at the second scan. This is a scan-admission limitation,
-rather than evidence of solver numerical error.
+Transform arrival timing differs from header timing: the first recorded
+`odom_imu → odom` transform has stamp **1793069359712544260 ns**, but the bag
+received it **488.759 ms later**. Replay provides recorded odometry brackets
+before each covered scan, making transforms available earlier. The recorded
+`throttle_scans: 2` then makes differences in callback admission affect later
+scan choices. The evidence points to input-admission differences, not solver
+numerical error; no corresponding poses exist to compare numerically.
+
+All **875 bracketed scans** sent had callback receipts, and **98 leading
+unbracketed scans** were also sent. A full feed would send **99 unbracketed
+scans**, including the final scan after odometry ends, but the consecutive
+timeout guard stopped this attempt before that final scan. Its
+`exact.lookahead_samples` count is **867**. The replay output label is
+`all-scans1`; the measured values above come from its `replay.json` and bag.
 
 ### When map saving fails
 
