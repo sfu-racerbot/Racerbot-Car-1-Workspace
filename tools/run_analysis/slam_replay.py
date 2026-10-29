@@ -92,6 +92,45 @@ def exact_scan_plan(scan_stamps_ns, pose_stamps_ns) -> list[int]:
     return poses
 
 
+def exact_feed_order(scan_stamps_ns, pose_stamps_ns):
+    """Feed every recorded scan, using recorded pose stamps only as wait checkpoints."""
+    scans = list(scan_stamps_ns)
+    planned = set(exact_scan_plan(scans, pose_stamps_ns))
+    return [(stamp, stamp in planned) for stamp in scans]
+
+
+class ExactPoseAccounting:
+    """Track all observed poses and planned timeouts without making extras fatal."""
+
+    def __init__(self, planned_stamps):
+        self.planned = set(planned_stamps)
+        self.observed = set()
+        self.timed_out = []
+        self.consecutive_missing = []
+
+    def observe(self, stamp):
+        self.observed.add(stamp)
+
+    def checkpoint(self, stamp):
+        if stamp in self.observed:
+            self.consecutive_missing.clear()
+            return True
+        self.timed_out.append(stamp)
+        self.consecutive_missing.append(stamp)
+        if len(self.consecutive_missing) > 10:
+            raise ReplayFailed(f'{len(self.consecutive_missing)} consecutive planned poses missing: '
+                               f'{self.consecutive_missing}')
+        return False
+
+    def summary(self):
+        return {
+            'matched_planned': len(self.planned & self.observed),
+            'missing_planned_stamps': sorted(self.planned - self.observed),
+            'extra_pose_stamps': sorted(self.observed - self.planned),
+            'timed_out_stamps': list(self.timed_out),
+        }
+
+
 def pose_sequence_error(recorded, replayed) -> dict:
     """Match (stamp_ns, x, y, yaw) rows; measure against 1 mm / 0.1 degree.
 
