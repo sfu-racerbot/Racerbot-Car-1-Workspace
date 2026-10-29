@@ -192,6 +192,10 @@ Give the team the order: two-car wheels-off check, then a slow two-car floor run
 - **R3:** no recognition setting was faster without adding false movers. `min_hits` 8 and `moving_speed` 0.6 stay. About 49% of passes are recognised (35% on car 1's course).
 - **R4:** the outline is a 0.58 × 0.31 m rectangle, with its centre recovered from the near face. Margin 0.15 was the only setting with 0 stalls, so the margins (0.15, 0.10) stay.
 - **The final review added an alongside abort:** when the narrow-section rule refuses a pass with the other car alongside, cap the speed at `max(0, v_other − 0.5)` so this car drops back. Before, the cap there was infinite.
+- **The abort needed two fixes of its own (2026-10-29):**
+  - As first written, it stalled both cars: side by side, each capped below the other, down to zero (car 1's course reversed, 2.5 m/s leader: 0 of 2 finished). Now only the car whose centre is behind yields.
+  - A wall segment briefly tracked as a mover beside the leader fired the abort for 2 ticks, and the 1 s follow memory held it, which led to a wedge (33 of 36 runs finished, against 36 of 36 without the abort). Now the memory holds only the follow law, and the abort applies only on scans that see the car.
+- **The simulator interlock got a clean-graph window (2026-10-29):** discovery took about 2.45 s against a 3 s hold, and a forged `/joy` occasionally got out beside a live `urg_node`. The graph must now read clean for 3 s after the hold.
 - **R7:** team A's `disparity_extender` hits the wall within 3-5 s in `racerbot_sim`. It turns in late at 3.0 m/s and asks for 0.56-0.67 rad, while car 1's servo stops at 0.45-0.51 rad. Car 1 ran those races with awareness off.
 - **R8 dropped** (user, 2026-10-28): no copy or edit of team A's code. They run from their own launch files under a `/car2` namespace with remaps, with their own deadman on, fed a forged `/car2/joy`.
 
@@ -208,3 +212,4 @@ Give the team the order: two-car wheels-off check, then a slow two-car floor run
    - The box is shared: `--workers 2`, and hold sweeps while a real-time race runs.
 7. **Models:** OpenAI, tokenzap and Haiku all hit usage limits during the run. Small checkpoint commits and the ledger made every hand-over between models a resume, not a restart.
 8. **Good implementers stop on contradictions** (NEEDS_CONTEXT 9 times). Most of those stops were errors in the controller's own briefs: "and" written for "or", wrong test geometry, a missing file. Check each brief against the plan before sending it.
+9. **One controller per branch.** A session resumed in a VS Code terminal and a forked background copy of it both carried the note "B-1 was handed to me", ran the same suites on the same ROS domains for hours, and broke each other's tests. Before starting, run `ListAgents` (or `ps` for `claude`) and check that no other session is working the plan.
