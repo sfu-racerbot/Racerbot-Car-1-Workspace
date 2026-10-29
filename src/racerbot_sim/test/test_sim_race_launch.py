@@ -415,7 +415,8 @@ def test_team_a_deadman_isolated(tmp_path, probe, team_a_packages, held):
     assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
     assert race['steps'] > 1
     assert all(len(s['cars']) == 2 for s in statuses)
-    # oracle: deadman isolation thresholds specified for R7, in m/s.
+    # oracle: R7 task brief in this conversation specifies these m/s thresholds;
+    # task context: docs/superpowers/plans/2026-10-27-part-b1-racing.md, Task R7.
     assert max(s['cars'][0]['speed'] for s in statuses) > 0.5
     speeds = [abs(s['cars'][1]['speed']) for s in statuses]
     if held:
@@ -443,7 +444,8 @@ def test_team_a_car1_deadman_does_not_gate_car2(tmp_path, probe, team_a_packages
     assert race['steps'] > 1
     assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
     assert all(len(s['cars']) == 2 for s in statuses)
-    # oracle: R7 review request, speeds in m/s for stopped and moving cars.
+    # oracle: R7 review request in this conversation specifies these m/s thresholds;
+    # task context: docs/superpowers/plans/2026-10-27-part-b1-racing.md, Task R7.
     assert max(abs(s['cars'][0]['speed']) for s in statuses) < 0.05
     assert max(s['cars'][1]['speed'] for s in statuses) > 0.5
 
