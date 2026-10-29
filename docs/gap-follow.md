@@ -31,6 +31,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 18. [Fused speed (IMU)](#fused-speed-imu)
 19. [Understeer check (IMU)](#understeer-check-imu)
 20. [Traction control (IMU)](#traction-control-imu)
+21. [Impact stop (IMU)](#impact-stop-imu)
 
 ## Highlights
 
@@ -1174,6 +1175,146 @@ Across all tracks, mean lap time was 12.255 s off and 12.160 s on, with zero cha
 contacts and 48 stop ticks in each configuration. Mean steering reversals were
 0.650/s off and 0.656/s on. The longest commanded-motion standstill was five ticks
 (0.125 s) in either configuration; neither added a sustained stall.
+
+## Impact stop (IMU)
+
+The impact stop commands zero speed after a large horizontal accelerometer spike.
+The stop [**latches**](glossary.md#latch), meaning it stays set even after the spike ends.
+It ships **off** (`enable_imu_impact_stop: false`); the launch flag is
+`imu_impact_stop:=true`.
+Its threshold is provisional until a wheels-off bump has been recorded.
+
+Enabling it starts the shared IMU stack once, even with the other five IMU
+features off. Disabling steering damping alone does not stop that stack while
+impact detection is enabled.
+
+**To resume after a latched stop, release LB and then press it again.**
+Holding LB, or pressing it without a release received after the impact, never
+clears the stop. A controller message missing the LB button does not count as
+a release. Starting a new `gap_follow` process starts with a cleared latch.
+
+### What triggers it
+
+The check reads the calibrated `/imu/data` accelerometer in car axes: x forward,
+y left, z up, in m/s². Horizontal force is `hypot(x, y)`, so the gravity reading
+on +z at rest is excluded. See the [IMU bridge reference](../src/imu_bridge/README.md#topics).
+
+A trusted sample **strictly above 33.7257297468959 m/s²** triggers the default
+one-sample check. Equality does not trigger it. With `imu_impact_min_samples`
+above 1, that many consecutive trusted exceedances are required; an ordinary,
+untrusted or non-finite sample breaks the sequence.
+
+On the next scan tick, the latch is checked immediately after the LB deadman,
+before odometry, scan processing or any other driving decision. The published
+speed is zero and steering stays where the rack was last commanded.
+
+The `/drive_intent` state is `imu_impact_stop`; its reason includes the triggering
+force, its node receive time in seconds and the release-press instruction.
+
+### IMU failure and the latch
+
+Detection requires the shared `_imu_gate()` trust check: status `ok`, a fresh
+sample and a finite yaw rate. Missing IMU data, status `waiting` or `fault`, stale
+data or non-finite horizontal acceleration cannot set the latch.
+Before a latch is set, these failures give the feature-off command and a reason
+such as `imu_impact_stop_off: imu stale` on `/drive_intent`.
+
+**An IMU failure never lifts an impact stop that is already latched.**
+This is a deliberate exception to the other IMU features' fallback rule: a
+sensor disconnect, or restarting `imu_bridge`, must not make a stopped car resume.
+Only the LB release-then-press sequence clears this latch while the node runs.
+
+The deadman still runs first. With LB released, never received or stale, the
+command stays zero and the intent names the deadman's reason instead.
+
+For comparison, understeer and traction drop their cap or hold when the IMU
+becomes untrusted. Their normal acceleration ramp then uses the node's actual
+last command and current odometry. It does not jump to the command that a
+controller with no earlier cap would have reached.
+
+<details>
+<summary><b>Recorded spikes and parameter reference</b>: skip unless checking or tuning the threshold.</summary>
+
+The 2026-10-29 sweep checked every bag under `~/.ros/racerbot_runs/*/bag`.
+Eight had non-empty `/imu/data`; the sixteen gyro-odometry replay bags did not.
+Metadata and all bag data used for the analysis were copied to
+`/tmp/oc-part-b23-i6/`; the source runs were not changed.
+
+| Run | Finite horizontal samples | Maximum h (m/s²) | 99.9th percentile (m/s²) |
+|---|---:|---:|---:|
+| `20261026-174337` | 56,537 | 14.158056 | 7.721650 |
+| `20261026-180228` | 188,493 | 12.695402 | 5.802826 |
+| `20261026-194422` | 7,344 | 0.787884 | 0.786919 |
+| `20261026-194514` | 23,058 | 14.395892 | 9.147828 |
+| `20261026-194714` | 17,536 | 6.919875 | 4.387577 |
+| `20261026-194913` | 23,343 | 9.183741 | 6.470117 |
+| `20261029-132744` | 1,201 | 21.986713 | 18.373599 |
+| `20261029-132902` | 1,214 | 22.483820 | 21.378008 |
+
+The five largest distinct events in each run were inspected, keeping events
+at least 0.5 s apart. Speeds came from absolute `/odom` forward speed: the
+median over the preceding 0.1 s and the minimum over the following 0.5 s.
+A drop of more than 70% from above 0.5 m/s marked a candidate for inspection.
+
+Two candidates appeared. In `20261026-174337`, at 188.628 s after its first IMU
+sample, h reached 14.158056 m/s² and speed fell from 2.469307 to 0.590842 m/s.
+
+In `20261026-180228`, at 83.419 s, h reached 11.036402 m/s² and speed fell from
+2.444059 to 0.644802 m/s. Neither establishes a clear impact stopping the car.
+
+The largest spike, 22.48381983126393 m/s² in `20261029-132902` at 11.048 s,
+was followed by speed 3.711633 → 2.210027 m/s, rather than falling toward zero.
+
+With no clear impact identified, the controller's 2026-10-29 ruling gives
+`max(15.0, 1.5 × 22.48381983126393)` = **33.7257297468959 m/s²**.
+This threshold is **provisional until a wheels-off bump is recorded**.
+
+| YAML parameter | Default | Meaning |
+|---|---:|---|
+| `imu_impact_threshold` | 33.7257297468959 m/s² | Strict horizontal-force exceedance. Must be finite and positive. |
+| `imu_impact_min_samples` | 1 | Consecutive trusted exceedances. Must be an integer of at least 1. |
+
+Both numeric parameters are validated at startup and on live changes through
+ROS parameter services. Accepted changes reset the pending sample count, but
+preserve an existing latch and any release already received after that latch.
+The feature flag requires a restart.
+
+</details>
+
+### Floor-trial order
+
+**Test with the wheels off the ground first, then on the floor at low speed in
+open space. Hold LB whenever the car moves; releasing it stops the car.**
+Keep the recorder on as in [Validation](#validation), including for the bump,
+so the threshold can be checked against an actual chassis tap.
+
+In **Terminal 2**, with ROS and the workspace sourced and bringup already running
+in **Terminal 1**, start the wheels-off check at 1.0 m/s:
+
+```bash
+ros2 launch gap_follow gap_follow_launch.py imu_impact_stop:=true max_speed:=1.0
+```
+
+**Working when:** the IMU stack starts once and `/imu/status` reaches `ok`.
+With the car secure on its stand, hold LB and tap the chassis to trigger the
+check. Confirm that the wheels stop and the intent names `imu_impact_stop`.
+Keep LB held and confirm the stop remains; release it and press again to resume.
+
+If a gentle tap does not trigger the provisional threshold, keep the wheels off
+and inspect the recorded horizontal force before tuning it. Do not use a floor
+collision to establish the threshold. After the latch and reset are checked,
+continue with a low-speed floor run in open space.
+
+### Limitations
+
+This is an unvalidated floor-trial feature, not proof that every contact will
+be detected. A slow push or a spike below the threshold can go undetected.
+Tilting the chassis can put gravity into its horizontal axes.
+
+The mirror has its own latch state. Its callers supply horizontal acceleration
+(zero in ordinary gym runs) and LB state; parity tests inject a spike and check
+the held stop, release and press. Those tests prove wiring, not a physical impact
+threshold, so the feature remains off pending the recorded bump.
 
 ## See also
 

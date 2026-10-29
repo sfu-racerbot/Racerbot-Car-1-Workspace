@@ -75,6 +75,18 @@ def _command(msg):
     return msg.drive.steering_angle, msg.drive.speed
 
 
+def test_feature_on_wires_imu_and_separate_lb_subscription():
+    with _node(extra=['-p', 'enable_steering_damping:=false']) as n:
+        # oracle: spec I6: impact alone owns one shared IMU input and its own
+        # LB callback, alongside the unchanged deadman subscription.
+        imu = [s for s in n.subscriptions if s.topic_name == '/imu/data']
+        joy = [s for s in n.subscriptions if s.topic_name == '/joy']
+        assert len(imu) == 1
+        assert imu[0].callback == n.imu_callback
+        assert len(joy) == 2
+        assert {s.callback for s in joy} == {n.joy_callback, n.impact_joy_callback}
+
+
 def test_spike_stops_for_five_seconds_and_only_release_press_resumes():
     with _node() as n:
         commands, intents = _capture(n), _capture_intent(n)
