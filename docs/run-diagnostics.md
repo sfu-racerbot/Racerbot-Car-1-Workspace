@@ -637,53 +637,64 @@ In all-scans mode, unbracketed boundary scans cannot have this acknowledgement;
 the feeder yields between sends so
 SLAM can handle them through its TF filter.
 
-### Limitations: measured result on the 19:49 run
+### Measured result on the 19:49 run
 
 Run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
 matches a distinct recorded scan. The SLAM report's **314 updates** count
 changes between successive `map → odom_imu` corrections; the initial
 correction is identity. That count does not mean a pose lacks its scan.
 
-#### Forced-admission result
+#### Forced admission with recorded TF: round 3
 
-The `forced1` replay completed with **315 matched poses, none missing and none
-extra**. It sent 318 scans: the 315 planned inputs and three sacrificial scans,
-which produced no poses. All 318 had callback receipts.
+**The 1 mm / 0.1° bar was met.** The `recorded-tf3` replay matched all **315
+poses**, with none missing or extra. Maximum errors were
+**1.171361 × 10⁻¹³ m** and **3.053332 × 10⁻¹³°**; `first_over_bar` is null.
+It sent 318 scans: the 315 planned inputs and three sacrifices, which produced
+no poses. All 318 had callback receipts. The map and pose graph were saved.
 
-The map and pose graph
-were saved, and `exact.admission_overrides` records each changed gate and its
-original value.
+The dynamic pairs derived from the recording are `odom_imu → odom` and
+`odom → base_link`; the final `base_link → laser` edge is static. The replay
+bag retained **9,475 non-map TF messages**, verified to have identical payloads
+and order to the required source prefix. The source contains 9,487 such
+messages in total; the remaining tail is beyond the last required bracket.
 
-**The 1 mm / 0.1° bar was not met.** Maximum errors were **2.246775 m** and
-**3.625845°**, both at pose 59. The first exceedance was pose **20**, stamp
+The filter removed **4,606 map-parented transforms** from the candidate stream.
+There are **no mixed messages** in this source bag. Synthetic tests also check
+that a mixed message retains its non-map transforms rather than being dropped
+as a whole.
+
+#### Comparison with round 2
+
+Round 2 (`forced1`) used the odometry relay and matched all 315 stamps, but
+failed the numerical bar: maximum errors were **2.246775 m** and **3.625845°**
+at pose 59. Its first exceedance was pose **20**, stamp
 **1793069383585897818 ns**, at **0.00998585 m** and **0.199962°**.
 
-The error history below uses one-based pose indices and rounded values.
+The comparison uses one-based pose indices and rounded values.
 
-| Pose | Position error (m) | Yaw error (°) |
-|---|---:|---:|
-| 2 | 0.00004318 | < 0.000001 |
-| 10 | 0.00012115 | < 0.000001 |
-| 19 | 0.00000583 | < 0.000001 |
-| 20 | 0.00998585 | 0.199962 |
-| 50 | 0.01999860 | 0.399925 |
-| 59 | 2.24677468 | 3.625845 |
-| 100 | 0.12057477 | 0.586101 |
-| 315 | 0.72786463 | 0.065573 |
+| Pose | Round 2 position (m) | Round 3 position (m) | Round 2 yaw (°) | Round 3 yaw (°) |
+|---|---:|---:|---:|---:|
+| 2 | 0.00004318 | 9.02e-15 | < 0.000001 | 2.54e-14 |
+| 10 | 0.00012115 | 2.89e-14 | < 0.000001 | 5.09e-14 |
+| 19 | 0.00000583 | 2.94e-14 | < 0.000001 | 0 |
+| 20 | 0.00998585 | 2.86e-14 | 0.199962 | 2.54e-14 |
+| 50 | 0.01999860 | 2.39e-14 | 0.399925 | 1.02e-13 |
+| 59 | 2.24677468 | 8.14e-15 | 3.625845 | 2.54e-14 |
+| 100 | 0.12057477 | 1.94e-14 | 0.586101 | 5.09e-14 |
+| 315 | 0.72786463 | 8.10e-14 | 0.065573 | 1.53e-13 |
 
-There is a measurable input difference before scan matching. Replay
-interpolates the already-composed `/odom/imu` pose. The car's recorded TF tree
-instead interpolates `odom_imu → odom` and `odom → base_link` separately,
-then composes them. At pose 20, their odometry guesses differ by **0.00003035 m**,
-with no measured yaw difference.
+Round 2 interpolated the already-composed `/odom/imu` pose. The car's recorded
+TF tree interpolates `odom_imu → odom` and `odom → base_link` separately, then
+composes them. At pose 20, those odometry guesses differed by **0.00003035 m**,
+with no measured yaw difference. Round 3 preserves the recorded tree instead.
 
 The first yaw discrepancy is one fine-search angular step, **0.00349 rad**
 (0.199962°). Karto passes this configured value as the angular resolution in
 [`Mapper.cpp:624–628`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/lib/karto_sdk/src/Mapper.cpp#L624-L628).
 
-Small interpolation differences selecting a different scan-match peak are the
-best explanation for the early divergence; this is evidence of sensitivity,
-not proof that every later error has the same cause.
+The round-2 yaw discrepancy was one fine-search angular step. The recorded-TF
+result removes that discrepancy and the later large errors, supporting the
+interpolation difference as the cause of the earlier scan-match divergence.
 
 Ceres threading can also affect numerical reproducibility: reductions are not
 bit-identical across thread counts. In 2.8.5,
@@ -692,8 +703,8 @@ hard-codes `num_threads = 50`; the replay log reports Ceres capping that to
 **8**.
 
 The plugin exposes no thread-count parameter, so a controlled one-thread
-replay was not available. The car's effective thread count is unknown, and
-threading has not been isolated as the cause of the later errors.
+replay was not available. The car's effective thread count is unknown. No
+thread-count change was needed to meet the bar with the recorded TF tree.
 
 #### All-scans timing experiment
 

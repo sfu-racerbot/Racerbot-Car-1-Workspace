@@ -46,7 +46,6 @@ from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
 from tf2_msgs.msg import TFMessage
 from rclpy.node import Node
-from rclpy.duration import Duration
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
 from slam_replay import (ExactPoseAccounting, bag_messages, exact_feed_steps,
@@ -157,21 +156,30 @@ class ExactFeed(Node):
         self.static_pub.publish(TFMessage(transforms=statics))
         if scans:
             # rosbag2 --use-sim-time defers topic discovery until its first clock.
-            # Repeat that same time until the recorder can capture the first pose.
-            self.wait(lambda: any(info.node_name.startswith('rosbag2_recorder')
-                                  for info in self.get_subscriptions_info_by_topic('/pose')),
-                      'recorder /pose subscription', tick=lambda: self.clock(stamp_ns(scans[0])))
+            # Match its TF subscription as well as its pose subscription before
+            # sending the first volatile TF message, so the replay bag retains it.
+            def recorder_ready():
+                pose_ready = any(info.node_name.startswith('rosbag2_recorder')
+                                 for info in self.get_subscriptions_info_by_topic('/pose'))
+                tf_ready = self.recorded_tf_pub is None or (
+                    self.recorded_tf_pub.get_subscription_count() >= 3
+                    and any(info.node_name.startswith('rosbag2_recorder')
+                            for info in self.get_subscriptions_info_by_topic('/tf')))
+                return pose_ready and tf_ready
+
+            self.wait(recorder_ready, 'recorder subscriptions',
+                      tick=lambda: self.clock(stamp_ns(scans[0])))
         index = 0
         for scan, (stamp, planned, end, bracketed) in zip(scans, steps):
             while index < end:
                 if self.exact_mode == 'forced':
                     transforms = tf_messages[index]
                     self.recorded_tf_pub.publish(TFMessage(transforms=transforms))
-                    if not self.recorded_tf_pub.wait_for_all_acked(Duration(seconds=10.0)):
-                        raise FeedTimeout(f'recorded TF delivery at scan {stamp}')
                     keys = [(tf.header.frame_id, tf.child_frame_id, stamp_ns(tf)) for tf in transforms]
+                    # Spin for receipt instead of blocking this executor in
+                    # wait_for_all_acked while SLAM's TF timer keeps publishing.
                     self.wait(lambda: all(key in self.tf_seen for key in keys),
-                              f'recorded TF receipt at scan {stamp}')
+                              f'recorded TF receipt {keys} at scan {stamp}')
                     self.tf_messages_sent += 1
                     self.lookahead_samples += sum(stamp_ns(tf) > stamp for tf in transforms)
                 else:
