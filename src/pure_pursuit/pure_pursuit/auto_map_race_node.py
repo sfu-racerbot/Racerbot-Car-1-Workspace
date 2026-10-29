@@ -277,6 +277,10 @@ class LapRecorder:
             self.last_sample = point
             self.last_pose = (x, y, yaw)
             self.last_odom_yaw = odom_yaw
+            self._odom_anchor_time = now_sec
+            self._odom_gap_turn = 0.0
+            self._odom_gap = False
+            self._odom_gap_ambiguous = False
             self.points.append((x, y))
             self.point_turn.append(self.turn)
             return False
@@ -290,14 +294,37 @@ class LapRecorder:
         # Accumulated yaw, not path heading: yaw comes straight from
         # localisation and does not have the sampled path's sensitivity
         # to noise at 0.15m spacing.
-        if odom_yaw is not None and self.last_odom_yaw is not None:
-            # Odometry is not re-optimised, so this is the car's own
-            # turning whether or not the pose graph moved this tick.
-            self.turn += angle_difference(odom_yaw, self.last_odom_yaw)
-        elif not jumped:
-            # Map yaw, and only when the map did not move under us -- across
-            # a re-anchor the yaw change is the map's, not the car's.
-            self.turn += angle_difference(yaw, self.last_pose[2])
+        # During an odom gap, credit map turning provisionally (never a
+        # jumped correction). On return replace that credit with the full
+        # anchored odom difference, so every interval is counted once.
+        # Wrapped differences become ambiguous at pi. Car 1's autonomy
+        # radius is 1.05 m (docs/hardware-reference.md); the shipped speed
+        # cap is 5 m/s (gap_follow.yaml). With 25% yaw-rate margin,
+        # 5/1.05 * 1.25 * 0.25 s = 1.49 rad < pi/2. Beyond 0.25 s,
+        # or if provisional turning ever exceeds pi/2, keep the map count
+        # and only re-anchor. Time is measured from the last odom sample,
+        # including the returning tick, not just the missing ticks.
+        if odom_yaw is not None:
+            if self.last_odom_yaw is not None:
+                if not self._odom_gap:
+                    self.turn += angle_difference(odom_yaw, self.last_odom_yaw)
+                elif (now_sec - self._odom_anchor_time <= 0.25
+                      and not self._odom_gap_ambiguous):
+                    self.turn += (angle_difference(odom_yaw, self.last_odom_yaw)
+                                  - self._odom_gap_turn)
+            elif not jumped:
+                self.turn += angle_difference(yaw, self.last_pose[2])
+            self._odom_anchor_time = now_sec
+            self._odom_gap_turn = 0.0
+            self._odom_gap = False
+            self._odom_gap_ambiguous = False
+        else:
+            map_turn = 0.0 if jumped else angle_difference(yaw, self.last_pose[2])
+            self.turn += map_turn
+            if self.last_odom_yaw is not None:
+                self._odom_gap = True
+                self._odom_gap_turn += map_turn
+                self._odom_gap_ambiguous |= abs(self._odom_gap_turn) > math.pi / 2
         self.last_pose = (x, y, yaw)
         if odom_yaw is not None:
             self.last_odom_yaw = odom_yaw
