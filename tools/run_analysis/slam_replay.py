@@ -500,7 +500,8 @@ def _parser() -> argparse.ArgumentParser:
                         help='YAML of slam_toolbox parameters laid over the recorded ones')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--rate', type=_positive_float, default=None, help='playback speed (default 1.0)')
-    mode.add_argument('--exact', action='store_true', help='feed processed scans in lockstep to synchronous SLAM')
+    mode.add_argument('--exact', action='store_true',
+                      help='feed every scan to synchronous SLAM, waiting at recorded pose checkpoints')
     parser.add_argument('--out-root', type=Path, default=None, help='output parent (default ~/.ros/racerbot_runs)')
     parser.add_argument('--label', default='default', help='names the output folder (default "default")')
     return parser

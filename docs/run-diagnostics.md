@@ -482,7 +482,7 @@ whether SLAM can reproduce the recorded poses without another drive.
 
 - Starts SLAM with the recording's parameter snapshot, plus optional profile overrides.
 - Rebuilds odometry transforms instead of playing the car's recorded map corrections.
-- Offers exact scan selection and lockstep feeding for stamp-by-stamp comparison.
+- Feeds every recorded scan, with pose checkpoints for stamp-by-stamp comparison.
 - Saves a replay bag, logs, map files when available, and a `replay.json` summary.
 
 **Stop bringup before replaying.** The command refuses while a
@@ -515,24 +515,45 @@ The source run is read without being modified.
 
 ### What exact mode feeds
 
-SLAM stamps each `/pose` with the scan it processed. Exact mode selects only
-the recorded `/scan` messages whose header stamps equal those pose stamps,
-in recorded pose order. It starts `sync_slam_toolbox_node` and waits for each
-scan's matching `/pose` before sending the next scan. This is **lockstep**:
-SLAM sets the pace, rather than a playback rate.
+Exact mode starts `sync_slam_toolbox_node` and publishes **every recorded
+`/scan` in recorded order**. SLAM applies its own startup, throttling, travel
+and time filters to that complete input. Sending only scans that previously
+produced a pose changes the filter counters and therefore changes the run.
+
+SLAM stamps each `/pose` with the scan it processed. A scan whose stamp appears
+in the recorded `/pose` sequence is a **planned checkpoint**: replay waits
+for that stamp's pose before advancing. Other scans do not wait for a pose.
+This is lockstep at planned checkpoints, rather than playback at a fixed rate.
+
+Extra poses are recorded without stopping. A planned pose that does not arrive
+within the 10-second pose timeout is logged as missing, and feeding continues.
+**More than ten consecutive missing planned poses ends replay as failed**,
+naming the stamps.
+
+A later pose can resolve a previously timed-out stamp in
+the final accounting; `exact.timed_out_stamps` retains the timeout history.
 
 Before a scan, the feeder publishes odometry through the first sample at or
 after its stamp, so [TF](glossary.md#tf--transform--frame) can interpolate the car's
 pose at that time. The car's SLAM message filter normally waits for this same
-sample.
+sample. A planned scan outside recorded odometry coverage refuses before any
+replay process starts.
+
+Unplanned scans outside coverage are still sent with the available odometry,
+without a complete interpolation bracket. SLAM's TF message filter decides
+their fate, just as on the car. `exact.unbracketed_scans` counts these sends.
+
+The 19:49 bag has 98 scans before odometry starts and one after it ends, so
+a complete feed would send 99 unbracketed scans.
 
 `/clock` advances to the scan stamp, not to the future odometry
 sample. `exact.lookahead_samples` in `replay.json` counts odometry messages
-sent beyond the current scan's stamp; normally there is one per scan sent.
+first sent beyond the current scan's stamp. An odometry bracket already sent
+for an earlier scan is reused, without sending that sample again.
 
 Exact mode refuses before starting if a pose's matching scan was not recorded,
-if scan stamps are duplicated, or if a scan has no odometry sample at or after
-its stamp. The error names the missing stamp.
+if scan stamps are duplicated, or if a planned scan lacks odometry coverage.
+The error names the missing stamp.
 
 A missing processed scan means
 the recording cannot reproduce that run; even the first pose has no exception.
@@ -544,6 +565,34 @@ recorded settings. Rate replay is useful for tuning, but an overloaded SLAM
 node can drop different scans, so its pose sequence is not a tick-for-tick
 reproduction.
 
+### Keeping scan receipt observable
+
+The feeder checks that each bracketed scan reached SLAM's scan callback before
+sending another. This receipt check applies even when SLAM rejects the scan;
+it does not wait for an unplanned pose. It prevents a burst of replay input
+from overrunning SLAM's subscription or its TF message filter.
+
+In slam_toolbox 2.8.5, the synchronous processing queue is an unbounded FIFO:
+[`slam_toolbox_sync.hpp:54`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/include/slam_toolbox/slam_toolbox_sync.hpp#L54)
+declares it, and
+[`slam_toolbox_sync.cpp:47–53`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_sync.cpp#L47-L53)
+removes entries in order. Exceeding ten entries emits a warning, not a drop.
+The earlier
+[TF message filter](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_common.cpp#L472-L475)
+is separate and bounded; this recording sets `scan_queue_size: 1`.
+
+The scan publisher uses reliable `KEEP_ALL` history, so it has no fixed-length
+outgoing queue that discards older scans.
+
+For a covered scan, SLAM's
+`map → odom` transform header acknowledges receipt of that scan's callback.
+The check requires `restamp_tf: false` and a positive
+`transform_publish_period`, as recorded in the 19:49 run.
+
+Unbracketed boundary
+scans cannot have this acknowledgement; the feeder yields between sends so
+SLAM can handle them through its TF filter.
+
 ### Limitations: measured result on the 19:49 run
 
 Run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
@@ -553,9 +602,12 @@ correction is identity. That count does not mean a pose lacks its scan.
 
 The all-scan replay with slam_toolbox **2.8.5** sent **973 scans**, then stopped
 after **11 consecutive planned-pose timeouts**. Its bag contains **12 extra
-poses and no matching pose stamps**: `matched: 0`, `missing_in_replay: 315`,
+poses and no matching pose stamps**.
+
+The comparison reports `matched: 0`, `missing_in_replay: 315`,
 `extra_in_replay: 12`, `max_position_m: 0.0`, `max_yaw_deg: 0.0`, and
-`first_over_bar: null`.
+`first_over_bar: null`. The 315 missing stamps include planned scans not
+reached after the abort; eleven were actually attempted and timed out.
 
 **The 1 mm / 0.1° reproduction bar was not met.** With no matched stamps,
 the zero numeric errors and null `first_over_bar` provide no accuracy
@@ -569,16 +621,22 @@ before that first pose.
 
 Transform arrival timing differs from header timing: the first recorded
 `odom_imu → odom` transform has stamp **1793069359712544260 ns**, but the bag
-received it **488.759 ms later**. Replay provides recorded odometry brackets
+received it **488.759 ms later**.
+
+Replay provides recorded odometry brackets
 before each covered scan, making transforms available earlier. The recorded
 `throttle_scans: 2` then makes differences in callback admission affect later
-scan choices. The evidence points to input-admission differences, not solver
+scan choices.
+
+The evidence points to input-admission differences, not solver
 numerical error; no corresponding poses exist to compare numerically.
 
 All **875 bracketed scans** sent had callback receipts, and **98 leading
 unbracketed scans** were also sent. A full feed would send **99 unbracketed
 scans**, including the final scan after odometry ends, but the consecutive
-timeout guard stopped this attempt before that final scan. Its
+timeout guard stopped this attempt before that final scan.
+
+Its
 `exact.lookahead_samples` count is **867**. The replay output label is
 `all-scans1`; the measured values above come from its `replay.json` and bag.
 

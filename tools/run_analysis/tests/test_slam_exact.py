@@ -293,3 +293,9 @@ def test_planned_boundary_scans_refused(stamp):
     # oracle: controller ruling - ONLY unplanned scans may lack an interpolation bracket.
     with pytest.raises(replay.StampMismatch, match=f'bracket.*{stamp}'):
         replay.exact_feed_steps([10, 20], [5, 15, 25], [stamp])
+
+
+def test_preflight_refuses_planned_scan_before_first_odometry():
+    # oracle: controller coverage rule - a future sample alone cannot bracket a planned scan.
+    with pytest.raises(replay.StampMismatch, match='bracket.*5'):
+        replay.odometry_brackets([10, 20], [5])
