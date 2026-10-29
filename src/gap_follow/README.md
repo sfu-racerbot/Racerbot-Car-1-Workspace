@@ -24,7 +24,11 @@ What each does, how to turn each off, the results, and the order to bring them u
 
 **Other cars on the track.** The other-car layer (`opponent_tracking.py`) is on by default since 2026-10-28. It tracks moving cars, follows them, and passes only with room on a straight. It can only lower speed or choose a side of an opening.
 
-Turn it off with `opponent_awareness:=false` on `gap_follow_launch.py`. The mapping launches (`map_course`, `auto_map_race`, `autonomous_mapping_launch.py`) read this YAML too, so the layer is on in their mapping laps. Their only switch is `enable_opponent_awareness` in the YAML. The details and the first-run order are in [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once).
+Turn it off with `opponent_awareness:=false` on `gap_follow_launch.py`. The mapping launches (`map_course`, `auto_map_race`, `autonomous_mapping_launch.py`) read this YAML too, but they turn the layer off, because mapping is always one car.
+
+Each of them takes `opponent_awareness`, which defaults to `false`; `opponent_awareness:=true` turns the layer on there. TODO(verify-R2d): the argument is added by a separate code change.
+
+The details and the first-run order are in [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once).
 
 ## Making the car faster
 
