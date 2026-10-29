@@ -12,6 +12,12 @@ Round-1 step 4, each observed failing individually, then reverted and rerun gree
   b. make extra poses fatal -> test_extra_pose_counted_not_fatal
 Checkpoint and boundary-step stubs also failed the timeout/reset/late-pose and
 unbracketed-boundary tests, respectively. No original assertions were weakened.
+
+Round-2 step 4, observed failing separately, reverted and rerun green:
+  a. skip sacrificial scans -> test_forced_plan_consumes_three_startup_callbacks
+  b. override all-scans admission -> test_all_scans_keeps_recorded_admission
+Forced-plan/override stubs failed the remaining new cases; using profile values
+instead of the snapshot failed test_admission_audit_uses_snapshot_not_profile.
 """
 import math
 import os
