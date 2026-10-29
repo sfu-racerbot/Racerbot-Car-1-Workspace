@@ -92,8 +92,9 @@ def _setup(context, *args, **kwargs):
     # Bringup's auto_record passes a prefix so it can tell the nodes of its
     # own recording from someone else's recorder (race_diagnostics/
     # auto_record.py). Empty for a recording started by hand.
+    prefix = LaunchConfiguration('name_prefix').perform(context).strip()
     diag_name, snapshot_name, bag_name = recorder_node_names(
-        LaunchConfiguration('name_prefix').perform(context).strip())
+        prefix)
 
     # What the run was made with -- code, calibration, parameters -- written
     # into <run>/metadata/ (race_diagnostics/run_metadata.py). Never fatal.
@@ -156,6 +157,14 @@ def _setup(context, *args, **kwargs):
         ),
     ]
 
+    if LaunchConfiguration('system_log', default='true').perform(context).lower() in ('true', '1'):
+        actions.append(ExecuteProcess(
+            cmd=['ros2', 'run', 'race_diagnostics', 'system_log',
+                 '--output', os.path.join(run_dir, 'system')],
+            name=f'{prefix}system_log',
+            output='screen',
+        ))
+
     if LaunchConfiguration('record_bag').perform(context).lower() in ('true', '1'):
         actions.append(ExecuteProcess(
             cmd=['ros2', 'bag', 'record', '--node-name', bag_name,
@@ -183,6 +192,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'record_bag', default_value='true',
             description='Record a rosbag. Set false to capture only the probe stream.'),
+        DeclareLaunchArgument(
+            'system_log', default_value='true',
+            description='Record per-process system resource usage.'),
         DeclareLaunchArgument(
             'topics', default_value=' '.join(DEFAULT_TOPICS),
             description='Space-separated topics to bag. Drop /scan to shrink ~10x.'),
