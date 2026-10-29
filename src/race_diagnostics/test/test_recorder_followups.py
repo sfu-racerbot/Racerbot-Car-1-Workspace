@@ -89,7 +89,7 @@ def _process_state(pid):
     """proc(5) state letter, or None when /proc/<pid> no longer exists."""
     try:
         text = Path(f'/proc/{pid}/stat').read_text()
-    except FileNotFoundError:
+    except OSError:  # FileNotFoundError, or ProcessLookupError if it just exited
         return None
     return text.rsplit(')', 1)[1].split()[0]
 
