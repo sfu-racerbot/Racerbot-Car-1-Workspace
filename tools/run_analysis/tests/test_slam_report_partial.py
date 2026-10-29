@@ -21,7 +21,7 @@ def _metadata(path, topics):
 def test_missing_scans_keeps_partial_report_and_cli(tmp_path, capsys):
     _metadata(tmp_path, ['/odom', '/odom/imu', '/rosout'])
     def no_slam(path):
-        raise ValueError('SLAM did not map this run')
+        raise report.slam_bag.NoSlamMapping('SLAM did not map this run')
     # oracle: a 3-4-5 triangle followed by a 3 m leg has total length 8 m.
     odom = np.array([[0, 0, 0, 0], [1, 3, 4, 0], [2, 6, 4, 0]])
     gyro = np.array([[0, 0, 0, 0], [1, 3, 4, .1], [2, 6, 4, .2]])
@@ -103,3 +103,26 @@ def test_scan_drops_only_count_slam_toolbox_logger(tmp_path):
     # oracle: slam_launch.py names the node slam_toolbox; only its drop counts.
     assert run['drops'] == [1]
     assert report.build_report(run)[1]['Scan drops']['count'] == 1
+
+
+def test_plain_value_error_with_no_slam_text_propagates(tmp_path):
+    def broken(path):
+        raise ValueError('SLAM did not map this run: unrelated invalid input')
+    # oracle: only the distinct no-map exception denotes absent SLAM.
+    with pytest.raises(ValueError, match='SLAM did not map this run: unrelated invalid input'):
+        report.load_inputs(tmp_path, load_slam=broken, load_scans=lambda p: None,
+                           load_rosout=lambda p: [])
+
+
+def test_empty_bag_raises_typed_no_slam_error(tmp_path):
+    import rosbag2_py
+    bag = tmp_path / 'bag'
+    writer = rosbag2_py.SequentialWriter()
+    writer.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id='sqlite3'),
+                rosbag2_py.ConverterOptions('cdr', 'cdr'))
+    del writer
+    # oracle: no messages means no map-to-odometry transform; the typed
+    # exception remains a ValueError for existing callers.
+    with pytest.raises(report.slam_bag.NoSlamMapping, match='SLAM did not map this run') as exc:
+        report.slam_bag.read_bag(bag)
+    assert isinstance(exc.value, ValueError)

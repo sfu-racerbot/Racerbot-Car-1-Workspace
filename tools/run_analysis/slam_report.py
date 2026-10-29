@@ -216,9 +216,7 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
     run = {'path': path}
     try:
         run['slam'] = (load_slam or slam_bag.load)(path)
-    except ValueError as exc:
-        if 'SLAM did not map this run' not in str(exc):
-            raise
+    except slam_bag.NoSlamMapping as exc:
         run.update(slam=None, no_slam_reason=str(exc))
     if load_scans is not None or load_rosout is not None:
         # Compatibility for callers supplying the original synthetic inputs.
