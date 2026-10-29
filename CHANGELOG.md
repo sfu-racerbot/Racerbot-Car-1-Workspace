@@ -22,13 +22,13 @@ The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s fol
 
 ### racerbot_launch
 
-- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML, so the other-car layer is on in their mapping laps too. None of them has an `opponent_awareness` argument. The switch there is `enable_opponent_awareness` in the YAML.
+- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML and turn the other-car layer off for their mapping laps, because mapping is always one car. Each takes an `opponent_awareness` argument that defaults to `false`; `opponent_awareness:=true` turns the layer on. TODO(verify-R2d): the argument is in a separate code change; check the three launch files against this bullet once it lands.
 
 ### Needs on-car validation
 
 - The other-car layer has never run on the floor. Order: wheels off with both cars, then a slow two-car run at `max_speed:=1.0`, with a person holding LB on each controller. If a wall shows as `opponent mode=` with no other car moving, let go of LB, relaunch with `opponent_awareness:=false`, and report the run.
 
-## 2026-10-27 (latest) — gap_follow race defaults (not yet driven on the car)
+## 2026-10-27 — gap_follow race defaults (not yet driven on the car)
 
 Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated only: **not yet driven on the car.** The numbers, and how to go back, are in `docs/gap-follow.md#race-defaults-2026-10-27`.
 
