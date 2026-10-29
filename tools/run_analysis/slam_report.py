@@ -182,7 +182,7 @@ def _read_odom_imu(run_dir):
 
 
 def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_rosout=None):
-    """Load recorded inputs, catching only slam_bag's no-map diagnostic."""
+    """Load recorded inputs, preserving partial runs when topics are absent."""
     import yaml
 
     path = Path(run_dir).expanduser()
@@ -195,7 +195,13 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
         run.update(slam=None, no_slam_reason=str(exc))
         if (path / 'bag').is_dir():
             run['odom_imu'] = _read_odom_imu(path)
-    scans = (load_scans or runlog.load_run)(path)
+    try:
+        scans = (load_scans or runlog.load_run)(path)
+    except ValueError as exc:
+        if 'bag needs /scan and /drive, has ' not in str(exc) and not str(exc).endswith(': no /scan messages'):
+            raise
+        scans = None
+        run['no_scans_reason'] = str(exc)
     if scans is not None:
         for key in ('scan_t', 'scan', 'angle_min', 'angle_increment', 'range_min', 'range_max'):
             run[key] = scans[key] if isinstance(scans, dict) else getattr(scans, key)
@@ -357,7 +363,9 @@ def build_report(run):
     scan_t = np.asarray(run.get('scan_t', []), dtype=float)
     scans = np.asarray(run.get('scan', []))
     grid = slam.get('map')
-    if no_slam:
+    if run.get('no_scans_reason'):
+        lines.append('  no scans: ' + run['no_scans_reason'])
+    elif no_slam:
         lines.append('  no SLAM')
     elif (grid is None or len(pose) < 2 or not len(scan_t) or not len(scans)
           or any(run.get(key) is None for key in ('angle_min', 'angle_increment', 'range_max'))):
