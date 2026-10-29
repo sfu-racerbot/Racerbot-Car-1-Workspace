@@ -49,6 +49,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from sim_fidelity.bootstrap import bootstrap  # noqa: E402
 
 ROOT = bootstrap()
+sys.path.insert(0, str(ROOT / 'src' / 'imu_bridge'))
 sys.path.insert(0, str(ROOT / "src" / "racerbot_sim"))
 
 import gymnasium as gym  # noqa: E402

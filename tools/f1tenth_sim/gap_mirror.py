@@ -599,9 +599,6 @@ class GapController:
             steering, dt, current_speed, yaw_rate, measured_steering)
         tel['imu_understeer_engaged'] = math.isfinite(understeer_cap)
         tel['imu_understeer_cap'] = understeer_cap
-        if understeer_cap < desired_speed:
-            desired_speed = understeer_cap
-            binding = 'understeer'
         if creeping:
             binding = 'creep'
         if used_fallback and effective_corner < desired_speed:
@@ -613,6 +610,10 @@ class GapController:
         if p["speed_hold_sec"] > 0.0:
             self.speed_hold_clock += dt
             desired_speed = self.speed_hold.update(self.speed_hold_clock, desired_speed)
+        # An untrusted sensor must not leave a cap behind in the speed hold.
+        if understeer_cap < desired_speed:
+            desired_speed = understeer_cap
+            binding = 'understeer'
 
         ramp_basis = max(self.last_commanded_speed,
                          min(abs(float(current_speed)), p["max_speed"]))

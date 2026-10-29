@@ -47,8 +47,8 @@ def _inputs(node, failure=None):
             node.last_measured_steering_time = node.get_clock().now() - Duration(seconds=0.2)
 
 
-def _run(enabled=True, failure=None, dropout=False):
-    node = _make(enabled)
+def _run(enabled=True, failure=None, dropout=False, extra=()):
+    node = _make(enabled, extra)
     try:
         commands, intents = _capture(node), _capture_intent(node)
         engaged = []
@@ -201,3 +201,13 @@ def test_valid_live_change_restarts_check_and_its_independent_lag():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+def test_speed_hold_does_not_remember_an_untrusted_understeer_cap():
+    extra = ['-p', 'speed_hold_sec:=2.0']
+    on, _, engaged = _run(dropout=True, extra=extra)
+    off, _, _ = _run(False, dropout=True, extra=extra)
+    # oracle: invariant: fallback is feature-off even with speed hold enabled.
+    assert engaged[-2]
+    assert on[-2][0] < off[-2][0]
+    assert on[-1] == off[-1]

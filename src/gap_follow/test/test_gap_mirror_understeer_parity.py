@@ -11,12 +11,14 @@ from test_gap_mirror_parity import gap_mirror, _Lidar
 
 
 @pytest.mark.parametrize('enabled', [False, True])
-def test_understeer_mirror_matches_each_command_with_independent_state(enabled):
-    node = _make(enabled)
+@pytest.mark.parametrize('hold_sec', [0.0, 2.0])
+def test_understeer_mirror_matches_each_command_with_independent_state(enabled, hold_sec):
+    node = _make(enabled, ['-p', f'speed_hold_sec:={hold_sec}'])
     try:
         published = _capture(node)
         params = gap_mirror.node_params()
-        params.update(enable_imu_understeer=enabled, command_slew_max_dt=DT)
+        params.update(enable_imu_understeer=enabled, command_slew_max_dt=DT,
+                      speed_hold_sec=hold_sec)
         scan = _raycast(_corridor(1.4, 0.6))
         mirror = gap_mirror.GapController(params, _Lidar(scan))
         engaged = []

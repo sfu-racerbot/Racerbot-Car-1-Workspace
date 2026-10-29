@@ -99,3 +99,15 @@ def test_cap_closed_form_and_off(speed):
 def test_nonfinite_speed_has_no_cap(speed):
     # oracle: spec: an unknown speed must never set a driving ceiling.
     assert logic.understeer_speed_cap(True, speed, 0.85) == math.inf
+
+
+def test_ratio_band_boundaries_are_strict():
+    check = logic.UndersteerCheck(0.75, 0.85, 0.2)
+    # oracle: spec: at engage is not below it; at release is not above it.
+    assert not check.update(0.75, 0.2)
+    check.reset()
+    assert check.update(0.6, 0.2)
+    check.ratio_filter.reset()
+    assert check.update(0.85, 0.2)
+    check.ratio_filter.reset()
+    assert not check.update(math.nextafter(0.85, math.inf), 0.025)

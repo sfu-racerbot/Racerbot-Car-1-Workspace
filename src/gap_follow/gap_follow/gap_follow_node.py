@@ -1619,12 +1619,15 @@ class GapFollowNode(Node):
         understeer_cap, understeer_off = self._understeer_cap(steering_angle, command_dt)
         desired_speed = min(normal_speed, clearance_speed, anticipated_speed,
                             self._narrow_corridor_speed(side_left, side_right),
-                            follow_cap, understeer_cap)
+                            follow_cap)
         if used_fallback:
             desired_speed = min(desired_speed, self.effective_corner_speed)
         if self.speed_hold_sec > 0.0:
             self.speed_hold_clock += command_dt
             desired_speed = self.speed_hold.update(self.speed_hold_clock, desired_speed)
+        # Do not store an IMU ceiling in speed_hold: an untrusted sample must
+        # restore the feature-off command immediately, without a held cap.
+        desired_speed = min(desired_speed, understeer_cap)
 
         # Acceleration is deliberately gradual. A lower curvature/clearance
         # ceiling takes effect immediately; delaying a safety-related slowdown

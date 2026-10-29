@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sim_fidelity.bootstrap import bootstrap  # noqa: E402
 
 ROOT = bootstrap()
+sys.path.insert(0, str(ROOT / 'src' / 'imu_bridge'))
 
 try:
     import gymnasium as gym
