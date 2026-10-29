@@ -600,6 +600,7 @@ class OpponentAwareness:
         # Front bumper in base_link: body centred on the wheelbase midpoint
         # (gap_logic.vehicle_boundary_distances' model).
         self.front_x = wheelbase / 2.0 + car_length / 2.0
+        self.centre_x = wheelbase / 2.0
         self.ego = EgoPose()
         self.tracker = OpponentTracker(params)
         self.steer = SteeringEstimate(params.steer_delay, params.steer_gain,
@@ -749,10 +750,15 @@ class OpponentAwareness:
         full relevance band, regardless of another car permitting a pass.
 
         When passing is refused, each relevant moving or held car whose
-        observed rear/nearest face is at or behind our front bumper also
-        imposes max(0, hypot(vx, vy) - abort_speed_margin), in m/s. This
+        observed rear/nearest face is at or behind our front bumper, and
+        whose centre is strictly ahead of ours, also imposes
+        max(0, hypot(vx, vy) - abort_speed_margin), in m/s. This
         alongside-abort ceiling lets the other car pull ahead; once its face
         is ahead of the bumper the unchanged gap-only follow law takes over.
+        Only the car that is behind yields: two cars running the same rule
+        side by side would otherwise each cap below the other and ratchet
+        both to zero (measured 2026-10-29, car1_course reversed, 0 of 2
+        finished at a 2.5 m/s leader). With centres level neither yields.
         Relevance is exactly moving_body/_held_body's spatial band (including
         their rear cutoff), not an unbounded region behind us. With passing
         permitted, or no alongside car, this adds no ceiling. All ceilings
@@ -769,7 +775,7 @@ class OpponentAwareness:
         abort_cap = math.inf
         if not passing:
             for m in moving + held:
-                if m[4] <= self.front_x:
+                if m[4] <= self.front_x and m[0] > self.centre_x:
                     abort_cap = min(abort_cap, max(
                         0.0, math.hypot(m[2], m[3]) - self.params.abort_speed_margin))
         return min(moving_cap, held_cap, abort_cap)

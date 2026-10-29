@@ -48,6 +48,31 @@ def test_alongside_abort_closed_form_and_ahead_law(speed, margin):
     assert layer.follow_cap(False) == math.inf
 
 
+CENTRE = WHEELBASE / 2.0   # 0.18 m, body centre in base_link
+
+
+@pytest.mark.parametrize('ahead', [0.25, 0.01, 0.0, -0.01, -0.25])
+def test_alongside_abort_yields_only_the_car_that_is_behind(ahead):
+    """Two identical cars side by side, B's centre ``ahead`` metres in front
+    of A's, both running the rule. Each sees the other alongside (rear face
+    at or behind its bumper) with passing refused."""
+    speed = 1.5
+    p = ot.OpponentParams()
+    caps = []
+    for other_x in (CENTRE + ahead, CENTRE - ahead):   # A sees B, B sees A
+        layer = ot.OpponentAwareness(p, WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+        layer.tracker.tracks = [ot.Track(other_x, 0.7, vx=speed, moving=True)]
+        # oracle: invariant -- the scenario really is alongside for both cars.
+        assert layer.moving_body()[0][4] <= FRONT
+        caps.append(layer.follow_cap(False))
+    yield_cap = max(0.0, speed - p.abort_speed_margin)
+    # oracle: invariant -- exactly the car whose centre is behind yields, by the
+    # closed-form abort cap; level centres yield neither, so no mutual ratchet.
+    expected = ([yield_cap, math.inf] if ahead > 0 else
+                [math.inf, yield_cap] if ahead < 0 else [math.inf, math.inf])
+    assert caps == pytest.approx(expected, abs=1e-12)  # m/s roundoff
+
+
 @pytest.mark.parametrize('margin', [-0.01, math.nan, math.inf, -math.inf])
 def test_abort_margin_rejects_invalid_values(margin):
     # oracle: spec -- abort margin must be finite and nonnegative.
