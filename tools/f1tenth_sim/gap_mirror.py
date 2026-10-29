@@ -162,6 +162,7 @@ REQUIRED_PARAMS = frozenset((
     "opponent_prediction_step",
     "opponent_follow_min_gap",
     "opponent_follow_time_gap",
+    "opponent_abort_speed_margin",
     "opponent_follow_lateral",
     "opponent_relevant_lateral",
     "opponent_pass_max_steering",

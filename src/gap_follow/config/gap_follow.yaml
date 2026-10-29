@@ -535,6 +535,8 @@ gap_follow_node:
     opponent_prediction_step: 0.1    # s
     opponent_follow_min_gap: 0.5     # m, bumper gap at which the follow cap reaches 0
     opponent_follow_time_gap: 1.0    # s: 0.6 stalled 6 of 8 two-car runs on the 1.2 m loop, 1.0 none
+    # m/s below an alongside car's ground speed when a pass is refused; drop behind it.
+    opponent_abort_speed_margin: 0.5
     # Follow-cap memory (2026-10-28): when the car being followed is lost (its
     # track is dropped from the scan, or it leaves the relevant band), the follow
     # cap is held at its last finite value for this many seconds of scan stamps,

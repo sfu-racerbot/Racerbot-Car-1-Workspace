@@ -28,6 +28,33 @@ ANGLES = np.linspace(-0.75 * math.pi, 0.75 * math.pi, N_BEAMS)  # the Hokuyo's 2
 MAX_RANGE = 10.0
 
 
+@pytest.mark.parametrize('speed,margin', [(1.5, 0.5), (0.2, 0.5), (1.5, 0.0)])
+def test_alongside_abort_closed_form_and_ahead_law(speed, margin):
+    p = ot.OpponentParams(abort_speed_margin=margin)
+    layer = ot.OpponentAwareness(p, WHEELBASE, LASER_X, 0.0, CAR_LENGTH)
+    track = ot.Track(FRONT, 0.7, vx=speed, moving=True)
+    layer.tracker.tracks = [track]
+    # oracle: closed form at the inclusive bumper boundary, ground speed minus margin.
+    assert layer.follow_cap(False) == pytest.approx(max(0, speed - margin), abs=1e-12)
+    assert layer.follow_cap(True) == math.inf
+    track.x = FRONT + 2.0
+    # oracle: unchanged gap-only law, even when the car is outside follow_lateral.
+    assert layer.follow_cap(False) == pytest.approx(
+        (2.0 - p.follow_min_gap) / p.follow_time_gap, abs=1e-12)  # m/s roundoff
+    track.y = p.relevant_lateral + 0.001
+    # oracle: invariant -- an irrelevant car adds no cap.
+    assert layer.follow_cap(False) == math.inf
+    layer.tracker.tracks = []
+    assert layer.follow_cap(False) == math.inf
+
+
+@pytest.mark.parametrize('margin', [-0.01, math.nan, math.inf, -math.inf])
+def test_abort_margin_rejects_invalid_values(margin):
+    # oracle: spec -- abort margin must be finite and nonnegative.
+    with pytest.raises(ValueError, match='opponent_abort_speed_margin must be >= 0 and finite'):
+        ot.OpponentParams(abort_speed_margin=margin).validate()
+
+
 def _cast(segments, angles=ANGLES, origin=(LASER_X, 0.0)):
     """Ranges from ``origin`` (base_link) to the nearest of ``segments``
     [((x0, y0), (x1, y1)), ...] along each beam angle; inf where none."""

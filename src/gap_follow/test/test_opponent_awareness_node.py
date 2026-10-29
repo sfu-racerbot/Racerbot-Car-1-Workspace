@@ -526,6 +526,68 @@ def test_held_cap_publishes_zero_when_joy_is_stale(aware_node):
 CLOSED_CORRIDOR = _corridor(0.5, 0.5) + [((0.55, -0.5), (0.55, 0.5))]
 
 
+def _alongside_scan(step, narrow=False):
+    # Wide passing lane, narrowing ahead to the course's 1.06 m minimum.
+    walls = _corridor(2.0, 2.0)
+    if narrow:
+        walls = [((-10.0, s * 2.0), (0.3, s * 2.0)) for s in (-1, 1)]
+        walls += [((0.3, s * 2.0), (0.6, 0.30 + s * 0.53)) for s in (-1, 1)]
+        walls += [((0.6, 0.30 + s * 0.53), (20.0, 0.30 + s * 0.53)) for s in (-1, 1)]
+    scan = _raycast(walls + _box(1.2 - step * DT, 0.65))
+    ns = round((100.0 + step * DT) * 1e9)
+    scan.header.stamp.sec, scan.header.stamp.nanosec = divmod(ns, 10**9)
+    return scan
+
+
+def _alongside_tick(node, published, step, narrow=False, state='held'):
+    if state != 'never':
+        joy = Joy()
+        joy.buttons = [0, 0, 0, 0, int(state != 'released')]
+        node.joy_callback(joy)
+        if state == 'stale':
+            node.last_joy_time = node.get_clock().now() - Duration(
+                seconds=node.joy_timeout_sec + DT)
+    else:
+        node.last_joy_time = None
+    odom = Odometry()
+    odom.twist.twist.linear.x = EGO_SPEED
+    node.odom_callback(odom)
+    node.steering_basis = 0.0
+    node.last_commanded_speed = EGO_SPEED
+    node.last_command_time = node.get_clock().now() - Duration(seconds=DT)
+    node.scan_callback(_alongside_scan(step, narrow))
+    return published[-1].drive.speed
+
+
+def test_alongside_pass_aborts_on_first_narrow_tick(aware_node):
+    node, published = aware_node
+    for step in range(44):
+        _alongside_tick(node, published, step)
+    # oracle: invariant -- a pass really is under way with an alongside mover.
+    assert node.opponent_mode == 'clear'
+    assert any(m[4] <= FRONT for m in node.opponents.moving_body())
+    speed = _alongside_tick(node, published, 44, narrow=True)
+    assert node.opponent_mode == 'follow'
+    # oracle: invariant -- drop behind the true 1.5 m/s car on the first refusal.
+    # Exact margin arithmetic is tested with known velocities in the ROS-free test;
+    # scan centroid changes introduce velocity-estimation error here.
+    assert 0.0 < speed < OPP_SPEED
+
+
+@pytest.mark.parametrize('state', ['held', 'released', 'never', 'stale'])
+def test_alongside_abort_deadman_published_command(aware_node, state):
+    node, published = aware_node
+    for step in range(44):
+        _alongside_tick(node, published, step)
+    speed = _alongside_tick(node, published, 44, narrow=True, state=state)
+    # oracle: CLAUDE.md LB policy on the published command with abort cap active.
+    if state == 'held':
+        assert node.opponent_mode == 'follow'
+        assert 0.0 < speed < OPP_SPEED
+    else:
+        assert speed == 0.0
+
+
 def test_the_memory_clock_runs_through_a_no_safe_gap_stop(aware_node):
     node, published = aware_node
     cap = _follow_law(CAR_GAP)

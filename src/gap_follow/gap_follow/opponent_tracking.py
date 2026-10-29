@@ -73,6 +73,7 @@ class OpponentParams:
     prediction_step: float = 0.1     # s
     follow_min_gap: float = 0.5      # m, bumper-to-car gap at zero speed
     follow_time_gap: float = 1.0     # s
+    abort_speed_margin: float = 0.5  # m/s, drop behind an alongside car on refusal
     follow_lateral: float = 0.45     # m, |y| within which a car is "in path"
     relevant_lateral: float = 1.0    # m, |y| beyond which a mover is ignored
     pass_max_steering: float = 0.10  # rad, no new pass while steering harder
@@ -108,7 +109,7 @@ class OpponentParams:
             if not (math.isfinite(value) and value > 0.0):
                 raise ValueError(f'opponent_{name} must be positive and finite, got {value!r}')
         for name in ('passing_margin', 'prediction_horizon', 'follow_min_gap',
-                     'steer_delay', 'follow_memory_sec'):
+                     'steer_delay', 'follow_memory_sec', 'abort_speed_margin'):
             value = getattr(self, name)
             if not (math.isfinite(value) and value >= 0.0):
                 raise ValueError(f'opponent_{name} must be >= 0 and finite, got {value!r}')
@@ -745,11 +746,30 @@ class OpponentAwareness:
 
     def follow_cap(self, passing: bool = True) -> float:
         """Moving cars use the pass-dependent band; held cars always use the
-        full relevance band, regardless of another car permitting a pass."""
+        full relevance band, regardless of another car permitting a pass.
+
+        When passing is refused, each relevant moving or held car whose
+        observed rear/nearest face is at or behind our front bumper also
+        imposes max(0, hypot(vx, vy) - abort_speed_margin), in m/s. This
+        alongside-abort ceiling lets the other car pull ahead; once its face
+        is ahead of the bumper the unchanged gap-only follow law takes over.
+        Relevance is exactly moving_body/_held_body's spatial band (including
+        their rear cutoff), not an unbounded region behind us. With passing
+        permitted, or no alongside car, this adds no ceiling. All ceilings
+        combine by minimum and can only lower the commanded speed.
+        """
+        moving = self.moving_body()
+        held = self._held_body()
         moving_cap = follow_speed_cap(
-            [(m[4], m[1]) for m in self.moving_body()], self.front_x, self.params,
+            [(m[4], m[1]) for m in moving], self.front_x, self.params,
             lateral=None if passing else self.params.relevant_lateral)
         held_cap = follow_speed_cap(
-            [(m[4], m[1]) for m in self._held_body()], self.front_x, self.params,
+            [(m[4], m[1]) for m in held], self.front_x, self.params,
             lateral=self.params.relevant_lateral)
-        return min(moving_cap, held_cap)
+        abort_cap = math.inf
+        if not passing:
+            for m in moving + held:
+                if m[4] <= self.front_x:
+                    abort_cap = min(abort_cap, max(
+                        0.0, math.hypot(m[2], m[3]) - self.params.abort_speed_margin))
+        return min(moving_cap, held_cap, abort_cap)

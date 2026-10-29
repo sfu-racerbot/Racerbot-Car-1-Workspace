@@ -177,6 +177,32 @@ def _box_ahead(rear_x, y=0.0, length=0.58, width=0.30):
             ((x1, y + hw), (x1, y - hw)), ((x1, y - hw), (x0, y - hw))]
 
 
+def test_mirror_matches_alongside_wide_to_narrow_abort(node):
+    from test_opponent_awareness_node import _alongside_scan, _alongside_tick, OPP_SPEED
+    params = gap_mirror.node_params()
+    params['command_slew_max_dt'] = DT
+    node.command_slew_max_dt = DT
+    mirror = gap_mirror.GapController(params, _Lidar(_alongside_scan(0)))
+    published = []
+    node.drive_pub.publish = published.append
+    for step in range(45):
+        mirror.steering_basis = 0.0
+        mirror.last_commanded_speed = 2.5
+        mirror.last_command_time = step - 1
+        mirror.previous_target_idx = node.previous_target_idx
+        actual = _alongside_tick(node, published, step, narrow=step == 44)
+        steer, speed = mirror.command(np.asarray(_alongside_scan(step, step == 44).ranges),
+                                      2.5, step)
+        # oracle: invariant -- independent node and mirror command paths agree.
+        assert actual == pytest.approx(speed, abs=TOLERANCE)  # m/s
+        assert published[-1].drive.steering_angle == pytest.approx(steer, abs=TOLERANCE)
+        if step == 43:
+            assert node.opponent_mode == mirror.opponent_mode == 'clear'
+    assert node.opponent_mode == mirror.opponent_mode == 'follow'
+    # oracle: invariant -- both commands drop below the car's true ground speed.
+    assert 0.0 < actual < OPP_SPEED
+
+
 def test_mirror_matches_the_node_with_opponent_awareness_on():
     """The same comparison with enable_opponent_awareness on and another car
     in the scene: ahead in a 2 m corridor, closing, drifting sideways, so the
