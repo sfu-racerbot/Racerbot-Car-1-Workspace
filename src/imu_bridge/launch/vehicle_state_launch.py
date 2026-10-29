@@ -44,6 +44,10 @@ def bridge_running():
 
 
 def _actions(context, *args, **kwargs):
+    hardware_value = LaunchConfiguration('hardware').perform(context).strip().lower()
+    if hardware_value not in ('true', 'false'):
+        raise RuntimeError('hardware must be true or false')
+    hardware = hardware_value == 'true'
     share = get_package_share_directory('imu_bridge')
     root = os.path.expanduser(LaunchConfiguration('racer_imu_root').perform(context))
     bno = LaunchConfiguration('bno').perform(context).strip().lower() in ('true', '1')
@@ -51,7 +55,9 @@ def _actions(context, *args, **kwargs):
     publish_tf = LaunchConfiguration('publish_odom_tf').perform(context).strip().lower() in (
         'true', '1')
     actions = []
-    if bno:
+    if not hardware:
+        actions.append(LogInfo(msg='hardware:=false: starting only vehicle_state_node on simulated IMU topics.'))
+    if hardware and bno:
         script = os.path.join(root, 'tools', BRIDGE_SCRIPT)
         if bridge_running():
             actions.append(LogInfo(msg=(
@@ -70,16 +76,17 @@ def _actions(context, *args, **kwargs):
             actions.append(ExecuteProcess(
                 cmd=['python3', '-u', script, '--pty', pty, '--no-dyncal'],
                 name='bno_i2c_bridge', output='screen'))
-    actions.append(Node(
-        package='imu_bridge', executable='imu_bridge_node', name='imu_bridge_node',
-        output='screen',
-        parameters=[os.path.join(share, 'config', 'imu_bridge.yaml'),
-                    {'racer_imu_root': root, 'bno_port': pty if bno else ''}],
-    ))
+    if hardware:
+        actions.append(Node(
+            package='imu_bridge', executable='imu_bridge_node', name='imu_bridge_node',
+            output='screen',
+            parameters=[os.path.join(share, 'config', 'imu_bridge.yaml'),
+                        {'racer_imu_root': root, 'bno_port': pty if bno else ''}],
+        ))
     # Without the BNO there is no trusted forward accelerometer on car 1 (the
     # VESC's mount rotation is still car 2's): publish the wheel speed as is.
     overrides = {'publish_odom_tf': publish_tf}
-    if not bno:
+    if hardware and not bno:
         overrides['accel_source'] = 'none'
     actions.append(Node(
         package='imu_bridge', executable='vehicle_state_node', name='vehicle_state_node',
@@ -91,6 +98,9 @@ def _actions(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'hardware', default_value='true',
+            description='true starts the real IMU stack; false uses simulated IMU topics.'),
         DeclareLaunchArgument(
             'bno', default_value='true',
             description='Use the BNO085 (front axle, Jetson I2C). false = VESC IMU only.'),

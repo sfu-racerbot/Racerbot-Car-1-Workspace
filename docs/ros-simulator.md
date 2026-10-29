@@ -54,8 +54,10 @@ car is exactly where this is most convenient to run:
   and an invented one.
 
 So neither publishes anything while any of `vesc_driver_node`,
-`ackermann_to_vesc_node`, `vesc_to_odom_node`, `urg_node` or `joy` is on
-the ROS graph. The check repeats, so bringing the car up *after* the
+`ackermann_to_vesc_node`, `vesc_to_odom_node`, `urg_node`, `joy` or
+`imu_bridge_node` is on the ROS graph.
+
+The check repeats, so bringing the car up *after* the
 simulator silences the simulator too (`racerbot_sim/hardware_guard.py`).
 It is a live-graph check rather than a flag because a flag is something
 you can forget.
@@ -92,6 +94,130 @@ ros2 launch gap_follow gap_follow_launch.py     # second terminal
 ```
 
 Needs the F1TENTH Gym from `tools/f1tenth_sim/setup.sh` (one time).
+
+## Simulated IMU
+
+The simulator publishes an IMU (inertial measurement unit), which measures
+turn rate and acceleration, for every controlled car. Car 1 uses
+`/imu/bno/data` and `/imu/vesc/data`; `/imu/data` repeats the BNO reading.
+Car 2 has the same topics under `/car2/imu/`, and later cars use `/carN/imu/`.
+
+Each car also has an `/imu/status` topic under its own prefix. It carries
+JSON describing the primary BNO's health. The status is latched, so a
+subscriber that starts later receives the last verdict.
+The latched `/imu/status` for each car is withdrawn whenever the hardware interlock blocks and offered again with the current verdict when it reopens.
+
+**Terminal 2**, with the simulator running in Terminal 1 and this terminal
+sourced as above, check the sensor topics and car 1's status:
+
+```bash
+ros2 topic list -t | grep imu
+ros2 topic echo --once /imu/status
+```
+
+**Working when:** car 1's four topics appear and the status says
+`{"state": "ok", "reason": null, "imu": "bno"}`. The default race launch
+also lists `/car2/imu/data` and `/car2/imu/status`.
+
+Both default launches passed this check on 2026-10-29.
+If no topics appear, check Terminal 1 for
+a startup error; if topics exist but no data arrives, check the interlock.
+
+The gyro uses the gym's true yaw rate. Acceleration comes from the change
+in true speed and yaw rate between simulation ticks, plus the acceleration
+caused by each sensor's position ahead of the rear axle (the lever arm).
+The BNO is 0.36 m ahead; the VESC (motor controller) IMU is 0.18 m ahead,
+matching `vehicle_state.yaml`.
+
+Forward acceleration includes `-offset × yaw_rate²`, and lateral
+acceleration includes `offset × change_in_yaw_rate / dt`. At rest, the
+vertical accelerometer reads gravity, +9.80665 m/s². Readings use car axes:
+x forward, y left, z up. Orientation is marked unknown.
+
+Independent Gaussian noise is added to every axis. These per-axis standard
+deviations are the mean of the three measured axis standard deviations:
+
+| Sensor | Gyro noise (rad/s) | Acceleration noise (m/s²) | Samples |
+|---|---:|---:|---:|
+| BNO | 0.000711561 | 0.021534955 | 4481 |
+| VESC | 0.001347428 | 0.014463125 | 878 |
+
+The source is run `20261026-194514`, `/imu/bno/data` and `/imu/vesc/data`,
+3.5–21.3 seconds after the bag began, after the 3-second startup bias. All
+890 `/odom` samples in that window showed zero speed. Each axis's mean was
+removed before measuring its spread. The window is long because the BNO gyro
+reports values in coarse steps, and a short window samples too few of them.
+
+### Inject an IMU fault
+
+`publish_imu:=false` on either simulator launch omits all IMU publishers.
+Otherwise `imu_fault` affects car 1 and `car2_imu_fault` affects car 2.
+Both default to `none` and can change while the simulator runs.
+
+| Fault | Output |
+|---|---|
+| `none` | Normal readings; status `ok`. |
+| `bias` | Add 0.1 rad/s to both gyros' z axes; status stays `ok`. |
+| `scale` | Multiply both gyros' z axes by 1.1; status stays `ok`. |
+| `zero` | All accelerometer and gyro axes become exactly zero, without noise; status `fault`. |
+| `status_fault` | Normal readings with status `fault`. |
+| `stale` | Stop IMU readings and retain the last status. Consumers must check data age. |
+
+**Terminal 2**, with the simulator still running, stop car 1's IMU stream:
+
+```bash
+ros2 param set /gym_bridge_node imu_fault stale
+```
+
+**Working when:** the parameter change succeeds and `/imu/data` stops.
+After a healthy stream, `/imu/status` stays `ok`; `gap_follow` then reports
+`imu stale` and removes steering damping. Set `imu_fault none` with the
+same command to resume readings. Car 2 continues throughout.
+
+Start the IMU-derived estimator in another sourced terminal with
+`ros2 launch imu_bridge vehicle_state_launch.py hardware:=false`.
+This starts only `vehicle_state_node`, using the simulated BNO and VESC
+topics. The default `hardware:=true` starts the real sensor stack.
+
+When `steering_damping` or `adaptive_grip` is on, `gap_follow_launch.py` starts
+this estimator. In the simulator it chooses the simulated IMU by itself:
+`imu_hardware` defaults to `auto`, which sees the running simulator and starts
+neither `imu_bridge_node` nor the BNO085 bridge. `imu_hardware:=false` forces
+the simulated IMU.
+
+`map_course` also uses the simulated IMU. With `sim_bringup_launch.py`
+running, the wrapper adds `imu_hardware:=false` for you, so the estimator
+runs without starting the real sensor readers. You can use `gyro_odom:=true`
+to give SLAM the gyro's heading. `imu:=false` explicitly disables the estimator.
+
+In the first comparison on 2026-10-29, three-lap runs on
+`car1_course_2026_10_26` at a 2.0 m/s cap
+used a deliberately wrong yaw-rate scale of 1.1. Wheel odometry (heading
+estimated from speed and steering, [glossary](glossary.md#odometry--odom)) drifted
+43°, 93° and 128° after successive revolutions; gyro heading stayed within
+0.36°. All runs saved maps, including a scale-1.0 control. Only the gyro-mapping
+run generated a racing profile, but it still reported steering and wall-clearance
+problems. This demonstrates the heading benefit, not a clean map.
+
+The comparison used `diagnostics:=false` because the recorder include
+overrides the map output directory when enabled.
+
+Steering damping is active in the simulator: `/drive_intent` reports a
+non-zero correction against the gyro's turn rate while cornering. With
+`imu_fault:=stale`, its reason changes to `steering_damping_off: imu stale`
+while driving continues; setting the fault back to `none` restores damping.
+Reasons appear periodically, so some messages omit that field.
+
+**All simulated IMU output sits behind the hardware interlock.**
+The simulator refuses to send readings beside `imu_bridge_node`, including in
+other namespaces, because mixing real and simulated gyros would mislead
+controllers. The same startup and clean-graph waits apply as for `/scan`.
+
+### Limitations
+
+The gym's tyres cannot slide: tyre force is linear in slip angle. Use this
+simulator to check IMU wiring and fault fall-backs, not to tune grip or
+understeer thresholds; those need recorded runs from the car.
 
 ## Two cars and racing
 
@@ -177,6 +303,7 @@ that depends on a thousandth of a radian will vary with it.
 | `hold_deadman` | `true` | `false` proves the car stays stopped with LB released |
 | `release_after_sec` | `-1` | Release the synthetic LB this far into the run |
 | `odom_speed_scale` | `1.0` | Odometry scale error, as a miscalibrated `speed_to_erpm_gain` would give |
+| `odom_yaw_rate_scale` | `1.0` | Scale the turn rate used by dead-reckoned `/odom`, modelling a miscalibrated steering model. The simulated gyro still measures the true turn rate. |
 | `seed` | `12345` | LiDAR noise and odometry noise |
 | `dashboard` | `false` | Also start `web_dashboard` |
 

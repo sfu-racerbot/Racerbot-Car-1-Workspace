@@ -40,8 +40,11 @@ speed, and if vehicle_state dies /odom/fused goes silent and gap_follow stops
 the car as it would for a silent /odom. SLAM, the odom -> base_link
 transform and auto_map_race_node stay on /odom either way. Compare runs with
 ``record_bag:=true`` (the default): the bag then holds /odom, /odom/fused and
-/steering/measured side by side. In the simulator pass ``imu:=false``
-(the map_course wrapper does it for you): there is no IMU there.
+/steering/measured side by side. In the simulator the map_course wrapper
+adds ``imu_hardware:=false``: vehicle_state_node uses the simulated IMU,
+without starting the real sensor readers. Direct launches default to
+``imu_hardware:=auto``, detecting the running simulator; true/false select
+real/simulated inputs explicitly.
 
 ``gyro_odom:=true`` (default false) gives slam_toolbox gyro odometry: its
 odom_frame becomes odom_imu, and vehicle_state publishes odom_imu -> odom
@@ -59,6 +62,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from gap_follow.speed_overrides import mapping_speed_overrides
+from gap_follow.launch_imu import select_imu_hardware
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription,
                             OpaqueFunction, RegisterEventHandler, SetLaunchConfiguration)
@@ -124,12 +128,16 @@ def slam_profile_for(gyro_odom):
         get_package_share_directory('racerbot_launch'), 'config', SLAM_GYRO_PROFILE)
 
 
-def _wiring(context):
+def _wiring(context, imu_probe=None):
     gyro_odom = LaunchConfiguration('gyro_odom').perform(context)
     frame, publish_tf = gyro_odom_settings(
         LaunchConfiguration('imu').perform(context), gyro_odom)
     actions = [SetLaunchConfiguration('slam_odom_frame', frame),
                SetLaunchConfiguration('publish_odom_tf', publish_tf)]
+    if _flag('imu', LaunchConfiguration('imu').perform(context)):
+        hardware, _ = select_imu_hardware(
+            LaunchConfiguration('imu_hardware').perform(context), probe=imu_probe)
+        actions.append(SetLaunchConfiguration('imu_selected_hardware', hardware))
     profile = slam_profile_for(gyro_odom)
     if profile is not None:
         actions.append(SetLaunchConfiguration('slam_profile_file', profile))
@@ -139,7 +147,7 @@ def _wiring(context):
     return actions
 
 
-def generate_launch_description():
+def generate_launch_description(imu_probe=None):
     args = [
         DeclareLaunchArgument(
             'opponent_awareness', default_value='false',
@@ -173,7 +181,11 @@ def generate_launch_description():
             'imu', default_value='true',
             description='Run the IMU stack (BNO085 bridge, imu_bridge, '
                         'vehicle_state): records /odom/fused and '
-                        '/steering/measured. false in the simulator.'),
+                        '/steering/measured, including from simulated IMUs.'),
+        DeclareLaunchArgument(
+            'imu_hardware', default_value='auto',
+            description='IMU source: auto uses simulated topics when gym_bridge_node is running, '
+                        'otherwise real hardware. true/false explicitly select real/simulated inputs.'),
         DeclareLaunchArgument(
             'gyro_odom', default_value='false',
             description='true: slam_toolbox maps on gyro odometry (odom_imu) instead of '
@@ -209,6 +221,7 @@ def generate_launch_description():
     imu = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('imu_bridge'), 'launch', 'vehicle_state_launch.py')),
+        launch_arguments={'hardware': LaunchConfiguration('imu_selected_hardware')}.items(),
         condition=IfCondition(LaunchConfiguration('imu')),
     )
     gap_config = os.path.join(
@@ -255,5 +268,6 @@ def generate_launch_description():
             on_exit=[EmitEvent(event=Shutdown(reason='mapping run finished'))]))
         return [gap_follow, supervisor, shutdown]
 
-    return LaunchDescription(args + [OpaqueFunction(function=_wiring), diagnostics, slam, imu,
+    return LaunchDescription(args + [OpaqueFunction(function=_wiring, kwargs={'imu_probe': imu_probe}),
+                                     diagnostics, slam, imu,
                                      OpaqueFunction(function=nodes)])
