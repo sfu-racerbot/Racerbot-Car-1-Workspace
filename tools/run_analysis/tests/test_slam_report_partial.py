@@ -107,10 +107,11 @@ def test_scan_drops_only_count_slam_toolbox_logger(tmp_path):
 
 def test_plain_value_error_with_no_slam_text_propagates(tmp_path):
     def broken(path):
-        raise ValueError('SLAM did not map this run: unrelated invalid input')
+        raise ValueError(f'{path}: unrelated invalid input')
     # oracle: only the distinct no-map exception denotes absent SLAM.
     with pytest.raises(ValueError, match='SLAM did not map this run: unrelated invalid input'):
-        report.load_inputs(tmp_path, load_slam=broken, load_scans=lambda p: None,
+        report.load_inputs(tmp_path / 'SLAM did not map this run', load_slam=broken,
+                           load_scans=lambda p: None,
                            load_rosout=lambda p: [])
 
 
