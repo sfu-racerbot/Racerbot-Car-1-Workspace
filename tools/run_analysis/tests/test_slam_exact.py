@@ -6,6 +6,12 @@ S4 step 6 mutation checks, observed failing individually and reverted:
   c. omit PGM row flip -> map_bytes_and_yaml (first raster byte differs)
   d. omit feeder child_env -> exact_children_isolated (domain 79 instead of 77)
 The added bracket and pose-edge tests also failed against deliberate function stubs.
+
+Round-1 step 4, each observed failing individually, then reverted and rerun green:
+  a. wait at every scan -> test_feed_every_scan_wait_only_at_planned
+  b. make extra poses fatal -> test_extra_pose_counted_not_fatal
+Checkpoint and boundary-step stubs also failed the timeout/reset/late-pose and
+unbracketed-boundary tests, respectively. No original assertions were weakened.
 """
 import math
 import os
