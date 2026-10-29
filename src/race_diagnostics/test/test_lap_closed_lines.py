@@ -24,7 +24,7 @@ def test_closed_recorded_laps_and_truncation():
 def test_quality_recorded_failure():
     # oracle: log map_course-20261026-194912.log.
     assert parse_lap_quality(FAIL) == dict(lap=3, passed=False, metric='heading_error',
-                                          value=29.5, limit=15.0)
+                                          value=29.5, limit=15.0, accepted_at_ceiling=False)
 
 
 def test_invalid_lap_lines():
