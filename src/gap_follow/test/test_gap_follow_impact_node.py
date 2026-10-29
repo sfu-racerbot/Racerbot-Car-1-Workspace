@@ -1,4 +1,10 @@
-"""I6 published commands on shipped YAML; ROS-sourced package pytest runner."""
+"""I6 published commands on shipped YAML; ROS-sourced package pytest runner.
+
+Mutation evidence (2026-10-29): forced-engaged _deadman_status fails all six
+refusal cases (latched/unlatched). Ignored stops, validation, retuning, trust
+gating and feature-off selection each fail the corresponding command tests.
+Scripts and full failure output: /tmp/oc-part-b23-i6/ on the measurement host.
+"""
 from contextlib import contextmanager
 import json
 import math

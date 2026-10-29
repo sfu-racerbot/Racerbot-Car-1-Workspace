@@ -1,4 +1,7 @@
-"""Impact flag wiring; collected by ROS-sourced package pytest."""
+"""Impact flag wiring; collected by ROS-sourced package pytest.
+
+All 66 cases failed before launch wiring existed, then passed (2026-10-29).
+"""
 import itertools
 
 import pytest

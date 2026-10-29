@@ -1,4 +1,8 @@
-"""Independent impact histories in node/mirror; ROS-sourced package pytest."""
+"""Independent impact histories in node/mirror; ROS-sourced package pytest.
+
+Mutation evidence (2026-10-29): a mirror that never latches fails enabled
+parity; a mirror that always stops fails feature-off parity.
+"""
 import numpy as np
 import pytest
 

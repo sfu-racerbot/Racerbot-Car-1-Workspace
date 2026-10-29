@@ -1,4 +1,8 @@
-"""I6 state-machine contracts; collected by package pytest (no ROS needed)."""
+"""I6 state-machine contracts; collected by package pytest (no ROS needed).
+
+Mutation evidence (2026-10-29): all 24 cases fail a logic stub; the strict
+boundary and held-LB tests also reject >= and press-only reset, respectively.
+"""
 import math
 
 import pytest

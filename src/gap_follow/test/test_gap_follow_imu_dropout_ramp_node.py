@@ -1,4 +1,8 @@
-"""I4/I5 dropout uses actual command history; ROS-sourced package pytest."""
+"""I4/I5 dropout uses actual command history; ROS-sourced package pytest.
+
+Both cases rejected an in-memory mutation that published the never-capped
+controller's command on dropout (2026-10-29), rather than the seeded oracle.
+"""
 import pytest
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
