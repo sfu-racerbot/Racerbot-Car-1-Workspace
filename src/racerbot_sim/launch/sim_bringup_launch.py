@@ -95,6 +95,9 @@ def generate_launch_description():
             'odom_speed_scale', default_value='1.0',
             description='Odometry scale error, as vesc_to_odom would have. 1.0 is a perfect wheel-speed estimate.'),
         DeclareLaunchArgument(
+            'odom_yaw_rate_scale', default_value='1.0',
+            description='Dead-reckoned yaw-rate scale error from a miscalibrated steering model.'),
+        DeclareLaunchArgument(
             'controlled_cars', default_value='1',
             description='Number of ROS-controlled cars: 1 or 2.'),
         DeclareLaunchArgument(
@@ -115,6 +118,7 @@ def generate_launch_description():
             'track_directory': LaunchConfiguration('track_directory'),
             'seed': LaunchConfiguration('seed'),
             'odom_speed_scale': LaunchConfiguration('odom_speed_scale'),
+            'odom_yaw_rate_scale': LaunchConfiguration('odom_yaw_rate_scale'),
             'controlled_cars': ParameterValue(LaunchConfiguration('controlled_cars'), value_type=int),
             'controlled_start_offsets_m': ParameterValue(
                 LaunchConfiguration('controlled_start_offsets_m'), value_type=str),

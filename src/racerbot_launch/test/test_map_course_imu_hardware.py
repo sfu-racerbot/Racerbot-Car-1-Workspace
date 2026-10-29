@@ -10,7 +10,7 @@ from pathlib import Path
 
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction
-from launch.utilities import perform_substitutions
+from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
 from launch_ros.actions import Node
 from launch_ros.utilities import evaluate_parameters
 import pytest
@@ -55,7 +55,8 @@ def _imu_includes(probe, **overrides):
             continue
         include.launch_description_source.get_launch_description(ctx)
         if include.launch_description_source.location.endswith('/vehicle_state_launch.py'):
-            enabled.append({key: perform_substitutions(ctx, value)
+            enabled.append({key: perform_substitutions(
+                ctx, normalize_to_list_of_substitutions(value))
                             for key, value in include.launch_arguments})
     return ctx, enabled
 

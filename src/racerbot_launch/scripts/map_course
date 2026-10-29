@@ -38,11 +38,14 @@ def _running(pattern) -> bool:
 
 
 def launch_arguments(argv, simulated):
-    """argv as given, plus imu:=false in the simulator unless imu was set:
-    there is no IMU there, and the BNO bridge would read the real sensor on
-    a car that is not moving."""
-    if simulated and not any(a.startswith('imu:=') for a in argv):
-        return [*argv, 'imu:=false']
+    """Pass argv through, adding imu_hardware:=false in the simulator unless set.
+
+    The simulator supplies IMU topics; hardware:=false runs the estimator
+    without starting the real sensor bridge. An explicit imu:= is untouched.
+    Outside the simulator nothing is appended.
+    """
+    if simulated and not any(a.startswith('imu_hardware:=') for a in argv):
+        return [*argv, 'imu_hardware:=false']
     return list(argv)
 
 
