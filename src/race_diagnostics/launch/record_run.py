@@ -14,6 +14,7 @@ as printed. See docs/run-diagnostics.md.
 """
 
 import os
+import sys
 from pathlib import Path
 from time import strftime
 
@@ -126,13 +127,19 @@ def _setup(context, *args, **kwargs):
     try:
         write_packages(meta)
     except Exception as e:  # noqa: BLE001 -- must not stop a run
-        with open(meta / 'ERROR.txt', 'a') as handle:
-            handle.write(f'metadata packages.txt not written: {e!r}\n')
+        try:
+            with open(meta / 'ERROR.txt', 'a') as handle:
+                handle.write(f'metadata packages.txt not written: {e!r}\n')
+        except OSError as log_error:
+            print(f'metadata packages.txt not written: {e!r}; error log: {log_error}', file=sys.stderr)
     try:
         write_submodules(meta, repos.get('racerbot-ws'))
     except Exception as e:  # noqa: BLE001 -- must not stop a run
-        with open(meta / 'ERROR.txt', 'a') as handle:
-            handle.write(f'metadata submodules.txt not written: {e!r}\n')
+        try:
+            with open(meta / 'ERROR.txt', 'a') as handle:
+                handle.write(f'metadata submodules.txt not written: {e!r}\n')
+        except OSError as log_error:
+            print(f'metadata submodules.txt not written: {e!r}; error log: {log_error}', file=sys.stderr)
 
     topics = LaunchConfiguration('topics').perform(context).split()
     config = os.path.join(
