@@ -299,3 +299,50 @@ def test_preflight_refuses_planned_scan_before_first_odometry():
     # oracle: controller coverage rule - a future sample alone cannot bracket a planned scan.
     with pytest.raises(replay.StampMismatch, match='bracket.*5'):
         replay.odometry_brackets([10, 20], [5])
+
+
+def test_forced_plan_consumes_three_startup_callbacks():
+    # oracle: controller ruling and 2.8.5 common.cpp startup counter: first, callbacks 2-4, rest.
+    assert replay.forced_scan_plan([5, 10, 20, 30, 40, 50, 60, 70], [10, 50, 70]) == [
+        (10, True), (20, False), (30, False), (40, False), (50, True), (70, True)]
+
+
+@pytest.mark.parametrize('scans', [[10, 20], [5, 10, 20]])
+def test_forced_plan_refuses_too_few_sacrificial_scans(scans):
+    # oracle: controller rule - three recorded scans immediately before second planned stamp required.
+    with pytest.raises(replay.ReplayRefused, match='three.*20'):
+        replay.forced_scan_plan(scans, [10, 20])
+
+
+@pytest.mark.parametrize('poses,expected', [([], []), ([10], [(10, True)])])
+def test_forced_plan_without_second_pose(poses, expected):
+    # oracle: closed form - no second checkpoint means no startup callbacks need consuming.
+    assert replay.forced_scan_plan([10, 20], poses) == expected
+
+
+def test_forced_admission_overrides_and_audit():
+    # oracle: measured 20261026-194913 snapshot; forced values from controller ruling, not output.
+    recorded = {'throttle_scans': 2, 'minimum_time_interval': .2,
+                'minimum_travel_distance': .25, 'minimum_travel_heading': .25,
+                'resolution': .05}
+    params = {'slam_toolbox': {'ros__parameters': dict(recorded)}}
+    changed, audit = replay.exact_admission_parameters(params, 'forced')
+    assert changed == {'slam_toolbox': {'ros__parameters': {
+        **recorded, 'throttle_scans': 1, 'minimum_time_interval': 0.0,
+        'minimum_travel_distance': 0.0, 'minimum_travel_heading': 0.0}}}
+    assert audit == {
+        'throttle_scans': {'recorded': 2, 'override': 1},
+        'minimum_time_interval': {'recorded': .2, 'override': 0.0},
+        'minimum_travel_distance': {'recorded': .25, 'override': 0.0},
+        'minimum_travel_heading': {'recorded': .25, 'override': 0.0}}
+    assert params == {'slam_toolbox': {'ros__parameters': recorded}}
+
+
+def test_all_scans_keeps_recorded_admission():
+    # oracle: invariant - faithful-admission experiment must not receive forced-mode overrides.
+    params = {'slam_toolbox': {'ros__parameters': {
+        'throttle_scans': 2, 'minimum_time_interval': .2,
+        'minimum_travel_distance': .25, 'minimum_travel_heading': .25}}}
+    unchanged, audit = replay.exact_admission_parameters(params, 'all-scans')
+    assert unchanged == params
+    assert audit == {}
