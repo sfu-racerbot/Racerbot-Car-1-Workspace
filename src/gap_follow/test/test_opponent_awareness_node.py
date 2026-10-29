@@ -363,14 +363,17 @@ def _follow_law(gap):
     return (gap - p.follow_min_gap) / p.follow_time_gap
 
 
-def _scene_tick(node, published, step, gap, ego_speed, joy_state='held'):
+def _scene_tick(node, published, step, gap, ego_speed, joy_state='held',
+                walls=None):
     """One 40 Hz scan with a car ahead at ``gap`` metres from the bumper (None:
     the scan holds no car), odometry at ego_speed, and the deadman in joy_state.
+    ``walls``, when given, replaces the open corridor (a closed one makes the
+    node stop with no_safe_gap).
     'held' and 'released' are Joy messages with LB as named. 'stale' is a held
     Joy that arrived more than joy_timeout_sec ago. 'never' is a node that has
     heard no Joy at all: last_joy_time is cleared, the state the deadman reports
     as waiting_for_joy. Returns the published speed."""
-    segments = _corridor(2.0, 2.0)
+    segments = _corridor(2.0, 2.0) if walls is None else walls
     if gap is not None:
         segments = segments + _box(gap + FRONT - LASER_X)
     scan = _raycast(segments)
@@ -516,3 +519,52 @@ def test_held_cap_publishes_zero_when_joy_is_stale(aware_node):
     # oracle: CLAUDE.md safety model -- an expired Joy denies motion, whatever the
     # memory is holding.
     assert speeds == [0.0] * 4, speeds
+
+
+# A corridor closed 0.55 m ahead: no gap the node will take, so it stops with
+# no_safe_gap. The clock test below stops the car on it.
+CLOSED_CORRIDOR = _corridor(0.5, 0.5) + [((0.55, -0.5), (0.55, 0.5))]
+
+
+def test_the_memory_clock_runs_through_a_no_safe_gap_stop(aware_node):
+    node, published = aware_node
+    cap = _follow_law(CAR_GAP)
+    for step in range(40):
+        confirm_speed = _scene_tick(node, published, step, CAR_GAP, EGO_CRUISE)
+    # oracle: the car is tracked and its follow cap binds before it is lost.
+    assert node.opponent_mode in ('clear', 'follow'), node.opponent_mode
+    assert cap - 0.05 <= confirm_speed <= cap + 0.01, (confirm_speed, cap)
+    # The car is lost on an open corridor at cruise speed, the odometry the track
+    # was confirmed with, so the held cap stays at its confirm-phase value. The
+    # track ends about 7 scans after the loss and the memory takes over.
+    drop_speeds = []
+    for step in range(40, 50):
+        drop_speeds.append(_scene_tick(node, published, step, None, EGO_CRUISE))
+    # oracle: the held cap binds on every loss scan (closed form, 1 cm/s allowance),
+    # and once the track has ended the mode names the memory.
+    assert all(v <= cap + 0.01 for v in drop_speeds), (drop_speeds, cap)
+    assert node.opponent_mode == 'follow_memory', node.opponent_mode
+    # Steps 50-69: the corridor closes and the car is still gone, 20 scans (0.5 s)
+    # of no_safe_gap. The memory's clock is the scan stamp, and its last update
+    # before the stop is step 49. Step 70 is 21 scans (0.525 s) later, past the
+    # 0.5 s staleness rule, so step 70 is still held only if the stop scans
+    # updated the memory.
+    stop_states, stop_speeds = [], []
+    for step in range(50, 70):
+        stop_speeds.append(_scene_tick(node, published, step, None, 0.5,
+                                       walls=CLOSED_CORRIDOR))
+        stop_states.append(node.last_decision_state)
+    # oracle: every stop scan is no_safe_gap, and no_safe_gap publishes zero.
+    assert stop_states == ['no_safe_gap'] * 20, stop_states
+    assert stop_speeds == [0.0] * 20, stop_speeds
+    # The corridor opens again, still with no car, at 0.5 m/s. The cap was stored
+    # at step 39 or later, so its 1.0 s hold runs to step 79 at the earliest and
+    # covers steps 70-79.
+    open_speeds, open_modes = [], []
+    for step in range(70, 80):
+        open_speeds.append(_scene_tick(node, published, step, None, 0.5))
+        open_modes.append(node.opponent_mode)
+    # oracle: the held cap binds on every one of those scans, and the mode names
+    # the memory.
+    assert open_modes == ['follow_memory'] * 10, open_modes
+    assert all(v <= cap + 0.01 for v in open_speeds), (open_speeds, cap)
