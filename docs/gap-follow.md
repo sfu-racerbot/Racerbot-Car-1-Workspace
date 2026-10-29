@@ -28,6 +28,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 15. [Keeping the mirror honest](#keeping-the-mirror-honest)
 16. [Steering damping (gyro)](#steering-damping-gyro)
 17. [Adaptive grip (IMU)](#adaptive-grip-imu)
+18. [Fused speed (IMU)](#fused-speed-imu)
 
 ## Highlights
 
@@ -95,7 +96,7 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 - **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
   - `enable_steering_damping: false`, `steering_damping_gain: 0.03` and `enable_corner_setup: true`.
   - `max_speed: 3.5`, `min_speed: 1.0`, `corner_speed: 1.5`, `corner_speed_wide: 1.9`, `narrow_corridor_speed: 2.5` and `max_acceleration: 3.0`.
-- Only `max_speed`, `steering_damping`, `adaptive_grip` and `opponent_awareness` are launch arguments. The other settings need the file.
+- Launch arguments include `max_speed`, `steering_damping`, `adaptive_grip`, `fused_speed`, `imu_hardware` and `opponent_awareness`. The other settings listed above need the file.
 
 ### Other launches that read the same file
 
@@ -862,6 +863,32 @@ Do these in order, as in [Validation](#validation). Each step needs the one befo
 TODO(verify): the simulator's results for the adaptive grip are not written in this doc yet. The controller's solo and head-to-head runs will fill this in.
 
 `tools/f1tenth_sim/gap_mirror.py` has the same rule, and `test_gap_mirror_parity.py` checks it against the node. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay. So the car may do worse than the simulator says.
+
+## Fused speed (IMU)
+
+`fused_speed:=true` makes `gap_follow` read its speed from `/odom/fused` instead of `/odom`. The fused speed combines wheel speed with the BNO085 IMU's forward acceleration, so it can account for wheelspin. It stays within 0.3 m/s of wheel speed. Position and heading remain the wheel odometry's own.
+
+The flag starts `vehicle_state_launch.py`, the IMU stack that publishes `/odom/fused`. Steering damping, adaptive grip and fused speed share one copy of that stack, even with all three on.
+
+The shared `imu_hardware` argument defaults to `auto`: it uses simulated IMU topics when `gym_bridge_node` is running, otherwise real hardware. `true` explicitly selects real hardware; `false` selects simulated inputs.
+
+**Before a floor trial, test with the wheels off the ground, then on the floor at low speed in open space. Hold LB whenever the car moves.** Follow [Validation](#validation), including recording the run, so an unexpected command can be checked afterwards.
+
+In **Terminal 2**, with ROS and the workspace sourced and bringup already running in **Terminal 1**, use:
+
+```bash
+ros2 launch gap_follow gap_follow_launch.py fused_speed:=true max_speed:=1.0
+```
+
+**Working when:** in another sourced terminal, `ros2 param get /gap_follow_node odom_topic` prints `/odom/fused`, and `ros2 topic info /odom/fused` reports a subscriber. If no messages arrive, check the IMU stack's terminal output and the [imu_bridge troubleshooting table](../src/imu_bridge/README.md#troubleshooting).
+
+If no usable accelerometer samples arrive, `/odom/fused` carries **exactly the wheel speed**. This includes missing, stale or non-finite BNO samples; previously accepted acceleration expires after `imu_timeout` (0.1 s). Given that same speed, `gap_follow` publishes the same commands as with `fused_speed:=false`.
+
+If `vehicle_state_node` dies, `/odom/fused` goes silent. The shipped stale-odometry check then commands zero speed once `odom_timeout_sec` (0.5 s) is reached, even with LB held. The [imu_bridge README](../src/imu_bridge/README.md#fused-speed-and-measured-steering) explains the estimator and its fallback.
+
+### Limitations
+
+**Fused speed ships off; floor trial needed.** The simulator cannot show a benefit because the gym tyres never slip, so fused speed equals wheel speed there. No simulator tuning sweep is used to enable it by default. Leave the flag out, or pass `fused_speed:=false`, to keep using `/odom`.
 
 ## See also
 
