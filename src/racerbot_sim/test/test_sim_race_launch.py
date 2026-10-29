@@ -383,6 +383,29 @@ def test_team_a_deadman_isolated(tmp_path, probe, team_a_packages, held):
         assert max(speeds) < 0.05
 
 
+def test_team_a_car1_deadman_does_not_gate_car2(tmp_path, probe, team_a_packages):
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=0.2',
+                      'record:=false', 'swap_starts:=true', 'car1_hold_deadman:=false',
+                      'timeout_s:=20', f'output_dir:={tmp_path}') as proc:
+        graph = Graph(probe)
+        deadline = time.monotonic() + 150
+        while proc.poll() is None and time.monotonic() < deadline:
+            graph.spin_for(0.2)
+        assert proc.poll() is not None, 'race did not end'
+        assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
+    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    assert graph.spin_until(lambda: any(s['steps'] >= race['steps'] for s in probe.status), 5)
+    statuses = [s for s in probe.status if s['steps'] <= race['steps']]
+    # oracle: every scored step must be observed once, from the first step.
+    assert race['missed_steps'] == 0
+    assert race['steps'] > 1
+    assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
+    assert all(len(s['cars']) == 2 for s in statuses)
+    # oracle: R7 review request, speeds in m/s for stopped and moving cars.
+    assert max(abs(s['cars'][0]['speed']) for s in statuses) < 0.05
+    assert max(s['cars'][1]['speed'] for s in statuses) > 0.5
+
+
 def test_referee_creates_only_the_result_publisher():
     # Static companion to the runtime check above. The brief asks for this grep.
     path = os.path.join(os.path.dirname(__file__), '..', 'racerbot_sim', 'race_referee_node.py')

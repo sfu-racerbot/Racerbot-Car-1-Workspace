@@ -55,7 +55,8 @@ def _setup(context):
             'track': track, 'track_directory': track_directory,
             'seed': LaunchConfiguration('seed'), 'controlled_cars': '2',
             'controlled_start_offsets_m': offsets,
-            'hold_deadman': 'true', 'car2_hold_deadman': LaunchConfiguration('car2_hold_deadman'),
+            'hold_deadman': LaunchConfiguration('car1_hold_deadman'),
+            'car2_hold_deadman': LaunchConfiguration('car2_hold_deadman'),
         }.items())
     car1 = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
                 parameters=[car1_yaml], output='screen')
@@ -128,6 +129,7 @@ def generate_launch_description():
         DeclareLaunchArgument('record_dir', default_value=''),
         DeclareLaunchArgument('output_dir', default_value=''),
         DeclareLaunchArgument('reverse', default_value='false'),
+        DeclareLaunchArgument('car1_hold_deadman', default_value='true'),
         DeclareLaunchArgument('car2_hold_deadman', default_value='true'),
         DeclareLaunchArgument('timeout_s', default_value='300.0'),
     ]
