@@ -239,6 +239,9 @@ def test_late_imu_status_withdrawn_when_hardware_appears_and_restored(ros_contex
     """I1 round 2: pre-fix durable simulated ok survived the hardware block.
 
     Run by pytest src/racerbot_sim/test/ with rb in an isolated ROS domain.
+    Seen failing against c8b6932 and with destroy_publisher skipped (late ok
+    leaked); skipping recreation failed the resume assertion with both topics
+    empty. Both mutations were reverted and this test passed again.
     """
     node, start = ros_context
     topics = ('/imu/status', '/car2/imu/status')
