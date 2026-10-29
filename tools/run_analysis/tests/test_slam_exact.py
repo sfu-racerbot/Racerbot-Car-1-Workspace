@@ -214,3 +214,62 @@ def test_exact_profile_mode_override_refused(tmp_path, monkeypatch, capsys, key)
                         '--out-root', str(tmp_path / 'out')]) == 2
     assert 'profile overrides of sync/async mode' in capsys.readouterr().err
     assert not (tmp_path / 'out').exists()
+
+
+def test_feed_every_scan_wait_only_at_planned():
+    # oracle: spec round-1 ruling - preserve bag order; pose stamps are wait checkpoints only.
+    assert replay.exact_feed_order([10, 20, 30, 40], [20, 40]) == [
+        (10, False), (20, True), (30, False), (40, True)]
+
+
+def test_extra_pose_counted_not_fatal():
+    # oracle: set differences - one matched stamp, one extra, no missing poses.
+    accounting = replay.ExactPoseAccounting([20])
+    accounting.observe(10)
+    accounting.observe(20)
+    assert accounting.checkpoint(20) is True
+    assert accounting.summary() == {
+        'matched_planned': 1, 'missing_planned_stamps': [],
+        'extra_pose_stamps': [10], 'timed_out_stamps': []}
+
+
+def test_ten_consecutive_missing_continue():
+    # oracle: spec - failure is strictly MORE than 10 consecutive missing checkpoints.
+    accounting = replay.ExactPoseAccounting(range(1, 12))
+    results = [accounting.checkpoint(stamp) for stamp in range(1, 11)]
+    accounting.observe(11)
+    assert accounting.checkpoint(11) is True
+    assert results == [False] * 10
+    assert accounting.summary()['missing_planned_stamps'] == list(range(1, 11))
+
+
+def test_eleven_consecutive_missing_fail_with_stamps():
+    # oracle: spec - the eleventh consecutive timeout fails, naming all eleven stamps.
+    accounting = replay.ExactPoseAccounting(range(101, 112))
+    for stamp in range(101, 111):
+        assert accounting.checkpoint(stamp) is False
+    with pytest.raises(replay.ReplayFailed, match='11 consecutive') as exc:
+        accounting.checkpoint(111)
+    assert str(list(range(101, 112))) in str(exc.value)
+
+
+def test_matched_checkpoint_resets_missing_streak():
+    # oracle: invariant - two blocks of ten separated by a match are not 20 consecutive misses.
+    accounting = replay.ExactPoseAccounting(range(1, 22))
+    for stamp in range(1, 11):
+        assert accounting.checkpoint(stamp) is False
+    accounting.observe(11)
+    assert accounting.checkpoint(11) is True
+    for stamp in range(12, 22):
+        assert accounting.checkpoint(stamp) is False
+    assert accounting.summary()['matched_planned'] == 1
+
+
+def test_late_pose_resolves_final_missing_but_retains_timeout():
+    # oracle: invariant - an observed late pose is matched in final accounting, not lost.
+    accounting = replay.ExactPoseAccounting([20])
+    assert accounting.checkpoint(20) is False
+    accounting.observe(20)
+    assert accounting.summary() == {
+        'matched_planned': 1, 'missing_planned_stamps': [],
+        'extra_pose_stamps': [], 'timed_out_stamps': [20]}
