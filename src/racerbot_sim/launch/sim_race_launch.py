@@ -8,13 +8,13 @@ import json
 from pathlib import Path
 
 import yaml
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, Shutdown
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, Shutdown
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace, SetRemap
 from launch_ros.parameter_descriptions import ParameterValue
 
 from racerbot_sim import tracks
@@ -27,10 +27,8 @@ def _params(path):
 
 def _setup(context):
     opponent = LaunchConfiguration('opponent').perform(context)
-    if opponent == 'team_a':
-        raise RuntimeError('opponent:=team_a is added in Task R7')
-    if opponent != 'ours':
-        raise RuntimeError(f"unknown opponent:={opponent!r}; expected ours")
+    if opponent not in ('ours', 'team_a'):
+        raise RuntimeError(f"unknown opponent:={opponent!r}; expected ours or team_a")
     track = LaunchConfiguration('track').perform(context)
     if track in tracks.LAYOUTS:
         track_directory = '~/.ros/racerbot_sim/tracks'
@@ -68,6 +66,24 @@ def _setup(context):
                 parameters=[car1_yaml], output='screen')
     car2_node = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
                      namespace='car2', parameters=[car2], output='screen')
+    if opponent == 'team_a':
+        includes = []
+        for package, launch_file in (('disparity_extender', 'disparity_extender_launch.py'),
+                                     ('safety_node', 'launch_safety.py')):
+            try:
+                share = get_package_share_directory(package)
+            except PackageNotFoundError as exc:
+                raise RuntimeError(f'opponent:=team_a requires installed package {package}') from exc
+            includes.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(share, 'launch', launch_file))))
+        car2_node = GroupAction([
+            PushRosNamespace('car2'),
+            *(SetRemap(src=src, dst=dst) for src, dst in (
+                ('/joy', '/car2/joy'), ('/scan', '/car2/scan'),
+                ('/ego_racecar/odom', '/car2/odom'), ('/safety/brake', '/car2/safety/brake'),
+                ('/drive', '/car2/drive'))),
+            *includes,
+        ])
     referee = Node(package='racerbot_sim', executable='race_referee_node', name='race_referee_node',
                    parameters=[{'track': track, 'track_directory': track_directory,
                                  'laps': ParameterValue(LaunchConfiguration('laps'), value_type=float),
