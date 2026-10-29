@@ -6,7 +6,7 @@ import rclpy
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import Imu, LaserScan, Joy
+from sensor_msgs.msg import Imu, JointState, LaserScan, Joy
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
@@ -19,6 +19,16 @@ from gap_follow import gap_logic, live_tuning, opponent_tracking
 # after the bridge still gets the current verdict at once.
 IMU_STATUS_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                             reliability=QoSReliabilityPolicy.RELIABLE)
+
+UNDERSTEER_DEFAULTS = {
+    'imu_understeer_engage_ratio': 0.75,
+    'imu_understeer_release_ratio': 0.85,
+    'imu_understeer_speed_factor': 0.85,
+    'imu_understeer_hold_sec': 0.2,
+    'imu_understeer_timeout_sec': 0.1,
+    'imu_understeer_steering_lag_sec': 0.15,
+    'imu_understeer_max_steering_change': 0.05,
+}
 
 
 class GapFollowNode(Node):
@@ -101,6 +111,18 @@ class GapFollowNode(Node):
         # that window (quasi-steady). Otherwise the tick is not judged.
         self.declare_parameter('adaptive_grip_steering_lag_sec', 0.15)
         self.declare_parameter('adaptive_grip_max_steering_change', 0.05)
+        self.declare_parameter('enable_imu_understeer', False)
+        for name, default in UNDERSTEER_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        self.enable_imu_understeer = self.get_parameter('enable_imu_understeer').value
+        understeer_values = {name: self.get_parameter(name).value
+                            for name in UNDERSTEER_DEFAULTS}
+        self._validate_understeer_parameters(understeer_values)
+        for name, value in understeer_values.items():
+            setattr(self, name, float(value))
+        self._restart_understeer()
+        self.measured_steering = math.nan
+        self.last_measured_steering_time = None
         # Padded collision envelope around this car's rear-axle base_link.
         # wheelbase, laser_offset_x and the 0.30 m the car measures over the
         # tires were tape-measured 2026-08-24; car_width is that 0.30 m plus
@@ -778,12 +800,15 @@ class GapFollowNode(Node):
             Joy, self.joy_topic, self.joy_callback, 10)
         # Subscribed only when a gyro feature is on, so with both off the node's
         # ROS graph is exactly what it was before those features existed.
-        if self.enable_steering_damping or self.enable_adaptive_grip:
+        if self.enable_steering_damping or self.enable_adaptive_grip or self.enable_imu_understeer:
             self.imu_sub = self.create_subscription(
                 Imu, self.imu_topic, self.imu_callback, 10)
             self.imu_status_sub = self.create_subscription(
                 String, self.imu_status_topic, self.imu_status_callback,
                 IMU_STATUS_QOS)
+        if self.enable_imu_understeer:
+            self.measured_steering_sub = self.create_subscription(
+                JointState, '/steering/measured', self.measured_steering_callback, 10)
         self.status_timer = self.create_timer(
             min(0.25, self.scan_timeout_sec / 2.0), self._sensor_status_callback)
 
@@ -806,14 +831,27 @@ class GapFollowNode(Node):
         Rejecting says so out loud instead. See live_tuning.py.
         """
         requested = {parameter.name: parameter.value for parameter in parameters}
+        understeer = {name: value for name, value in requested.items()
+                      if name in UNDERSTEER_DEFAULTS}
+        try:
+            self._validate_understeer_parameters({
+                name: understeer.get(name, getattr(self, name))
+                for name in UNDERSTEER_DEFAULTS})
+        except ValueError as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
         accepted, reason = live_tuning.review(
-            self._tunables, requested, self._tunable_values,
+            self._tunables, {k: v for k, v in requested.items() if k not in understeer},
+            self._tunable_values,
             passthrough=('use_sim_time',),
             invariants=live_tuning.GAP_FOLLOW_INVARIANTS)
         if reason is not None:
             self.get_logger().warn(f'live tune rejected: {reason}')
             return SetParametersResult(successful=False, reason=reason)
 
+        for name, value in understeer.items():
+            setattr(self, name, float(value))
+        if understeer:
+            self._restart_understeer()
         for name, value in accepted.items():
             tunable = self._tunables[name]
             previous = self._tunable_values[name]
@@ -833,6 +871,59 @@ class GapFollowNode(Node):
     def odom_callback(self, msg: Odometry):
         self.current_speed = float(msg.twist.twist.linear.x)
         self.last_odom_time = self.get_clock().now()
+
+    @staticmethod
+    def _validate_understeer_parameters(values):
+        for name, value in values.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f'{name} must be finite')
+        if not (0 < values['imu_understeer_engage_ratio']
+                < values['imu_understeer_release_ratio'] <= 1.5):
+            raise ValueError('imu_understeer_engage_ratio and imu_understeer_release_ratio '
+                             'must satisfy 0 < engage < release <= 1.5')
+        if not 0 < values['imu_understeer_speed_factor'] < 1:
+            raise ValueError('imu_understeer_speed_factor must be in (0, 1)')
+        for name in UNDERSTEER_DEFAULTS:
+            if name.endswith(('_sec', '_change')) and values[name] <= 0:
+                raise ValueError(f'{name} must be positive')
+
+    def _restart_understeer(self):
+        self.understeer_check = gap_logic.UndersteerCheck(
+            self.imu_understeer_engage_ratio, self.imu_understeer_release_ratio,
+            self.imu_understeer_hold_sec)
+        self.understeer_steering_lag = gap_logic.SteeringLag(
+            self.imu_understeer_steering_lag_sec)
+
+    def measured_steering_callback(self, msg: JointState):
+        # Malformed or non-finite samples invalidate the previous measurement.
+        self.measured_steering = math.nan
+        self.last_measured_steering_time = self.get_clock().now()
+        if msg.name == ['steering'] and len(msg.position) == 1:
+            self.measured_steering = float(msg.position[0])
+
+    def _understeer_cap(self, steering, dt):
+        if not self.enable_imu_understeer:
+            return math.inf, None
+        lagged = self.understeer_steering_lag.step(
+            dt, steering, self.imu_understeer_max_steering_change)
+        _, why = self._imu_gate()
+        if why is None:
+            if not self._odom_fresh():
+                why = 'no fresh odometry'
+            elif self.last_measured_steering_time is None:
+                why = 'no measured steering'
+            elif not ((self.get_clock().now() - self.last_measured_steering_time).nanoseconds
+                      / 1e9 < self.imu_understeer_timeout_sec):
+                why = 'measured steering stale'
+            elif not math.isfinite(self.measured_steering):
+                why = 'measured steering not finite'
+        ratio = (gap_logic.understeer_ratio(self.measured_steering, lagged, self.current_speed)
+                 if why is None else math.nan)
+        engaged = self.understeer_check.update(ratio, dt)
+        if not math.isfinite(ratio):
+            return math.inf, why or 'turn not judgeable'
+        return gap_logic.understeer_speed_cap(
+            engaged, self.current_speed, self.imu_understeer_speed_factor), None
 
     def imu_callback(self, msg: Imu):
         self.imu_yaw_rate = float(msg.angular_velocity.z)
@@ -1525,9 +1616,10 @@ class GapFollowNode(Node):
                     self.max_speed,
                 ),
             )
+        understeer_cap, understeer_off = self._understeer_cap(steering_angle, command_dt)
         desired_speed = min(normal_speed, clearance_speed, anticipated_speed,
                             self._narrow_corridor_speed(side_left, side_right),
-                            follow_cap)
+                            follow_cap, understeer_cap)
         if used_fallback:
             desired_speed = min(desired_speed, self.effective_corner_speed)
         if self.speed_hold_sec > 0.0:
@@ -1552,6 +1644,14 @@ class GapFollowNode(Node):
         acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
         speed = min(desired_speed, acceleration_ceiling)
 
+        understeer_text = ''
+        if self.enable_imu_understeer:
+            if understeer_off is not None:
+                understeer_text = f', imu_understeer_off: {understeer_off}'
+            elif math.isfinite(understeer_cap):
+                ratio = self.understeer_check.ratio_filter.value
+                understeer_text = (f', imu understeer cap {understeer_cap:.2f}m/s '
+                                   f'(ratio {ratio:.2f})')
         self._publish_drive(steering_angle, speed, now=now)
         gap_lo_angle = scan.angle_min + (lo_idx + gap_start) * scan.angle_increment
         gap_hi_angle = scan.angle_min + (lo_idx + gap_end) * scan.angle_increment
@@ -1654,7 +1754,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{grip_text}{guard_text}{steering_shape_text}{speed_shape_text}")
+            f"{damping_text}{grip_text}{understeer_text}{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
         # Every speed ceiling that competed for this tick, so the dashboard
