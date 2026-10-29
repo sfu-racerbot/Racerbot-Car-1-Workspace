@@ -27,10 +27,10 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetRemap
 from launch_ros.parameter_descriptions import ParameterValue
 
 
@@ -43,11 +43,14 @@ def _validate_controlled_cars(context):
 
 def _mux(mux_config, namespace='', condition=None):
     root = f'/{namespace}' if namespace else ''
-    return Node(package='ackermann_mux', executable='ackermann_mux',
-                name='ackermann_mux', namespace=namespace,
-                remappings=[(root + suffix, [LaunchConfiguration('drive_topic_prefix'), root + suffix])
-                            for suffix in ('/drive', '/ackermann_cmd')],
-                parameters=[mux_config], condition=condition)
+    return GroupAction([
+        *(SetRemap(src=root + suffix,
+                   dst=[LaunchConfiguration('drive_topic_prefix'), root + suffix])
+          for suffix in ('/drive', '/ackermann_cmd')),
+        Node(package='ackermann_mux', executable='ackermann_mux',
+             name='ackermann_mux', namespace=namespace,
+             parameters=[mux_config]),
+    ], condition=condition)
 
 
 def generate_launch_description():
@@ -102,8 +105,6 @@ def generate_launch_description():
         name='gym_bridge_node',
         output='screen',
         parameters=[{
-            'drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/ackermann_cmd'],
-            'car2_drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/car2/ackermann_cmd'],
             'track': LaunchConfiguration('track'),
             'track_directory': LaunchConfiguration('track_directory'),
             'seed': LaunchConfiguration('seed'),
@@ -117,6 +118,11 @@ def generate_launch_description():
                 LaunchConfiguration('opponents'), value_type=str),
         }],
     )
+    gym_bridge = GroupAction([
+        *(SetRemap(src=topic, dst=[LaunchConfiguration('drive_topic_prefix'), topic])
+          for topic in ('/ackermann_cmd', '/car2/ackermann_cmd')),
+        gym_bridge,
+    ])
     sim_joy = Node(
         package='racerbot_sim',
         executable='sim_joy_node',
