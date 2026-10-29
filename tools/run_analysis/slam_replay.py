@@ -160,6 +160,44 @@ def exact_children(params_file, bag, odom_topic, base_env):
     ]
 
 
+def bag_messages(bag, topics):
+    """Read selected messages lazily; ROS imports stay outside the pure planning API."""
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from rosidl_runtime_py.utilities import get_message
+    reader = rosbag2_py.SequentialReader()
+    reader.open(rosbag2_py.StorageOptions(uri=str(bag), storage_id=''),
+                rosbag2_py.ConverterOptions('', ''))
+    types = {t.name: get_message(t.type) for t in reader.get_all_topics_and_types() if t.name in topics}
+    reader.set_filter(rosbag2_py.StorageFilter(topics=list(topics)))
+    while reader.has_next():
+        topic, data, _ = reader.read_next()
+        yield topic, deserialize_message(data, types[topic])
+
+
+def stamp_ns(message):
+    return message.header.stamp.sec * 1_000_000_000 + message.header.stamp.nanosec
+
+
+def bag_pose_rows(bag):
+    rows = []
+    for _, msg in bag_messages(bag, ['/pose']):
+        p = msg.pose.pose
+        q = p.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        rows.append((stamp_ns(msg), p.position.x, p.position.y, yaw))
+    return rows
+
+
+def bag_exact_plan(bag):
+    stamps = {'/scan': [], '/pose': []}
+    for topic, msg in bag_messages(bag, stamps):
+        stamps[topic].append(stamp_ns(msg))
+    if not stamps['/pose']:
+        raise ReplayRefused('exact replay needs recorded /pose messages')
+    return exact_scan_plan(stamps['/scan'], stamps['/pose'])
+
+
 class ServiceError(RuntimeError):
     """One call to a slam_toolbox service did not answer, or answered with an error.
 
@@ -544,7 +582,7 @@ def _slam_version(env: dict[str, str]) -> str | None:
     return done.stdout.strip() or None
 
 
-def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -> int:
+def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label: str) -> int:
     out = plan.out_dir
     out.mkdir(parents=True)
     log = _Log(out / 'replay.log')
@@ -566,16 +604,25 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
     children: list[_Child] = []
     status, error = 'ok', None
     map_saved = posegraph_saved = False
+    exact = rate is None
     try:
         relay = _start(children, 'odom_tf_relay',
                        [sys.executable, str(RELAY), '--topic', plan.odom_topic,
                         '--ros-args', '-p', 'use_sim_time:=true'],
                        env, out / 'relay.log', log)
-        slam = _start(children, 'slam_toolbox',
-                      ['ros2', 'launch', 'racerbot_launch', 'slam_launch.py',
-                       f'slam_params_file:={params_file}', f'slam_tracking_file:={params_file}',
-                       'use_sim_time:=true', f'slam_odom_frame:={plan.odom_frame}'],
-                      env, out / 'slam_toolbox.log', log)
+        exact_specs = exact_children(params_file, plan.run_dir / 'bag', plan.odom_topic, env) if exact else []
+        slam_argv = exact_specs[0][1] if exact else ['ros2', 'launch', 'racerbot_launch', 'slam_launch.py',
+                        f'slam_params_file:={params_file}', f'slam_tracking_file:={params_file}',
+                        'use_sim_time:=true', f'slam_odom_frame:={plan.odom_frame}']
+        slam = _start(children, 'slam_toolbox', slam_argv,
+                      exact_specs[0][2] if exact else env, out / 'slam_toolbox.log', log)
+        if exact:
+            for transition in ('configure', 'activate'):
+                done = subprocess.run(['ros2', 'lifecycle', 'set', '/slam_toolbox', transition],
+                                      env=env, capture_output=True, text=True, timeout=SERVICE_TIMEOUT_S)
+                log(f'lifecycle {transition}: {done.stdout.strip()} {done.stderr.strip()}')
+                if done.returncode != 0:
+                    raise ReplayFailed(f'could not {transition} synchronous SLAM')
         recorder = _start(children, 'bag_record',
                           ['ros2', 'bag', 'record', '-o', str(out / 'bag'), '--storage', 'mcap',
                            '--use-sim-time', *RECORD_TOPICS],
@@ -585,13 +632,17 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
             raise ReplayFailed(f'/map was not listed within {MAP_WAIT_S:g} s, so slam_toolbox did not come '
                                'up; see slam_toolbox.log')
         _check_alive(relay, recorder)
-        play = _start(children, 'bag_play',
+        if exact:
+            name, argv, feed_env = exact_specs[1]
+            play = _start(children, name, argv, feed_env, out / 'exact_feed.log', log)
+        else:
+            play = _start(children, 'bag_play',
                       ['ros2', 'bag', 'play', str(plan.run_dir / 'bag'), '--clock', '--rate', str(rate),
                        '--topics', *plan.play_topics],
                       env, out / 'bag_play.log', log)
         code = play.proc.wait()
         if code != 0:
-            raise ReplayFailed(f'ros2 bag play exited with {code}; see bag_play.log')
+            raise ReplayFailed(f'{play.name} exited with {code}; see {play.log_name}')
         log(f'bag played; giving slam_toolbox {SETTLE_S:g} s to finish its queue')
         time.sleep(SETTLE_S)
 
@@ -628,6 +679,7 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
             log(f'stopped {child.name} with exit {_stop(child)}')
         log(f'replay {status}: {out}')
         summary = {
+            'mode': 'exact' if exact else 'rate',
             'status': status, 'error': error, 'label': label,
             'source_run': str(plan.run_dir), 'out_dir': str(out),
             'odom_frame': plan.odom_frame, 'odom_topic': plan.odom_topic,
@@ -638,6 +690,9 @@ def _run(plan: ReplayPlan, rate: float, profile_path: Path | None, label: str) -
             'map_saved': map_saved, 'posegraph_saved': posegraph_saved,
             'started': started, 'ended': _now(),
         }
+        if exact and (out / 'bag' / 'metadata.yaml').exists():
+            summary['pose_sequence_error'] = pose_sequence_error(
+                bag_pose_rows(plan.run_dir / 'bag'), bag_pose_rows(out / 'bag'))
         (out / 'replay.json').write_text(json.dumps(summary, indent=2, default=str) + '\n', encoding='utf-8')
         if (plan.run_dir / 'metadata').is_dir():
             shutil.copytree(plan.run_dir / 'metadata', out / 'metadata')
@@ -660,6 +715,8 @@ def main(argv=None) -> int:
         if args.exact and plan.profile and any(
                 key in plan.profile for key in ('mode', 'sync', 'async', 'synchronous', 'slam_mode')):
             raise ReplayRefused('--exact does not allow profile overrides of sync/async mode')
+        if args.exact:
+            bag_exact_plan(plan.run_dir / 'bag')
     except ReplayRefused as exc:
         print(f'refusing: {exc}', file=sys.stderr)
         return 2
