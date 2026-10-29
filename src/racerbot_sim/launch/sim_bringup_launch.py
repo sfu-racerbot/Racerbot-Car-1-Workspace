@@ -42,8 +42,11 @@ def _validate_controlled_cars(context):
 
 
 def _mux(mux_config, namespace='', condition=None):
+    root = f'/{namespace}' if namespace else ''
     return Node(package='ackermann_mux', executable='ackermann_mux',
                 name='ackermann_mux', namespace=namespace,
+                remappings=[(root + suffix, [LaunchConfiguration('drive_topic_prefix'), root + suffix])
+                            for suffix in ('/drive', '/ackermann_cmd')],
                 parameters=[mux_config], condition=condition)
 
 
@@ -56,6 +59,8 @@ def generate_launch_description():
         car2_mux_config = yaml.safe_load(handle)['ackermann_mux']['ros__parameters']
 
     arguments = [
+        DeclareLaunchArgument('drive_topic_prefix', default_value='',
+                              description='Optional drive-chain topic prefix for isolated tests.'),
         DeclareLaunchArgument(
             'track', default_value='indoor_oval',
             description=(
@@ -97,6 +102,8 @@ def generate_launch_description():
         name='gym_bridge_node',
         output='screen',
         parameters=[{
+            'drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/ackermann_cmd'],
+            'car2_drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/car2/ackermann_cmd'],
             'track': LaunchConfiguration('track'),
             'track_directory': LaunchConfiguration('track_directory'),
             'seed': LaunchConfiguration('seed'),

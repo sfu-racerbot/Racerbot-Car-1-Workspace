@@ -57,13 +57,16 @@ def _setup(context):
             'controlled_start_offsets_m': offsets,
             'hold_deadman': LaunchConfiguration('car1_hold_deadman'),
             'car2_hold_deadman': LaunchConfiguration('car2_hold_deadman'),
+            'drive_topic_prefix': LaunchConfiguration('drive_topic_prefix'),
         }.items())
     car1 = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
-                parameters=[car1_yaml], output='screen')
+                parameters=[car1_yaml, {'drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/drive']}],
+                output='screen')
     if opponent == 'ours':
         car2_yaml = LaunchConfiguration('car2_params').perform(context) or default_yaml
         car2 = _params(car2_yaml)
-        car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom', drive_topic='/car2/drive',
+        car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom',
+                    drive_topic=LaunchConfiguration('drive_topic_prefix').perform(context) + '/car2/drive',
                     joy_topic='/car2/joy', intent_topic='/car2/drive_intent',
                     imu_topic='/car2/imu/data', imu_status_topic='/car2/imu/status')
         car2_node = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
@@ -85,7 +88,8 @@ def _setup(context):
             *(SetRemap(src=src, dst=dst) for src, dst in (
                 ('/joy', '/car2/joy'), ('/scan', '/car2/scan'),
                 ('/ego_racecar/odom', '/car2/odom'), ('/safety/brake', '/car2/safety/brake'),
-                ('/drive', '/car2/drive'))),
+                ('/drive', LaunchConfiguration('drive_topic_prefix').perform(context) + '/car2/drive'),
+                ('/car2/drive', LaunchConfiguration('drive_topic_prefix').perform(context) + '/car2/drive'))),
             *includes,
         ])
     referee = Node(package='racerbot_sim', executable='race_referee_node', name='race_referee_node',
@@ -118,6 +122,7 @@ def _setup(context):
 
 def generate_launch_description():
     args = [
+        DeclareLaunchArgument('drive_topic_prefix', default_value=''),
         DeclareLaunchArgument('track', default_value='indoor_oval'),
         DeclareLaunchArgument('opponent', default_value='ours'),
         DeclareLaunchArgument('car1_params', default_value=''),

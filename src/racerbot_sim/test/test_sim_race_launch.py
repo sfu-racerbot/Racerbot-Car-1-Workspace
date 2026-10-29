@@ -77,6 +77,7 @@ from ament_index_python.packages import get_package_share_directory, PackageNotF
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'racerbot_sim'))
 import harness_procs  # noqa: E402
+from conftest import require_isolation  # noqa: E402
 
 SHIPPED_GAP_FOLLOW_YAML = os.path.join(ROOT, 'src', 'gap_follow', 'config', 'gap_follow.yaml')
 # Our own nodes only: a leftover gym bridge or referee on this domain would
@@ -91,10 +92,7 @@ STATUS_QOS = QoSProfile(depth=5000, reliability=QoSReliabilityPolicy.RELIABLE,
 
 
 def _isolated_domain():
-    domain = os.environ.get('ROS_DOMAIN_ID')
-    if domain in (None, '', '0') or os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST':
-        pytest.fail('run with ROS_DOMAIN_ID=78 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST: domain 0 is '
-                    "the car's graph, and a simulated race must never join it")
+    require_isolation()
 
 
 def _refuse_strays():
@@ -129,7 +127,8 @@ def _race_launch(tmp_path, *arguments):
     log_path = tmp_path / 'launch.log'
     with open(log_path, 'w', encoding='utf-8') as log:
         proc = subprocess.Popen(
-            ['ros2', 'launch', 'racerbot_sim', 'sim_race_launch.py', *arguments],
+            ['ros2', 'launch', 'racerbot_sim', 'sim_race_launch.py', *arguments,
+             'drive_topic_prefix:=/test_only'],
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             yield proc
@@ -211,7 +210,7 @@ def _shipped_value(key):
 
 
 def _wired(graph):
-    return (('/', 'gap_follow_node') in graph.publishers('/drive')
+    return (('/', 'gap_follow_node') in graph.publishers('/test_only/drive')
             and ('/car2', 'gap_follow_node') in graph.subscribers('/car2/joy')
             and ('/', 'race_referee_node') in graph.publishers('/sim/race_result'))
 
@@ -222,14 +221,17 @@ def test_short_race_keeps_each_car_in_its_own_namespace_and_finishes(tmp_path, p
         graph = Graph(probe)
         if not graph.spin_until(lambda: _wired(graph), 90):
             pytest.fail('the race never wired up. /drive publishers: '
-                        f'{graph.publishers("/drive")}; /car2/drive publishers: '
-                        f'{graph.publishers("/car2/drive")}\n{_tail(tmp_path / "launch.log")}')
+                         f'{graph.publishers("/test_only/drive")}; car2 drive publishers: '
+                         f'{graph.publishers("/test_only/car2/drive")}\n{_tail(tmp_path / "launch.log")}')
         graph.spin_for(2.0)  # let any late publisher appear before judging the graph
 
         # Car 1 owns the root names; car 2 owns only its own namespace.
-        assert graph.publishers('/drive') == [('/', 'gap_follow_node')]
-        assert graph.publishers('/car2/drive') == [('/car2', 'gap_follow_node')]
-        for topic in ('/drive', '/ackermann_cmd', '/joy'):
+        assert graph.publishers('/test_only/drive') == [('/', 'gap_follow_node')]
+        assert graph.publishers('/test_only/car2/drive') == [('/car2', 'gap_follow_node')]
+        # oracle: safety isolation -- no launched process publishes production drive names.
+        for topic in ('/drive', '/car2/drive', '/ackermann_cmd', '/car2/ackermann_cmd'):
+            assert graph.publishers(topic) == []
+        for topic in ('/test_only/drive', '/test_only/ackermann_cmd', '/joy'):
             assert all(namespace != '/car2' for namespace, _ in graph.publishers(topic)), (
                 f'a /car2 node publishes {topic}: {graph.publishers(topic)}')
         # Car 2's control layer hears car 2's sensors and car 2's deadman, and nothing of car 1's.
@@ -242,7 +244,7 @@ def test_short_race_keeps_each_car_in_its_own_namespace_and_finishes(tmp_path, p
 
         # The shipped YAML must reach the namespaced node, and its drive topic must be car 2's.
         drive, speed = _parameters(probe, ['drive_topic', 'max_speed'])
-        assert drive.string_value == '/car2/drive'
+        assert drive.string_value == '/test_only/car2/drive'
         assert speed.double_value == _shipped_value('max_speed')
 
         # The referee's footprint on the graph is its result topic and nothing that drives or senses.
@@ -344,7 +346,7 @@ def test_team_a_graph_is_isolated(tmp_path, probe, team_a_packages):
         def snapshot():
             return (
                 tuple((t, tuple(graph.publishers(t))) for t in
-                      ('/drive', '/car2/drive', '/safety/brake', '/car2/safety/brake')),
+                      ('/test_only/drive', '/test_only/car2/drive', '/safety/brake', '/car2/safety/brake')),
                 tuple((t, tuple(graph.subscribers(t))) for t in
                       ('/car2/scan', '/car2/joy', '/car2/odom', '/car2/safety/brake',
                        '/scan', '/joy', '/ego_racecar/odom')),
@@ -352,8 +354,8 @@ def test_team_a_graph_is_isolated(tmp_path, probe, team_a_packages):
                       for namespace, name in (safety, disparity)),
             )
         def ready():
-            return (('/', 'gap_follow_node') in graph.publishers('/drive')
-                    and disparity in graph.publishers('/car2/drive')
+            return (('/', 'gap_follow_node') in graph.publishers('/test_only/drive')
+                    and disparity in graph.publishers('/test_only/car2/drive')
                     and safety in graph.publishers('/car2/safety/brake')
                     and all(node in graph.subscribers(topic) for topic, node in required_subs))
         assert graph.spin_until(lambda: proc.poll() is not None or ready(), 45), _tail(tmp_path / 'launch.log')
@@ -373,12 +375,15 @@ def test_team_a_graph_is_isolated(tmp_path, probe, team_a_packages):
         assert stable, f'graph did not stabilize: {previous!r}\n{_tail(tmp_path / "launch.log")}'
         # oracle: race isolation contract: only car 1 publishes root drive and
         # every team A publisher belongs to car 2, except ROS infrastructure.
-        assert graph.publishers('/drive') == [('/', 'gap_follow_node')]
-        assert graph.publishers('/car2/drive') == [disparity]
+        assert graph.publishers('/test_only/drive') == [('/', 'gap_follow_node')]
+        assert graph.publishers('/test_only/car2/drive') == [disparity]
+        for topic in ('/drive', '/car2/drive', '/ackermann_cmd', '/car2/ackermann_cmd'):
+            assert graph.publishers(topic) == []
         assert graph.publishers('/safety/brake') == []
         for namespace, name in (safety, disparity):
             topics = {topic for topic, _ in probe.get_publisher_names_and_types_by_node(name, namespace)}
-            assert all(t.startswith('/car2/') or t in ('/rosout', '/parameter_events') for t in topics), topics
+            assert all(t.startswith('/car2/') or t in (
+                '/test_only/car2/drive', '/rosout', '/parameter_events') for t in topics), topics
         for topic, node in required_subs:
             assert node in graph.subscribers(topic), (topic, graph.subscribers(topic))
         for topic in ('/scan', '/joy', '/ego_racecar/odom'):

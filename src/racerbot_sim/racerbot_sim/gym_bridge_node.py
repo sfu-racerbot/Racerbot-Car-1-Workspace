@@ -57,6 +57,7 @@ class GymBridgeNode(Node):
         # VESC does, so it listens where the VESC does
         # (racerbot_launch/test/test_drive_path_wiring.py).
         self.declare_parameter('drive_topic', '/ackermann_cmd')
+        self.declare_parameter('car2_drive_topic', '/car2/ackermann_cmd')
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('odom_frame', 'odom')
@@ -146,6 +147,8 @@ class GymBridgeNode(Node):
         self.names[0].update(scan=str(value('scan_topic')), odom=str(value('odom_topic')),
                              drive=str(value('drive_topic')), odom_frame=self.odom_frame,
                              base_frame=self.base_frame, laser_frame=self.laser_frame)
+        if self.controlled_cars > 1:
+            self.names[1]['drive'] = str(value('car2_drive_topic'))
 
         self.scan_pubs = [self.create_publisher(LaserScan, names['scan'], 10)
                           for names in self.names]

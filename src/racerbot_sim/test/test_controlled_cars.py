@@ -11,6 +11,7 @@ import time
 import numpy as np
 import pytest
 import rclpy
+from ament_index_python.packages import get_package_prefix
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Joy, LaserScan
@@ -21,6 +22,21 @@ from rclpy.time import Time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from racerbot_sim import sim_bridge as sim, tracks  # noqa: E402
 from racerbot_sim.sim_joy_node import SimJoyNode  # noqa: E402
+
+
+@pytest.mark.parametrize('topic', ['/drive', '/car2/drive', '/ackermann_cmd', '/car2/ackermann_cmd'])
+def test_production_drive_publisher_is_refused_before_creation(topic):
+    rclpy.init()
+    node = rclpy.create_node('topic_guard_probe')
+    try:
+        # oracle: safety contract -- guard raises before ROS gets a publisher.
+        before = list(node.publishers)
+        with pytest.raises(pytest.fail.Exception, match='production drive topic forbidden'):
+            node.create_publisher(AckermannDriveStamped, topic, 10)
+        assert list(node.publishers) == before
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 @pytest.mark.parametrize('scenario', ['release', 'silence'])
@@ -246,7 +262,14 @@ def ros_context():
     node = rclpy.create_node('controlled_cars_test')
     processes = []
     def start(executable, *args):
-        p = subprocess.Popen(['ros2', 'run', 'racerbot_sim', executable,
+        if executable == 'gym_bridge_node':
+            args = (*args, '-p', 'drive_topic:=/test_only/ackermann_cmd',
+                    '-p', 'car2_drive_topic:=/test_only/car2/ackermann_cmd')
+        # Start the installed executable directly so teardown waits for the
+        # actual node, rather than a ros2-run parent whose child can outlive it.
+        executable_path = os.path.join(get_package_prefix('racerbot_sim'),
+                                       'lib', 'racerbot_sim', executable)
+        p = subprocess.Popen([executable_path,
                               '--ros-args', *args], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
         processes.append(p)
@@ -298,7 +321,7 @@ def test_silent_car_stops_while_other_car_drives(ros_context):
     status = []
     node.create_subscription(String, '/sim/status', lambda m: status.append(json.loads(m.data)), 10)
     publishers = [node.create_publisher(AckermannDriveStamped, topic, 10)
-                  for topic in ('/ackermann_cmd', '/car2/ackermann_cmd')]
+                  for topic in ('/test_only/ackermann_cmd', '/test_only/car2/ackermann_cmd')]
     start('gym_bridge_node', '-p', 'controlled_cars:=2')
     assert _spin_until(node, lambda: bool(status), 20.0)
     command = AckermannDriveStamped()
