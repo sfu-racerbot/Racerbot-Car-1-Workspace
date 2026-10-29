@@ -369,3 +369,77 @@ def test_all_scans_selector_requires_exact(tmp_path, monkeypatch, capsys):
         replay.main(['unused', '--exact-mode', 'all-scans'])
     assert exc.value.code == 2
     assert 'requires --exact' in capsys.readouterr().err
+
+
+def _tf(parent, child, stamp=0):
+    from types import SimpleNamespace
+    return SimpleNamespace(header=SimpleNamespace(
+        frame_id=parent, stamp=SimpleNamespace(sec=0, nanosec=stamp)), child_frame_id=child)
+
+
+def test_tf_filter_drops_only_map_parented_transforms():
+    # oracle: controller rule - retain exact non-map payloads, including in a mixed message.
+    correction = _tf('map', 'world_odom')
+    imu = _tf('world_odom', 'wheels')
+    wheel = _tf('wheels', 'chassis')
+    mixed = [correction, imu, wheel]
+    assert replay.filter_tf_transforms(mixed) == [imu, wheel]
+    assert replay.filter_tf_transforms([correction]) == []
+    assert mixed == [correction, imu, wheel]  # input message is not mutated
+
+
+def test_tf_chain_derived_from_recorded_tree_and_static_edges():
+    # oracle: synthetic tree - the sensor edge is static; the two dynamic edges need brackets.
+    assert replay.needed_tf_pairs(
+        [('wheels', 'chassis'), ('world_odom', 'wheels'), ('elsewhere', 'camera')],
+        [('chassis', 'sensor')], 'world_odom', 'sensor') == [
+            ('world_odom', 'wheels'), ('wheels', 'chassis')]
+
+
+def test_tf_brackets_cover_every_needed_pair_in_recorded_order():
+    # oracle: closed form - A reaches 15 at message 3; B only reaches it at message 4.
+    a, b = ('world_odom', 'wheels'), ('wheels', 'chassis')
+    messages = [[(*a, 10)], [(*b, 10)], [(*a, 20)], [(*b, 16)], [(*b, 30)]]
+    assert replay.tf_bracket_plan(messages, [a, b], [15, 20]) == [4, 5]
+
+
+def test_tf_bracket_missing_pair_refuses_with_pair_and_stamp():
+    # oracle: spec - another pair's future sample cannot stand in for the missing pair.
+    a, b = ('world_odom', 'wheels'), ('wheels', 'chassis')
+    with pytest.raises(replay.StampMismatch, match=r'wheels.*chassis.*15'):
+        replay.tf_bracket_plan([[(*a, 10), (*b, 10)], [(*a, 20)]], [a, b], [15])
+
+
+def test_tf_bracket_accepts_exact_stamp_for_each_pair():
+    # oracle: closed form - samples exactly at the requested time need no interpolation.
+    pair = ('world_odom', 'chassis')
+    assert replay.tf_bracket_plan([[(*pair, 15)]], [pair], [15]) == [1]
+
+
+def test_tf_bracket_requires_earlier_sample_too():
+    # oracle: invariant - future-only data cannot interpolate a transform at a past scan.
+    pair = ('world_odom', 'chassis')
+    with pytest.raises(replay.StampMismatch, match=r'world_odom.*chassis.*15'):
+        replay.tf_bracket_plan([[(*pair, 20)]], [pair], [15])
+
+
+def test_tf_chain_refuses_disconnected_frames():
+    # oracle: invariant - a missing transform link cannot be reconstructed by guessing.
+    with pytest.raises(replay.ReplayRefused, match=r'world_odom.*sensor'):
+        replay.needed_tf_pairs([('world_odom', 'wheels')], [], 'world_odom', 'sensor')
+
+
+def test_prepare_recorded_tf_preserves_payloads_and_reports_mixed_message():
+    from types import SimpleNamespace
+    # oracle: closed form - one map correction removed, one mixed message, two dynamic brackets.
+    a10, a20 = _tf('world_odom', 'wheels', 10), _tf('world_odom', 'wheels', 20)
+    b10, b20 = _tf('wheels', 'chassis', 10), _tf('wheels', 'chassis', 20)
+    correction = _tf('map', 'world_odom', 10)
+    messages = [SimpleNamespace(transforms=values) for values in
+                ([correction, a10, b10], [a20], [b20])]
+    filtered, ends, info = replay.prepare_recorded_tf(
+        messages, [_tf('chassis', 'sensor')], 'world_odom', 'sensor', [15])
+    assert filtered == [[a10, b10], [a20], [b20]]
+    assert ends == [3]
+    assert info == {'needed_tf_pairs': [['world_odom', 'wheels'], ['wheels', 'chassis']],
+                    'map_transforms_dropped': 1, 'mixed_tf_messages': 1, 'tf_messages_available': 3}
