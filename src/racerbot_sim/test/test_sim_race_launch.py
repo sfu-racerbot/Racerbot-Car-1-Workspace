@@ -39,6 +39,11 @@ test_team_a_deadman_isolated[False] (car 2 reached 2.9999 m/s). Wiring the
 car 2 hold argument to car 1 failed the same test (car 1 stayed at 0 m/s).
 With the namespace removed the explicit drive remap still targets /car2/drive;
 the graph check detects the nodes' incorrect root namespace. All breaks restored.
+
+R7 acceptance races (2026-10-28): all four stopped on car 2 wall contact,
+with zero missed steps and neither car finishing. Car 1 course normal/swapped:
+4.950/2.925 sim s; indoor_wide normal/swapped: 4.050/2.850 sim s. Full logs,
+race.json and recordings: /tmp/oc-part-b1-r7/<track>-<normal|swapped>/.
 """
 
 import contextlib
