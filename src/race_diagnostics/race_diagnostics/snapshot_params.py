@@ -84,6 +84,8 @@ def main(argv=None):
                 if snapshot(node, full, out, args.timeout, file_name=file_name) is not None:
                     watch.done(full)
                     count += 1
+                else:
+                    watch.failed(full)
             if time.monotonic() - start >= args.delay + args.watch:
                 break
             t_poll = time.monotonic()
