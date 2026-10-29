@@ -360,3 +360,12 @@ def test_admission_audit_uses_snapshot_not_profile():
     changed, audit = replay.exact_admission_parameters(params, 'forced', {'throttle_scans': 2})
     assert changed['slam_toolbox']['ros__parameters']['throttle_scans'] == 1
     assert audit['throttle_scans'] == {'recorded': 2, 'override': 1}
+
+
+def test_all_scans_selector_requires_exact(tmp_path, monkeypatch, capsys):
+    # oracle: invariant - an exact-mode selector must not silently start a rate replay.
+    monkeypatch.setattr(replay, 'PROC_ROOT', tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        replay.main(['unused', '--exact-mode', 'all-scans'])
+    assert exc.value.code == 2
+    assert 'requires --exact' in capsys.readouterr().err

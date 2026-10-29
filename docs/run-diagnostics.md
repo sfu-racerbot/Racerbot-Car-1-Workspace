@@ -482,7 +482,7 @@ whether SLAM can reproduce the recorded poses without another drive.
 
 - Starts SLAM with the recording's parameter snapshot, plus optional profile overrides.
 - Rebuilds odometry transforms instead of playing the car's recorded map corrections.
-- Feeds every recorded scan, with pose checkpoints for stamp-by-stamp comparison.
+- Forces the recorded scan-admission sequence for stamp-by-stamp pose comparison.
 - Saves a replay bag, logs, map files when available, and a `replay.json` summary.
 
 **Stop bringup before replaying.** The command refuses while a
@@ -513,51 +513,95 @@ are refused, so use a different `--label` for another attempt. Add
 `--out-root /tmp/slam-replays` to put results in a scratch directory instead.
 The source run is read without being modified.
 
-### What exact mode feeds
+### Forced admission: the default exact mode
 
-Exact mode starts `sync_slam_toolbox_node` and publishes **every recorded
-`/scan` in recorded order**. SLAM applies its own startup, throttling, travel
-and time filters to that complete input. Sending only scans that previously
-produced a pose changes the filter counters and therefore changes the run.
+`--exact` selects `--exact-mode forced` by default. It starts `sync_slam_toolbox_node` and
+uses the recorded `/pose` stamps to identify the scans the car processed.
+These are the **planned scans**. It feeds them in recorded pose order,
+waiting for each matching `/pose` before advancing: strict lockstep.
 
-SLAM stamps each `/pose` with the scan it processed. A scan whose stamp appears
-in the recorded `/pose` sequence is a **planned checkpoint**: replay waits
-for that stamp's pose before advancing. Other scans do not wait for a pose.
-This is lockstep at planned checkpoints, rather than playback at a fixed rate.
+The feed sequence is:
 
-Extra poses are recorded without stopping. A planned pose that does not arrive
-within the 10-second pose timeout is logged as missing, and feeding continues.
-**More than ten consecutive missing planned poses ends replay as failed**,
-naming the stamps.
+1. The first planned scan, followed by its pose acknowledgement.
+2. The three recorded scans immediately before the second planned scan.
+   These are **sacrificial scans**: they consume startup callback counts 2–4
+   and must produce no poses. If one produces a pose, replay fails with its stamp.
+3. The remaining planned scans, each followed by its pose acknowledgement.
 
-A later pose can resolve a previously timed-out stamp in
-the final accounting; `exact.timed_out_stamps` retains the timeout history.
+The startup rejection is hard-coded in
+[`slam_toolbox_common.cpp:795`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/src/slam_toolbox_common.cpp#L795).
+Forced mode also changes four admission gates, while retaining the recorded
+scan-matching, map and solver settings. For the 19:49 recording:
 
-Before a scan, the feeder publishes odometry through the first sample at or
-after its stamp, so [TF](glossary.md#tf--transform--frame) can interpolate the car's
-pose at that time. The car's SLAM message filter normally waits for this same
-sample. A planned scan outside recorded odometry coverage refuses before any
-replay process starts.
+| Admission parameter | Recorded value | Forced value |
+|---|---:|---:|
+| `throttle_scans` | 2 | 1 |
+| `minimum_time_interval` | 0.2 s | 0.0 s |
+| `minimum_travel_distance` | 0.25 m | 0.0 m |
+| `minimum_travel_heading` | 0.25 rad | 0.0 rad |
 
-Unplanned scans outside coverage are still sent with the available odometry,
-without a complete interpolation bracket. SLAM's TF message filter decides
-their fate, just as on the car. `exact.unbracketed_scans` counts these sends.
+This forces the already-known admission sequence rather than trying to
+reproduce timing-dependent rejections. On the car, every planned scan passed
+the travel and time filters measured from the same previous processed pose.
+
+With identical inputs those scans pass again; opening the gates removes the
+callback-count and timing dependency without changing their scan-matching
+configuration.
+
+`replay.json` records `exact.feed_mode: "forced"` and, under
+`exact.admission_overrides`, each original snapshot value and its override.
+The original value comes from the recording even if a profile changed it.
+
+Before every planned or sacrificial scan, replay publishes odometry through
+the first sample at or after its stamp, so
+[TF](glossary.md#tf--transform--frame) can interpolate the pose at that time.
+`/clock` advances to the scan stamp, not to the future odometry sample.
+
+`exact.lookahead_samples` counts odometry messages first sent beyond the
+current scan's stamp. A bracket already sent for an earlier scan is reused.
+
+Both exact modes log a planned pose missing after its 10-second pose timeout
+and continue. **More than ten consecutive missing planned poses ends replay
+as failed**, naming the stamps.
+
+A later pose can resolve an earlier timeout
+in the final accounting; `exact.timed_out_stamps` retains its history.
+
+Forced mode refuses before starting if a pose's matching scan was not recorded,
+scan stamps are duplicated, or a planned or sacrificial scan lacks odometry
+coverage. It also refuses when there are fewer than three recorded scans
+before the second planned scan. Errors name the relevant stamp.
+
+A missing processed scan means the recording cannot reproduce that run;
+even the first pose has no exception. Both exact modes refuse `--rate`
+and mode-related profile overrides.
+
+### All-scans admission experiment
+
+Use `all-scans` to investigate SLAM's timing-dependent admission behaviour.
+It sends **every recorded scan in bag order**, keeps the recorded admission
+parameters, and waits for poses only at planned checkpoints. Extra poses are
+recorded without stopping. `exact.admission_overrides` is empty in this mode.
+
+In the same terminal, replace `RUN_DIR` as above and choose a fresh label:
+
+```bash
+RB_WS="$(git rev-parse --show-toplevel)" rb python3 tools/run_analysis/slam_replay.py \
+  RUN_DIR --exact --exact-mode all-scans --odom odom_imu --label all-scans
+```
+
+Check that the summary says `exact.feed_mode: "all-scans"`. A failed summary
+with missing checkpoints can be the experimental result; see the measured
+19:49 outcome below. This mode does not guarantee the car's admission sequence,
+because recorded header stamps do not reproduce transform arrival timing.
+
+Unplanned scans outside odometry coverage are sent with the available odometry,
+without complete brackets. SLAM's TF message filter decides their fate.
+`exact.unbracketed_scans` counts these sends; forced mode sends no such scans.
 
 The 19:49 bag has 98 scans before odometry starts and one after it ends, so
-a complete feed would send 99 unbracketed scans.
-
-`/clock` advances to the scan stamp, not to the future odometry
-sample. `exact.lookahead_samples` in `replay.json` counts odometry messages
-first sent beyond the current scan's stamp. An odometry bracket already sent
-for an earlier scan is reused, without sending that sample again.
-
-Exact mode refuses before starting if a pose's matching scan was not recorded,
-if scan stamps are duplicated, or if a planned scan lacks odometry coverage.
-The error names the missing stamp.
-
-A missing processed scan means
-the recording cannot reproduce that run; even the first pose has no exception.
-`--exact` also refuses `--rate` and mode-related profile overrides.
+a complete all-scans feed would send 99 unbracketed scans. Planned scans still
+require brackets in either mode.
 
 Without `--exact`, the command uses asynchronous SLAM and plays all scans at
 `--rate` (default `1.0`). A YAML file passed with `--profile` overrides the
@@ -589,8 +633,8 @@ For a covered scan, SLAM's
 The check requires `restamp_tf: false` and a positive
 `transform_publish_period`, as recorded in the 19:49 run.
 
-Unbracketed boundary
-scans cannot have this acknowledgement; the feeder yields between sends so
+In all-scans mode, unbracketed boundary scans cannot have this acknowledgement;
+the feeder yields between sends so
 SLAM can handle them through its TF filter.
 
 ### Limitations: measured result on the 19:49 run
@@ -604,7 +648,9 @@ correction is identity. That count does not mean a pose lacks its scan.
 
 The `forced1` replay completed with **315 matched poses, none missing and none
 extra**. It sent 318 scans: the 315 planned inputs and three sacrificial scans,
-which produced no poses. All 318 had callback receipts. The map and pose graph
+which produced no poses. All 318 had callback receipts.
+
+The map and pose graph
 were saved, and `exact.admission_overrides` records each changed gate and its
 original value.
 
@@ -625,15 +671,16 @@ The error history below uses one-based pose indices and rounded values.
 | 100 | 0.12057477 | 0.586101 |
 | 315 | 0.72786463 | 0.065573 |
 
-There is a measurable input difference before scan matching: replay
-interpolates the composed `/odom/imu` pose, while the car's recorded TF tree
-composes separately interpolated `odom_imu → odom` and `odom → base_link`
-transforms. At pose 20, their odometry guesses differ by **0.00003035 m**,
+There is a measurable input difference before scan matching. Replay
+interpolates the already-composed `/odom/imu` pose. The car's recorded TF tree
+instead interpolates `odom_imu → odom` and `odom → base_link` separately,
+then composes them. At pose 20, their odometry guesses differ by **0.00003035 m**,
 with no measured yaw difference.
 
 The first yaw discrepancy is one fine-search angular step, **0.00349 rad**
 (0.199962°). Karto passes this configured value as the angular resolution in
 [`Mapper.cpp:624–628`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/lib/karto_sdk/src/Mapper.cpp#L624-L628).
+
 Small interpolation differences selecting a different scan-match peak are the
 best explanation for the early divergence; this is evidence of sensitivity,
 not proof that every later error has the same cause.
@@ -642,7 +689,9 @@ Ceres threading can also affect numerical reproducibility: reductions are not
 bit-identical across thread counts. In 2.8.5,
 [`ceres_solver.cpp:166`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/solvers/ceres_solver.cpp#L166)
 hard-codes `num_threads = 50`; the replay log reports Ceres capping that to
-**8**. The plugin exposes no thread-count parameter, so a controlled one-thread
+**8**.
+
+The plugin exposes no thread-count parameter, so a controlled one-thread
 replay was not available. The car's effective thread count is unknown, and
 threading has not been isolated as the cause of the later errors.
 

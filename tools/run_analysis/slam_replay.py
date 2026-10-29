@@ -857,7 +857,10 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
 
 
 def main(argv=None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.exact_mode == 'all-scans' and not args.exact:
+        parser.error('--exact-mode all-scans requires --exact')
     drivers = running_drivers(PROC_ROOT)
     if drivers:
         print(f'refusing: driver processes are running ({", ".join(drivers)}). '

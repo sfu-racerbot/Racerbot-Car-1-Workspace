@@ -212,8 +212,8 @@ def main():
                                           'unbracketed_scans': node.unbracketed_scans,
                                           'scans_sent': node.scans_sent,
                                           'scan_callbacks_confirmed': len(node.callback_stamps),
-                                           'completed_scans': node.completed_scans,
-                                           'sacrificial_scan_stamps': sorted(node.sacrificial_stamps),
+                                          'completed_scans': node.completed_scans,
+                                          'sacrificial_scan_stamps': sorted(node.sacrificial_stamps),
                                           **node.accounting.summary()}) + '\n')
         node.destroy_node()
         rclpy.shutdown()
