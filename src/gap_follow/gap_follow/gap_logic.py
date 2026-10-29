@@ -1267,6 +1267,53 @@ def understeer_speed_cap(engaged, measured_speed, factor) -> float:
     return max(0.0, measured_speed * factor)
 
 
+class TractionHold:
+    """Bounded wheelspin hold, with low-slip rearming after expiry."""
+
+    def __init__(self, slip_threshold, release_slip, min_speed, max_hold_sec):
+        if not all(math.isfinite(v) and v > 0 for v in
+                   (slip_threshold, release_slip, min_speed, max_hold_sec)):
+            raise ValueError('traction parameters must be finite and positive')
+        if release_slip >= slip_threshold:
+            raise ValueError('traction release_slip must be below slip_threshold')
+        self.slip_threshold = slip_threshold
+        self.release_slip = release_slip
+        self.min_speed = min_speed
+        self.max_hold_sec = max_hold_sec
+        self.reset()
+
+    def reset(self) -> None:
+        self.holding = False
+        self.armed = True
+        self.held_sec = 0.0
+
+    def update(self, wheel_speed, fused_speed, dt) -> bool:
+        if not all(math.isfinite(v) for v in (wheel_speed, fused_speed, dt)) or dt < 0:
+            self.reset()
+            return False
+        if wheel_speed < self.min_speed or fused_speed < self.min_speed:
+            self.holding = False
+            self.held_sec = 0.0
+            return False
+        slip = wheel_speed - fused_speed
+        if slip < self.release_slip:
+            self.reset()
+            return False
+        if self.armed and slip > self.slip_threshold:
+            self.holding = True
+        if self.holding:
+            self.held_sec += dt
+            if self.held_sec + 1e-12 >= self.max_hold_sec:
+                self.holding = False
+                self.armed = False
+        return self.holding
+
+
+def traction_limited_speed(desired_speed, last_commanded_speed, holding) -> float:
+    """Hold without delaying a lower speed ceiling."""
+    return min(desired_speed, last_commanded_speed) if holding else desired_speed
+
+
 class LowPass:
     """First-order low-pass over a stream of samples, with time constant
     ``time_constant_s``.
