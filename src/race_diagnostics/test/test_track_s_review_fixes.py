@@ -45,3 +45,14 @@ def test_tegrastats_child_checks_parent_after_signal_registration():
         statuses.append(os.waitstatus_to_exitcode(status))
     # oracle: a changed parent must exit 1; the original parent continues.
     assert statuses == [1, 0]
+
+
+def test_backoff_stays_bounded_after_ten_thousand_failures():
+    from race_diagnostics.run_metadata import NodeWatch
+    watch = NodeWatch()
+    for _ in range(10000):
+        watch.failed('/unresponsive')
+    # oracle: run_metadata.py's 32-poll cap permits at most 31 skipped polls;
+    # counts above six have the same schedule and must not grow the exponent.
+    assert watch._skip_polls['/unresponsive'] == 31
+    assert watch._failures['/unresponsive'] <= 6

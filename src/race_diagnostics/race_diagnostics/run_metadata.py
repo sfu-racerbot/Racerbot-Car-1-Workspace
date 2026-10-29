@@ -382,6 +382,6 @@ class NodeWatch:
 
         The k-th consecutive failure skips min(2**(k-1), 32) - 1 polls.
         """
-        count = self._failures.get(full_name, 0) + 1
+        count = min(self._failures.get(full_name, 0) + 1, 6)
         self._failures[full_name] = count
         self._skip_polls[full_name] = min(2 ** (count - 1), 32) - 1
