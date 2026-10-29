@@ -14,6 +14,7 @@ as printed. See docs/run-diagnostics.md.
 """
 
 import os
+from pathlib import Path
 from time import strftime
 
 from ament_index_python.packages import get_package_share_directory
@@ -24,7 +25,8 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from race_diagnostics.auto_record import recorder_node_names
 from race_diagnostics.run_metadata import (
-    find_repo_root, imu_calibration_files, team_repos, write_run_metadata)
+    find_repo_root, imu_calibration_files, team_repos, write_packages,
+    write_run_metadata, write_submodules)
 import yaml
 
 # Everything needed to reconstruct a run offline. /scan dominates the size
@@ -109,10 +111,28 @@ def _setup(context, *args, **kwargs):
         meta = write_run_metadata(
             run_dir, repos, imu_calibration_files(racer_imu_root))
     except Exception as e:  # noqa: BLE001 -- a metadata failure must not stop a run
+        repos = {}
         meta = os.path.join(run_dir, 'metadata')
         os.makedirs(meta, exist_ok=True)
         with open(os.path.join(meta, 'ERROR.txt'), 'w') as handle:
             handle.write(f'metadata not written: {e!r}\n')
+
+    # The installed apt package versions (slam_toolbox's release -- apt,
+    # so git state cannot say which one ran) and each submodule's
+    # checked-out commit next to what the workspace records for it
+    # (team A's pin moves often). Two separate tries: one failing must
+    # not skip the other, and neither may stop a run.
+    meta = Path(meta)
+    try:
+        write_packages(meta)
+    except Exception as e:  # noqa: BLE001 -- must not stop a run
+        with open(meta / 'ERROR.txt', 'a') as handle:
+            handle.write(f'metadata packages.txt not written: {e!r}\n')
+    try:
+        write_submodules(meta, repos.get('racerbot-ws'))
+    except Exception as e:  # noqa: BLE001 -- must not stop a run
+        with open(meta / 'ERROR.txt', 'a') as handle:
+            handle.write(f'metadata submodules.txt not written: {e!r}\n')
 
     topics = LaunchConfiguration('topics').perform(context).split()
     config = os.path.join(
