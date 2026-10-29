@@ -365,7 +365,9 @@ The layer works out the rectangle's centre from that visible face, using the car
 
 **The follow memory.** If the car being followed is lost for a moment, the [follow cap](glossary.md#follow-cap) is held for 1.0 s (`opponent_follow_memory_sec`) instead of being dropped. A car is lost when its track is dropped, or when it leaves the band the layer watches.
 
-The held cap lowers speed only. It never steers, stops or starts the car. Set the memory to `0.0` to turn it off and keep the rest of the layer on.
+The held cap can lower speed to zero. It never raises speed, overrides a safety stop or authorises motion by itself.
+
+It does not steer. Set the memory to `0.0` to turn it off and keep the rest of the layer on.
 
 **Narrow sections.** If the room beside the other car is narrower than the pass needs, the pass is refused, or abandoned if one is under way, and the car follows instead.
 

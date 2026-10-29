@@ -158,7 +158,11 @@ The reactive method `gap_follow` uses: look at the LiDAR scan, find the widest o
 
 ### Follow cap
 
-The top speed this car is allowed while another car is ahead of it on its path. It comes from the gap: `(gap − 0.5 m) ÷ 1.0 s`, where the gap runs from this car's front bumper to the other car. A follow cap only ever lowers speed. It never steers or stops the car. See [Several cars at once](gap-follow.md#several-cars-at-once).
+The top speed this car is allowed while another car is ahead of it on its path. It comes from the gap: `max(0, (gap − 0.5 m) ÷ 1.0 s)`, measured from this car's front bumper to the other car.
+
+A follow cap can lower speed to zero: the gap-based law reaches zero at `opponent_follow_min_gap` (0.5 m). It never raises speed, overrides a safety stop or authorises motion by itself.
+
+It does not steer. See [Several cars at once](gap-follow.md#several-cars-at-once).
 
 ### Deadlock
 
