@@ -520,6 +520,16 @@ gap_follow_node:
     opponent_radius: 0.30            # m, rear relevance cutoff only; not inflation
     opponent_length: 0.58            # m, padded outline; visible-face centre recovery
     opponent_width: 0.31             # m, 0.30 m tire width plus 5 mm per side
+    # R4 pass-margin sweep, 2026-10-28, on top of R2c. Leaders at 1.0, 1.5 and
+    # 2.0 m/s; car1_course_2026_10_26, indoor_wide and asb_10000; both
+    # directions; 2 seeds; 3 laps; 36 runs per setting. Only margin 0.15 m gave
+    # 0 stalls at every opponent_pass_max_steering tried (0.10, 0.20 and 0.33
+    # rad): 36 of 36 finished, 0 contacts, 1 overtake each. Margins 0.05 m and
+    # 0.10 m overtook up to 4 times but stalled 1 to 5 times. Rule: most
+    # overtakes at 0 contacts and 0 stalls; ties go to the larger time gained by
+    # the faster car. 0.15 m with 0.10 rad (both unchanged) ships: time gained
+    # +21.56 s, against +21.34 s at 0.33 rad and +16.05 s at 0.20 rad. The
+    # evidence and the designs rejected are in docs/gap-follow.md#several-cars-at-once.
     opponent_passing_margin: 0.15    # m, extra room demanded beside a moving car
     opponent_prediction_horizon: 0.8 # s of predicted path treated as blocked
     opponent_prediction_step: 0.1    # s
@@ -546,6 +556,8 @@ gap_follow_node:
     opponent_follow_memory_sec: 1.0  # s, inclusive hold, released one scan later
     opponent_follow_lateral: 0.45    # m, |y| within which a car ahead is "in the path"
     opponent_relevant_lateral: 1.0   # m, |y| beyond which a moving car is ignored
+    # Steering limit for starting a pass. 0.10 rad is shipped, chosen by the R4
+    # sweep recorded in the comment above opponent_passing_margin.
     opponent_pass_max_steering: 0.10 # rad, no new pass while steering harder (a bend)
     opponent_pass_max_heading_deg: 15.0  # no new pass while the car ahead turns more
     opponent_max_track_speed: 8.0    # m/s, clamp on the velocity estimate

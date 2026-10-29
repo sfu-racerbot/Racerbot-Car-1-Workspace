@@ -6,6 +6,28 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
+## 2026-10-28 (latest) — gap_follow other-car layer on by default; follow hold, memory and outline
+
+The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s follow hold, a 1 s follow memory, the measured 0.31 × 0.58 m outline and a narrow-section refusal. Simulator-validated only: **not yet driven on the car.** The numbers, the rejected designs and the first-run order are in `docs/gap-follow.md#several-cars-at-once`.
+
+### gap_follow
+
+- **Changed shipped default:** `enable_opponent_awareness` false → true (`config/gap_follow.yaml`). `gap_follow_launch.py`'s `opponent_awareness` argument now defaults to `'true'`. Off switch: `opponent_awareness:=false`. Anything other than `true` or `false` stops the launch. The node's own code default stays `False`, so a node started without the YAML behaves as before.
+- **New: follow-cap memory:** `opponent_follow_memory_sec: 1.0`. The follow cap is held for 1 s after its car is lost. Speed only; `0.0` turns it off. The decision log can show `opponent mode=follow_memory`.
+- **New: follow hold:** `opponent_stopped_release_sec: 1.0`. A car confirmed as moving stays followed for 1 s after it drops below 0.3 m/s, then becomes an ordinary obstacle. The hold never enables a pass.
+- **Changed meaning: `opponent_radius`** (0.30 m) is now only the rear cutoff. The other car is the measured 0.31 × 0.58 m rectangle (`opponent_length`, `opponent_width`), placed from its visible face.
+- **New: narrow-section refusal:** a pass is refused, or abandoned, when the room beside the other car is narrower than `car_width + 2 × opponent_passing_margin` (0.61 m shipped). The car follows instead.
+- **Unchanged after the R4 margin sweep:** `opponent_passing_margin` 0.15 m and `opponent_pass_max_steering` 0.10 rad. The evidence is in the YAML comment above them.
+- **Test functions per file** (`grep -c '^def test'`): `test_opponent_tracking.py` 95, `test_opponent_awareness_node.py` 23, `test_gap_mirror_parity.py` 10, `test_gap_follow_launch_steering_damping.py` 11.
+
+### racerbot_launch
+
+- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML, so the other-car layer is on in their mapping laps too. None of them has an `opponent_awareness` argument. The switch there is `enable_opponent_awareness` in the YAML.
+
+### Needs on-car validation
+
+- The other-car layer has never run on the floor. Order: wheels off with both cars, then a slow two-car run at `max_speed:=1.0`, with a person holding LB on each controller. If a wall shows as `opponent mode=` with no other car moving, let go of LB, relaunch with `opponent_awareness:=false`, and report the run.
+
 ## 2026-10-27 (latest) — gap_follow race defaults (not yet driven on the car)
 
 Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated only: **not yet driven on the car.** The numbers, and how to go back, are in `docs/gap-follow.md#race-defaults-2026-10-27`.
