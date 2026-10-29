@@ -2544,7 +2544,9 @@ class GapFollowNode(Node):
             return
         try:
             if self.using_fused_speed:
-                why = self._fused_imu_reason
+                # Early stops may not read gated odometry. Refresh only here,
+                # after the drive command, inside diagnostic containment.
+                why = self._imu_gate()[1]
                 state_text = ('ok' if why is None else
                               why.removeprefix('imu ') if why != 'imu yaw not finite' else 'fault')
                 original_reason = reason

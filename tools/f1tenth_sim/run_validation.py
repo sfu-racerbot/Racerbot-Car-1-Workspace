@@ -578,6 +578,7 @@ def run_gap_solo(track: str, seed: int, timeout_s: float) -> dict:
             state = np.asarray(ego["std_state"], dtype=float)
             steering, speed = controller.command(ego["scan"], float(state[3]), step,
                                                  horizontal_accel=0.0, lb_pressed=True,
+                                                 yaw_rate=float(state[5]),
                                                  fused_speed=float(plant.truth(0)[3]))
             min_scan = min(min_scan, nearest_valid_range(ego["scan"]))
             stop_steps += int(controller.stopped)
