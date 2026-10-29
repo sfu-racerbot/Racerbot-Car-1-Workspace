@@ -304,7 +304,7 @@ The slower car then turns into a bend across that path. At 3.3 m/s the fast car 
 
 **The off switch is `opponent_awareness:=false` on the launch line.** The same switch is `enable_opponent_awareness` in `config/gap_follow.yaml`. Anything other than `true` or `false` stops the launch.
 
-**With it off, nothing below runs.** The node's commands are then what they were before the layer existed (2026-10-22). A node test checks this: in a world where nothing moves, the commands with the layer on match the commands with it off.
+**With it off, nothing below runs.** The node's commands are then what they were before the layer existed (2026-10-22). On 2026-10-22, with the layer off, the benchmark above reproduced the 2026-10-20 numbers exactly. A node test checks the same thing: in a world where nothing moves, the commands with the layer on match the commands with it off.
 
 **Before the car, in this order.** Do not skip ahead. Each step is the cheapest place to find a problem the next one would find with a crash.
 
@@ -341,7 +341,7 @@ ros2 launch gap_follow gap_follow_launch.py
 With it on, every scan:
 
 1. **Finds car-shaped things.** It groups the scan into clusters 0.15–0.7 m wide. A cluster counts only if the scan shows open space just past each of its ends. A stub of wall fails that test, because the beam past its end doesn't jump further away.
-2. **Tracks them.** It matches clusters from scan to scan against this car's own motion, dead-reckoned from speed and steering. A cluster counts as **moving** after 8 scans in a row (0.2 s at 40 Hz) at 0.6 m/s or more over the ground. A parked car stays an obstacle, as before.
+2. **Tracks them.** It matches clusters from scan to scan against this car's own motion, dead-reckoned from speed and steering, and filters each one into a position and a velocity. A cluster counts as **moving** after 8 scans in a row (0.2 s at 40 Hz) at 0.6 m/s or more over the ground. A parked car stays an obstacle, as before.
 
    The steering is modelled as the servo actually follows the command, 75 ms late. Using the command itself made parked clutter 0.9 m away read as a 1 m/s car in simulation.
 3. **Follows.** Behind a moving car, this car's speed is capped at `(gap − 0.5 m) / 1.0 s`. The gap runs from this car's front bumper to the other car. At 1.8 m/s that allows a 2.3 m gap.
@@ -405,6 +405,8 @@ TODO(verify): the sweep's raw results are not checked in, and this doc does not 
 - A reachable-target filter. It gave 39 stalls.
 - A deadlock escape. It almost never engaged, because the stuck car is held by `emergency_clearance`, which must never be overridden.
 - Releasing the memory during a pass. It gave 13 stalls.
+
+**History (2026-10-22).** The text then said a pass needed about 2.4 m of width with the margins in use, and that these tracks were narrower than that where the leader drives. The outline and the room rule changed on 2026-10-28. A pass now needs at least 0.61 m of room beside the other car.
 
 **Why the follow hold and memory exist.** Behind a slower car on car 1's course, the shipped controller could get stuck for good. The car closed on the slow car in a tight corner, steered round it towards the outer wall, and stopped in a pose that no forward command allowed by its safety rules could leave. `gap_follow` never reverses.
 
