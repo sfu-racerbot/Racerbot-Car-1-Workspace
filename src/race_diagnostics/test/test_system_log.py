@@ -121,6 +121,18 @@ def test_sampler_cpu_disappearance_and_pid_reuse(tmp_path):
     assert records[0]['node'] == '/new' and records[0]['cpu_pct'] is None
 
 
+def test_pid_reuse_between_samples_resets_baseline(tmp_path):
+    process(tmp_path, 10, ['p', '--ros-args', '-r', '__node:=old'], ticks=100, start=1)
+    now = [10.0]
+    sampler = system_log().ProcSampler(tmp_path, clk_tck=100, clock=lambda: now[0])
+    sampler.sample()
+    process(tmp_path, 10, ['p', '--ros-args', '-r', '__node:=new'], ticks=300, start=2)
+    now[0] += 2.0
+    records = sampler.sample()
+    # oracle: proc(5) starttime changes on reuse, so the new name has no baseline.
+    assert [(r['node'], r['cpu_pct']) for r in records] == [('/new', None)]
+
+
 def test_missing_tegrastats_and_recording_continues(tmp_path):
     module = system_log()
     warnings = []
