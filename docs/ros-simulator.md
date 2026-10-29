@@ -105,6 +105,7 @@ Car 2 has the same topics under `/car2/imu/`, and later cars use `/carN/imu/`.
 Each car also has an `/imu/status` topic under its own prefix. It carries
 JSON describing the primary BNO's health. The status is latched, so a
 subscriber that starts later receives the last verdict.
+The latched `/imu/status` for each car is withdrawn whenever the hardware interlock blocks and offered again with the current verdict when it reopens.
 
 **Terminal 2**, with the simulator running in Terminal 1 and this terminal
 sourced as above, check the sensor topics and car 1's status:
