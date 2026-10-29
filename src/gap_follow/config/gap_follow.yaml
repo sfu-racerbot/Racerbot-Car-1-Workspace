@@ -44,6 +44,22 @@ gap_follow_node:
     scan_topic: /scan
     drive_topic: /drive
     odom_topic: /odom
+    fused_odom_topic: /odom/fused
+    wheel_odom_topic: /odom
+    # Traction is a floor-trial feature, OFF: gym cannot spin driven wheels.
+    # Exact-stamp /odom minus /odom/fused, runs 20261026-194514 / 194913:
+    # positive slip p50/p90/p95/p99 (m/s), accelerating:
+    # 194514: .02252/.11675/.14857/.19874 (531); 194913:
+    # .04812/.12719/.15089/.17340 (485). Cruising:
+    # 194514: .01635/.06021/.07860/.14848 (645); 194913:
+    # .00812/.05125/.07155/.11661 (1269). Combined p99=.163902809;
+    # max(.15, 1.5*p99)=.245854213, rounded .246 < estimator clamp .3.
+    enable_imu_traction: false
+    imu_traction_slip_threshold: 0.246
+    imu_traction_release_slip: 0.123
+    imu_traction_min_speed: 0.3
+    imu_traction_max_hold_sec: 0.5
+    imu_traction_timeout_sec: 0.2
     max_range: 10.0
     forward_fov_deg: 180.0
     # Deliberately higher than the code default (1.0): with this car's top

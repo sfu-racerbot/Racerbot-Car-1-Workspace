@@ -30,6 +30,14 @@ UNDERSTEER_DEFAULTS = {
     'imu_understeer_max_steering_change': 0.05,
 }
 
+TRACTION_DEFAULTS = {
+    'imu_traction_slip_threshold': 0.246,
+    'imu_traction_release_slip': 0.123,
+    'imu_traction_min_speed': 0.3,
+    'imu_traction_max_hold_sec': 0.5,
+    'imu_traction_timeout_sec': 0.2,
+}
+
 
 class GapFollowNode(Node):
     """Reactive 'follow the gap' driver: steers at the middle of the best
@@ -47,6 +55,21 @@ class GapFollowNode(Node):
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('drive_topic', '/drive')
         self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('fused_odom_topic', '/odom/fused')
+        self.declare_parameter('wheel_odom_topic', '/odom')
+        self.declare_parameter('enable_imu_traction', False)
+        self.enable_imu_traction = self.get_parameter('enable_imu_traction').value
+        for name, default in TRACTION_DEFAULTS.items():
+            self.declare_parameter(name, default)
+        traction_values = {name: self.get_parameter(name).value for name in TRACTION_DEFAULTS}
+        self._validate_traction_parameters(traction_values)
+        for name, value in traction_values.items():
+            setattr(self, name, float(value))
+        self._restart_traction()
+        self.fused_speed = math.nan
+        self.last_fused_time = None
+        self.wheel_speed = 0.0
+        self.last_wheel_time = None
         self.declare_parameter('max_range', 10.0)
         self.declare_parameter('forward_fov_deg', 180.0)
         self.declare_parameter('min_gap_distance', 1.0)
@@ -355,6 +378,15 @@ class GapFollowNode(Node):
         self.scan_topic = self.get_parameter('scan_topic').value
         self.drive_topic = self.get_parameter('drive_topic').value
         self.odom_topic = self.get_parameter('odom_topic').value
+        self.fused_odom_topic = self.get_parameter('fused_odom_topic').value
+        self.wheel_odom_topic = self.get_parameter('wheel_odom_topic').value
+        self.using_fused_speed = self.odom_topic == self.fused_odom_topic
+        self._fused_imu_reason = 'no imu'
+        for name in ('fused_odom_topic', 'wheel_odom_topic'):
+            if not isinstance(getattr(self, name), str) or not getattr(self, name).strip():
+                raise ValueError(f'{name} must be a nonempty topic')
+        if self.fused_odom_topic == self.wheel_odom_topic:
+            raise ValueError('wheel_odom_topic must differ from fused_odom_topic')
         self.max_range = self.get_parameter('max_range').value
         self.forward_fov = math.radians(self.get_parameter('forward_fov_deg').value)
         self.min_gap_distance = float(
@@ -796,11 +828,18 @@ class GapFollowNode(Node):
             LaserScan, self.scan_topic, self.scan_callback, 10)
         self.odom_sub = self.create_subscription(
             Odometry, self.odom_topic, self.odom_callback, 10)
+        if self.using_fused_speed:
+            self.wheel_odom_sub = self.create_subscription(
+                Odometry, self.wheel_odom_topic, self.wheel_odom_callback, 10)
+        if self.enable_imu_traction:
+            self.fused_odom_sub = self.create_subscription(
+                Odometry, self.fused_odom_topic, self.fused_odom_callback, 10)
         self.joy_sub = self.create_subscription(
             Joy, self.joy_topic, self.joy_callback, 10)
         # Gyro consumers share one subscription and one trust gate.
         if (self.enable_steering_damping or self.enable_adaptive_grip
-                or self.enable_imu_understeer):
+                or self.enable_imu_understeer or self.enable_imu_traction
+                or self.using_fused_speed):
             self.imu_sub = self.create_subscription(
                 Imu, self.imu_topic, self.imu_callback, 10)
             self.imu_status_sub = self.create_subscription(
@@ -833,14 +872,18 @@ class GapFollowNode(Node):
         requested = {parameter.name: parameter.value for parameter in parameters}
         understeer = {name: value for name, value in requested.items()
                       if name in UNDERSTEER_DEFAULTS}
+        traction = {name: value for name, value in requested.items() if name in TRACTION_DEFAULTS}
         try:
+            self._validate_traction_parameters({
+                name: traction.get(name, getattr(self, name)) for name in TRACTION_DEFAULTS})
             self._validate_understeer_parameters({
                 name: understeer.get(name, getattr(self, name))
                 for name in UNDERSTEER_DEFAULTS})
         except ValueError as exc:
             return SetParametersResult(successful=False, reason=str(exc))
         accepted, reason = live_tuning.review(
-            self._tunables, {k: v for k, v in requested.items() if k not in understeer},
+            self._tunables, {k: v for k, v in requested.items()
+                             if k not in understeer and k not in traction},
             self._tunable_values,
             passthrough=('use_sim_time',),
             invariants=live_tuning.GAP_FOLLOW_INVARIANTS)
@@ -852,6 +895,10 @@ class GapFollowNode(Node):
             setattr(self, name, float(value))
         if understeer:
             self._restart_understeer()
+        for name, value in traction.items():
+            setattr(self, name, float(value))
+        if traction:
+            self._restart_traction()
         for name, value in accepted.items():
             tunable = self._tunables[name]
             previous = self._tunable_values[name]
@@ -871,6 +918,84 @@ class GapFollowNode(Node):
     def odom_callback(self, msg: Odometry):
         self.current_speed = float(msg.twist.twist.linear.x)
         self.last_odom_time = self.get_clock().now()
+
+    @property
+    def current_speed(self):
+        # Select at read time so a dropout switches every existing odometry
+        # consumer, even without another odometry callback arriving.
+        if self.using_fused_speed:
+            self._fused_imu_reason = self._imu_gate()[1]
+            if self._fused_imu_reason is not None:
+                return self.wheel_speed
+        return self._primary_speed
+
+    @current_speed.setter
+    def current_speed(self, value):
+        self._primary_speed = value
+
+    @property
+    def last_odom_time(self):
+        if self.using_fused_speed:
+            self._fused_imu_reason = self._imu_gate()[1]
+            if self._fused_imu_reason is not None:
+                return self.last_wheel_time
+        return self._primary_odom_time
+
+    @last_odom_time.setter
+    def last_odom_time(self, value):
+        self._primary_odom_time = value
+
+    def wheel_odom_callback(self, msg: Odometry):
+        self.wheel_speed = float(msg.twist.twist.linear.x)
+        self.last_wheel_time = self.get_clock().now()
+
+    def fused_odom_callback(self, msg: Odometry):
+        self.fused_speed = float(msg.twist.twist.linear.x)
+        self.last_fused_time = self.get_clock().now()
+
+    @staticmethod
+    def _validate_traction_parameters(values):
+        for name, value in values.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f'{name} must be finite and positive')
+        if values['imu_traction_release_slip'] >= values['imu_traction_slip_threshold']:
+            raise ValueError('imu_traction_release_slip must be below imu_traction_slip_threshold')
+
+    def _restart_traction(self):
+        self.traction_hold = gap_logic.TractionHold(
+            self.imu_traction_slip_threshold, self.imu_traction_release_slip,
+            self.imu_traction_min_speed, self.imu_traction_max_hold_sec)
+
+    def _traction_step(self, dt):
+        """Return (holding, trusted fused ramp basis or None, off reason)."""
+        if not self.enable_imu_traction:
+            return False, None, None
+        _, why = self._imu_gate()
+        if why is None:
+            if not self._odom_fresh():
+                why = 'no fresh odometry'
+            elif self.last_fused_time is None:
+                why = 'no fused odometry'
+            elif ((self.get_clock().now() - self.last_fused_time).nanoseconds / 1e9
+                  >= self.imu_traction_timeout_sec):
+                why = 'fused odometry stale'
+            elif not math.isfinite(self.fused_speed):
+                why = 'fused speed not finite'
+        if why is not None:
+            self.traction_hold.reset()
+            return False, None, why
+        wheel = self.wheel_speed if self.using_fused_speed else self.current_speed
+        if self.using_fused_speed and (self.last_wheel_time is None or
+                (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+                >= self.odom_timeout_sec or not math.isfinite(wheel)):
+            self.traction_hold.reset()
+            return False, None, 'no fresh wheel odometry'
+        holding = self.traction_hold.update(wheel, self.fused_speed, dt)
+        # No judgement near standstill/reversing; preserve the feature-off ramp.
+        basis = (self.fused_speed if wheel >= self.imu_traction_min_speed
+                 and self.fused_speed >= self.imu_traction_min_speed else None)
+        return holding, basis, None
 
     @staticmethod
     def _validate_understeer_parameters(values):
@@ -1642,13 +1767,26 @@ class GapFollowNode(Node):
         # only ever raises the basis, is clamped to max_speed so a bad reading
         # cannot inflate it, and every ceiling above still applies.
         ramp_basis = self.last_commanded_speed
-        if self._odom_fresh():
+        traction_holding, fused_basis, traction_off = self._traction_step(command_dt)
+        if fused_basis is not None:
+            ramp_basis = max(ramp_basis, min(fused_basis, self.max_speed))
+        elif self._odom_fresh():
             ramp_basis = max(
                 ramp_basis, min(abs(self.current_speed), self.max_speed))
         acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
         speed = min(desired_speed, acceleration_ceiling)
+        if traction_holding:
+            speed = gap_logic.traction_limited_speed(
+                desired_speed, self.last_commanded_speed, True)
 
         self._publish_drive(steering_angle, speed, now=now)
+        traction_text = ''
+        if self.enable_imu_traction:
+            if traction_off is not None:
+                traction_text = f', imu_traction_off: {traction_off}'
+            elif traction_holding:
+                wheel = self.wheel_speed if self.using_fused_speed else self.current_speed
+                traction_text = f', imu traction hold (slip {wheel - self.fused_speed:.2f}m/s)'
         understeer_text = ''
         if self.enable_imu_understeer:
             if understeer_off is not None:
@@ -1758,7 +1896,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{grip_text}{understeer_text}{guard_text}{steering_shape_text}{speed_shape_text}")
+            f"{damping_text}{grip_text}{understeer_text}{traction_text}{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
         # Every speed ceiling that competed for this tick, so the dashboard
@@ -2333,6 +2471,13 @@ class GapFollowNode(Node):
         if not self._intent_throttle.should_publish(now):
             return
         try:
+            if self.using_fused_speed:
+                why = self._fused_imu_reason
+                state_text = ('ok' if why is None else
+                              why.removeprefix('imu ') if why != 'imu yaw not finite' else 'fault')
+                original_reason = reason
+                reason = lambda: ((original_reason() if callable(original_reason)
+                                   else original_reason) or '') + f', fused_speed_imu: {state_text}'
             payload = schema.build(
                 'gap_follow_node',
                 state,

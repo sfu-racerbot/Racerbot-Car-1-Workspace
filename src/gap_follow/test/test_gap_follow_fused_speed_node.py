@@ -14,7 +14,7 @@ from rclpy.time import Time
 
 from gap_follow.gap_follow_node import GapFollowNode
 from test_gap_follow_steering_damping_node import (
-    _blocked_right, _capture, _feed_odom, _hold_deadman, _scan)
+    _blocked_right, _capture, _feed_imu, _feed_odom, _hold_deadman, _scan)
 
 CONFIG = str(Path(get_package_share_directory('gap_follow')) / 'config/gap_follow.yaml')
 TEST_ONLY_DRIVE = ['-p', 'drive_topic:=/test_only/drive']
@@ -26,6 +26,7 @@ SPEED = 1.0  # m/s: synthetic wheel speed; well below the open scene's caps.
 def _node(extra):
     rclpy.init(args=['--ros-args', '--params-file', CONFIG, *extra, *TEST_ONLY_DRIVE])
     n = GapFollowNode()
+    _feed_imu(n, yaw_rate=0.0, state='ok')
     try:
         # oracle: spec -- shipped gap_follow.yaml enables opponent awareness.
         assert n.get_parameter('enable_opponent_awareness').value is True
@@ -43,11 +44,17 @@ def node():
         yield n
 
 
-def test_fused_speed_subscribes_to_fused_not_wheel_odometry(node):
-    topics = {s.topic_name for s in node.subscriptions}
-    # oracle: spec -- I3's odom_topic override selects only /odom/fused.
-    assert '/odom/fused' in topics
-    assert '/odom' not in topics
+def test_fused_speed_subscribes_to_both_sources_and_default_to_wheels_once():
+    with _node(FUSED) as node:
+        topics = {s.topic_name for s in node.subscriptions}
+        # oracle: spec -- I5 controller ruling: raw wheel fallback needs both.
+        assert '/odom/fused' in topics
+        assert '/odom' in topics
+    with _node([]) as default:
+        default_topics = [s.topic_name for s in default.subscriptions]
+        # oracle: invariant: the ordinary wheel path adds no subscriptions.
+        assert default_topics.count('/odom') == 1
+        assert '/odom/fused' not in default_topics
 
 
 def test_fused_speed_drives_with_lb_held(node):
@@ -100,6 +107,7 @@ def _commands(extra, speed):
         for k in range(20):
             clock.set_ros_time_override(Time(nanoseconds=10_000_000_000 + k * 25_000_000))
             _hold_deadman(n)
+            _feed_imu(n, yaw_rate=0.0, state='ok')
             _feed_odom(n, speed)
             ranges = _blocked_right() if k < 10 else list(reversed(_blocked_right()))
             n.scan_callback(_scan(ranges))
