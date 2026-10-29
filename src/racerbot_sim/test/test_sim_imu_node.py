@@ -233,3 +233,52 @@ def test_publish_imu_false_creates_no_imu_publishers(ros_context):
     for prefix in ('', '/car2'):
         for suffix in ('data', 'bno/data', 'vesc/data', 'status'):
             assert node.count_publishers(f'{prefix}/imu/{suffix}') == 0
+
+
+def test_late_imu_status_withdrawn_when_hardware_appears_and_restored(ros_context):
+    """I1 round 2: pre-fix durable simulated ok survived the hardware block.
+
+    Run by pytest src/racerbot_sim/test/ with rb in an isolated ROS domain.
+    """
+    node, start = ros_context
+    topics = ('/imu/status', '/car2/imu/status')
+    initial = {topic: subscribe(node, topic, String) for topic in topics}
+    start('-p', 'controlled_cars:=2')
+    # oracle: healthy default IMUs must have actually offered ok on both cars
+    # before hardware arrives; startup silence cannot satisfy this regression.
+    assert spin_until(node, lambda: all(messages and
+        json.loads(messages[-1].data)['state'] == 'ok'
+        for messages in initial.values()), INTERLOCK_OPENS_SEC + 20.0)
+
+    hardware = rclpy.create_node('imu_bridge_node')
+    late = None
+    resumed = None
+    try:
+        spin_until(node, lambda: False, INTERLOCK_OPENS_SEC + 1.0)
+        late = rclpy.create_node('sim_imu_blocked_late_subscriber')
+        blocked = {topic: subscribe(late, topic, String) for topic in topics}
+        # oracle: invariant -- nothing simulated may be offered beside hardware,
+        # including a durable sample published before the interlock blocked.
+        assert LEAK_WINDOW_SEC > INTERLOCK_OPENS_SEC
+        assert not spin_until(late, lambda: any(blocked.values()), LEAK_WINDOW_SEC), {
+            topic: [message.data for message in messages]
+            for topic, messages in blocked.items()}
+
+        hardware.destroy_node()
+        hardware = None
+        resumed = rclpy.create_node('sim_imu_resumed_late_subscriber')
+        restored = {topic: subscribe(resumed, topic, String) for topic in topics}
+        # oracle: healthy default status must be offered again on BOTH topics
+        # after the clean-graph hold, even though its value has not changed.
+        assert spin_until(resumed, lambda: all(messages and
+            json.loads(messages[-1].data)['state'] == 'ok'
+            for messages in restored.values()), RESUME_WINDOW_SEC), {
+                topic: [message.data for message in messages]
+                for topic, messages in restored.items()}
+    finally:
+        if hardware is not None:
+            hardware.destroy_node()
+        if late is not None:
+            late.destroy_node()
+        if resumed is not None:
+            resumed.destroy_node()
