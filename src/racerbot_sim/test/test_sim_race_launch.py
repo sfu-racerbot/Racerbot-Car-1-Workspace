@@ -49,7 +49,8 @@ import rclpy
 import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'racerbot_sim'))
@@ -120,7 +121,9 @@ class _Probe(Node):
     def __init__(self):
         super().__init__('race_test_probe')
         self.status = []
+        self.brakes = []
         self.create_subscription(String, '/sim/status', self._on_status, STATUS_QOS)
+        self.create_subscription(Bool, '/car2/safety/brake', lambda msg: self.brakes.append(msg.data), 10)
 
     def _on_status(self, message):
         self.status.append(json.loads(message.data))
@@ -283,7 +286,6 @@ def test_integer_lap_argument_preserves_numeric_race_requirement(tmp_path):
 
 
 @pytest.mark.parametrize('argument, expected', [
-    ('opponent:=team_a', 'opponent:=team_a is added in Task R7'),
     ('opponent:=rival', "unknown opponent:='rival'"),
     ('track:=no_such_track', "track 'no_such_track'"),
 ])
@@ -296,6 +298,77 @@ def test_bad_arguments_fail_the_launch_with_a_clear_message(argument, expected):
     assert expected in output, output[-2000:]
     if argument.startswith('track:='):
         assert os.path.join('tools', 'f1tenth_sim', 'maps') in output, output[-2000:]
+
+
+@pytest.fixture
+def team_a_packages():
+    for package in ('disparity_extender', 'safety_node'):
+        try:
+            get_package_share_directory(package)
+        except PackageNotFoundError:
+            pytest.skip(f'{package} is not installed; install it to run the team A integration tests')
+
+
+def test_team_a_graph_and_short_race(tmp_path, probe, team_a_packages):
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=0.2',
+                      'record:=false', 'timeout_s:=60', f'output_dir:={tmp_path}') as proc:
+        graph = Graph(probe)
+        safety = ('/car2', 'safety_node')
+        disparity = ('/car2', 'disparity_extender_node')
+        assert graph.spin_until(lambda: proc.poll() is not None or
+                                (disparity in graph.publishers('/car2/drive')
+                                 and safety in graph.publishers('/car2/safety/brake')), 90), _tail(tmp_path / 'launch.log')
+        assert proc.poll() is None, _tail(tmp_path / 'launch.log')
+        graph.spin_for(2)
+        # oracle: race isolation contract: only car 1 publishes root drive and
+        # every team A publisher belongs to car 2, except ROS infrastructure.
+        assert graph.publishers('/drive') == [('/', 'gap_follow_node')]
+        assert graph.publishers('/car2/drive') == [disparity]
+        assert graph.publishers('/safety/brake') == []
+        for namespace, name in (safety, disparity):
+            topics = {topic for topic, _ in probe.get_publisher_names_and_types_by_node(name, namespace)}
+            assert all(t.startswith('/car2/') or t in ('/rosout', '/parameter_events') for t in topics), topics
+        for topic, node in (('/car2/scan', safety), ('/car2/scan', disparity),
+                            ('/car2/joy', safety), ('/car2/odom', safety),
+                            ('/car2/safety/brake', disparity)):
+            assert node in graph.subscribers(topic), (topic, graph.subscribers(topic))
+        for topic in ('/scan', '/joy', '/ego_racecar/odom'):
+            assert safety not in graph.subscribers(topic)
+            assert disparity not in graph.subscribers(topic)
+        assert proc.wait(timeout=150) == 0, _tail(tmp_path / 'launch.log')
+    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    # oracle: referee contract: both cars are scored and no steps are lost.
+    assert len(race['laps']) == 2
+    assert race['missed_steps'] == 0
+
+
+@pytest.mark.parametrize('held', [False, True])
+def test_team_a_deadman_isolated(tmp_path, probe, team_a_packages, held):
+    with _race_launch(tmp_path, 'track:=indoor_oval', 'opponent:=team_a', 'laps:=0.2',
+                      'record:=false', f'car2_hold_deadman:={str(held).lower()}',
+                      'timeout_s:=20', f'output_dir:={tmp_path}') as proc:
+        graph = Graph(probe)
+        deadline = time.monotonic() + 150
+        while proc.poll() is None and time.monotonic() < deadline:
+            graph.spin_for(0.2)
+        assert proc.poll() is not None, 'race did not end'
+        assert proc.returncode == 0, _tail(tmp_path / 'launch.log')
+    race = json.loads((tmp_path / 'race.json').read_text(encoding='utf-8'))
+    assert graph.spin_until(lambda: any(s['steps'] >= race['steps'] for s in probe.status), 5)
+    statuses = [s for s in probe.status if s['steps'] <= race['steps']]
+    # oracle: race contract, every scored simulator step is observed once.
+    assert race['missed_steps'] == 0
+    assert [s['steps'] for s in statuses] == list(range(1, race['steps'] + 1))
+    assert race['steps'] > 1
+    assert all(len(s['cars']) == 2 for s in statuses)
+    # oracle: deadman isolation thresholds specified for R7, in m/s.
+    assert max(s['cars'][0]['speed'] for s in statuses) > 0.5
+    speeds = [abs(s['cars'][1]['speed']) for s in statuses]
+    if held:
+        assert max(speeds) > 0.5
+        assert False in probe.brakes
+    else:
+        assert max(speeds) < 0.05
 
 
 def test_referee_creates_only_the_result_publisher():
