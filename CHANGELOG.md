@@ -6,7 +6,20 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-28 (latest) — gap_follow other-car layer on by default; follow hold, memory and outline
+## 2026-10-29 (latest) — alongside abort, and the simulator interlock's clean-graph window
+
+### gap_follow
+
+- **New: alongside abort** (`opponent_abort_speed_margin: 0.5`). If a pass is refused or abandoned while the other car is alongside, and that car's centre is ahead of this car's, this car's speed is capped 0.5 m/s below the other car's, so it drops back behind. The car behind is the only one that yields, and the cap applies only on scans that see the other car: the follow memory never holds it. Speed only. See `docs/gap-follow.md#several-cars-at-once`, step 4.
+- **New methods:** `OpponentAwareness.follow_law_cap()` (the part the follow memory may hold) and `alongside_cap()`. `follow_cap()` still returns their minimum.
+- **Test functions per file:** `test_opponent_tracking.py` 98, `test_opponent_awareness_node.py` 26, `test_gap_mirror_parity.py` 12.
+
+### racerbot_sim
+
+- **New: `interlock_clear_confirm_sec: 3.0`** in `sim_joy_node` and `gym_bridge_node`. After the 3 s discovery hold, the graph must show no car on every check for 3 s before simulated `/joy`, `/scan` or `/odom` start, and again whenever the car's drivers leave. With the hold alone, a forged `/joy` sometimes got out beside a running `urg_node`. The simulator now starts about 6 s after launch. See `docs/ros-simulator.md`.
+- Simulator ROS tests drive `/test_only/...` topics, and `test/conftest.py` fails fast without an isolated ROS domain (`ROS_DOMAIN_ID` non-zero, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`).
+
+## 2026-10-28 — gap_follow other-car layer on by default; follow hold, memory and outline
 
 The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s follow hold, a 1 s follow memory, the measured 0.31 × 0.58 m outline and a narrow-section refusal. Simulator-validated only: **not yet driven on the car.** The numbers, the rejected designs and the first-run order are in `docs/gap-follow.md#several-cars-at-once`.
 

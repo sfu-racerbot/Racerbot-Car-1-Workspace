@@ -64,7 +64,9 @@ you can forget.
 
 The interlock starts blocked and waits `interlock_discovery_hold_sec` (3 s by default) before checking the graph. Before discovery, an empty graph can look like "no car here" even when the car is present.
 
-After the hold, the graph must show no car on every check for `interlock_clear_confirm_sec` (3 s by default) before simulated `/scan`, `/odom` or `/joy` messages start, so the simulator starts about 6 s after launch. One clean check isn't enough: on the dev box, discovery took about 2.45 s, and with the hold alone a forged `/joy` sometimes got out beside a running `urg_node` (measured 2026-10-29). The same window applies whenever the car's drivers leave the graph later.
+After the hold, the graph must show no car on every check for `interlock_clear_confirm_sec` (3 s by default). Only then do simulated `/scan`, `/odom` or `/joy` messages start, so the simulator starts about 6 s after launch. The same window applies whenever the car's drivers leave the graph later.
+
+One clean check isn't enough. On the dev box, discovery took about 2.45 s, and with the hold alone a forged `/joy` sometimes got out beside a running `urg_node` (measured 2026-10-29).
 
 If the graph cannot be read, the interlock stays blocked. It continues checking after it opens. `sim_joy_node` starts its release, hold and silence scenario timers when the interlock first opens, not when the process starts.
 

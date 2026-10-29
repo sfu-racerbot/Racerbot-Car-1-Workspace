@@ -355,6 +355,10 @@ With it on, every scan:
 
    The pass must also be the same opening the car would take anyway. The check runs on every scan, so a pass under way is abandoned the moment the room narrows.
 
+   If the other car is alongside when a pass is refused or abandoned, this car drops back behind it. Alongside means its rear face is at or behind this car's front bumper. This car's speed is then capped 0.5 m/s (`opponent_abort_speed_margin`) below the other car's speed. Two rules keep this from stopping both cars:
+   - **Only the car that is behind yields:** the cap applies only when the other car's centre is ahead of this car's. When two of these cars ran side by side and each slowed below the other, both ended at zero (2026-10-29: 0 of 2 runs finished on car 1's course, reversed, with a 2.5 m/s leader).
+   - **The cap lasts only while that car is seen.** The follow memory never holds it. A stretch of wall briefly tracked as a moving object beside the car would otherwise brake it for a whole second: in simulation, 3 of 36 two-car runs on car 1's course ended wedged that way.
+
 **The other car's outline.** The layer does not use a 0.30 m disc for the other car. It uses the measured 0.31 × 0.58 m rectangle. The scan sees only the face of the other car that faces this car.
 
 The layer works out the rectangle's centre from that visible face, using the car's length and width (the support-distance rule in `inflate_predicted`). It then widens the rectangle by 0.15 m on every side, and carries it 0.8 s ahead along the other car's motion.
