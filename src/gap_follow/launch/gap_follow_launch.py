@@ -2,12 +2,13 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
+from gap_follow.launch_imu import select_imu_hardware
 
 
 def _flag(name, value):
@@ -20,7 +21,7 @@ def _flag(name, value):
     raise RuntimeError(f"{name}:={value!r}: expected 'true' or 'false'")
 
 
-def generate_launch_description():
+def generate_launch_description(imu_probe=None):
     gap_follow_config = os.path.join(
         get_package_share_directory('gap_follow'),
         'config',
@@ -43,6 +44,10 @@ def generate_launch_description():
                     'corner_speed_wide are lowered with it; above it, only '
                     'max_speed rises.')
 
+    imu_hardware_arg = DeclareLaunchArgument(
+        'imu_hardware', default_value='auto',
+        description='IMU source: auto uses simulated topics when gym_bridge_node is running, '
+                    'otherwise real hardware. true/false explicitly select real/simulated inputs.')
     steering_damping_arg = DeclareLaunchArgument(
         'steering_damping', default_value='true',
         description='true (the default since 2026-10-27): steer against the car\'s own '
@@ -83,13 +88,18 @@ def generate_launch_description():
                         speed],
         )]
         if damping or grip:
-            # The IMU stack that publishes /imu/data and /imu/status. The same
-            # include map_course_launch.py makes, so do not run both at once.
-            # Either gyro feature needs it, and both together still start one.
+            # Either gyro feature needs the estimator, but simulated IMUs
+            # already come from gym_bridge_node. Start real readers only
+            # when selected; both gyro features together still include once.
+            hardware, reason = select_imu_hardware(
+                LaunchConfiguration('imu_hardware').perform(context), probe=imu_probe)
+            source = 'real IMU hardware' if hardware == 'true' else 'simulated IMU topics'
+            actions.append(LogInfo(msg=f'IMU source: {source} ({reason}).'))
             actions.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(
                 os.path.join(get_package_share_directory('imu_bridge'), 'launch',
-                             'vehicle_state_launch.py'))))
+                             'vehicle_state_launch.py')),
+                launch_arguments={'hardware': hardware}.items()))
         return actions
 
     return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
-                              adaptive_grip_arg, OpaqueFunction(function=node)])
+                              adaptive_grip_arg, imu_hardware_arg, OpaqueFunction(function=node)])
