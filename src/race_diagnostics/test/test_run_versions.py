@@ -80,7 +80,7 @@ class _Done:
 
 
 def _line(package, version):
-    return f'{package}\t{version}\n'
+    return f'{package}\t{version}'
 
 
 def test_write_packages_writes_the_lines_in_parse_order(tmp_path):
