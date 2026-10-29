@@ -93,6 +93,33 @@ ros2 launch gap_follow gap_follow_launch.py     # second terminal
 
 Needs the F1TENTH Gym from `tools/f1tenth_sim/setup.sh` (one time).
 
+## Simulated IMU
+
+The simulator publishes an IMU (inertial measurement unit), which measures
+turn rate and acceleration, for every controlled car. Car 1 uses
+`/imu/bno/data` and `/imu/vesc/data`; `/imu/data` repeats the BNO reading.
+Car 2 has the same topics under `/car2/imu/`, and later cars use `/carN/imu/`.
+
+Each car also has an `/imu/status` topic under its own prefix. It carries
+JSON describing the primary BNO's health. The status is latched, so a
+subscriber that starts later receives the last verdict.
+
+**Terminal 2**, with the simulator running in Terminal 1 and this terminal
+sourced as above, check the sensor topics and car 1's status:
+
+```bash
+ros2 topic list -t | grep imu
+ros2 topic echo --once /imu/status
+```
+
+**Working when:** car 1's four topics appear and the status says
+`{"state": "ok", "reason": null, "imu": "bno"}`. The default race launch
+also lists `/car2/imu/data` and `/car2/imu/status`.
+
+Both default launches passed this check on 2026-10-29.
+If no topics appear, check Terminal 1 for
+a startup error; if topics exist but no data arrives, check the interlock.
+
 ## Two cars and racing
 
 Start two simulated hardware layers to check a second car's topics (named message channels, [glossary](glossary.md#topic)). This does not start driving controllers.
