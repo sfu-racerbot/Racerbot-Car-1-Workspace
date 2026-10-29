@@ -232,12 +232,18 @@ One timestamped directory per run under `~/.ros/racerbot_runs/`:
 | `launch.log` | your `tee` | What every node decided, tick by tick |
 | `events.jsonl` | `race_diag_node` | Machine-readable pipeline state, **pose lag**, watchdog fires |
 | `probe.log` | `race_diag_node` stdout | Same, human-readable |
+| `system/proc.jsonl` | `system_log`, every second | CPU use, memory and thread count for each named ROS node process. CPU use of 100% means one full core. Was a node starved of CPU? |
+| `system/tegrastats.log` | The Jetson's `tegrastats`, every second, when available on the car | CPU use per core, GPU use, memory and temperatures |
 | `bag/` | `ros2 bag record` | Everything, replayable offline. Includes both odometries (`/odom`, `/odom/imu`), both IMUs, SLAM's `/pose` and pose graph, and every node's log on `/rosout` |
 | `metadata/git/` | `record_run.py` at start | Which code ran: HEAD, branch, `git status` and the full uncommitted diff of `racerbot-ws` and `~/imu-calibration`. Untracked files are listed, not copied |
 | `metadata/files/` | `record_run.py` at start | Copies of imu-calibration's `car.yaml` and calibration JSONs: the IMU mounts and calibration, which no ROS parameter holds |
-| `metadata/params/` | `snapshot_params`, 15 s in | Every node's parameters, one YAML per node, in `ros2 param dump` format (usable as `--params-file`). Later changes are in the bag's `/parameter_events` |
+| `metadata/packages.txt` | `record_run.py` at start | The installed version of every `ros-jazzy-*` apt package, with `slam_toolbox` listed first. Git state cannot say which `slam_toolbox` ran, because it is apt-installed, not code in this repo — so this file is the answer to "did a package upgrade change SLAM" |
+| `metadata/submodules.txt` | `record_run.py` at start | For each submodule in `.gitmodules` — team A's `src/racerbot_a` and B's `src/racerbot_b` included — the commit that was checked out, the commit the workspace itself records for it, and whether it is dirty. A `MOVED: <path>` line at the end names any submodule whose checked-out commit differs from what the workspace expects, which usually means someone advanced it without committing the change in the main repo |
+| `metadata/params/` | `snapshot_params`, from 15 s in and every 2 s for the whole run | Each node's parameters in `ros2 param dump` YAML format (usable as `--params-file`). A node that starts later gets a file when it appears. A restarted node gets `<name>.<n>.yaml`. Namespaced nodes use `ns__name.yaml`; names that collide get `~2`, `~3`, and so on before any restart number. Later parameter changes are in the bag's `/parameter_events` |
 | `map.pgm` / `map.yaml` | `slam_toolbox` save | The map as SLAM saw it |
 | `raceline_*.csv` | `auto_map_race_node` | The line that was generated and driven. `raceline_raw.csv` is the unmodified recording and is written even when the cleanup *refuses* the run, so a refusal can be plotted against the map |
+
+If `tegrastats` is missing, the recorder logs a warning and continues recording.
 
 ### Why the probe exists at all
 
@@ -373,6 +379,96 @@ the log line reports every one as `value/limit`:
 drove **114 m without closing a lap** because heading error was 30.2°
 against a 30.0° limit while every other gate had passed long before —
 invisible unless you read that one field.
+
+---
+
+## SLAM report
+
+After the car has stopped and the recording has finished, use this report to
+check how [SLAM](glossary.md#slam) built the map. It reads the recorded bag and
+does its analysis afterwards, so do not run it while the car is driving or
+mapping.
+
+In a terminal, from the workspace root, replace `RUN_DIR` with the path to the
+recorded run. The first read needs ROS sourced; later reads use cached data in
+the run's `analysis/` directory.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 tools/run_analysis/slam_report.py RUN_DIR
+```
+
+The command prints seven sections and writes `slam_report.txt`, `summary.json`
+and available PNG plots under `RUN_DIR/analysis/slam_report/`. To count loop
+closures, add `--log LOG_PATH` with the path to the launch terminal log. Without
+that log, the loop-closure count is unknown. The command uses `launch.log` in
+the run directory when it exists. Add `--refresh` to reread the bag, or
+`--no-plots` to skip PNGs.
+
+To compare two runs, replace `RUN_A`, `RUN_B` and `OUTPUT_DIR` with paths in
+this terminal command:
+
+```bash
+python3 tools/run_analysis/slam_report.py --compare RUN_A RUN_B --out OUTPUT_DIR
+```
+
+The comparison prints the numbers side by side and writes overlay plots to the
+output directory. It does not write into either run.
+
+### Reading the seven sections
+
+1. **Setup** compares SLAM's configured odometry frame with the frame in the
+   recorded transforms. A mismatch is flagged. It also gives wheel
+   [odometry](glossary.md#odometry--odom) distance and mean and maximum speed
+   while moving faster than 0.3 m/s.
+2. **Heading drift** shows how far two heading estimates drift apart after
+   starting at the same difference. Smaller differences are generally better,
+   but SLAM uses the odometry it was given, so agreement alone does not prove
+   either estimate is correct.
+3. **Corrections and loop closures** counts changes SLAM made to its map
+   transform, the largest movement and turn, and jumps over 0.3 m and 1.5 m.
+   A Ceres solve in the launch log is used as a proxy for a loop closure.
+4. **Laps** lists each closed lap's distance, closest approach to its start,
+   corrections absorbed and quality verdict. Laps before the last requested
+   lap are not judged. A judged lap is marked failed when the supervisor logs
+   a failure; it may be accepted anyway at the maximum lap count, which the
+   report also says. A judged lap with no failure is marked passed only when a
+   later message confirms that its racing profile was written. Without that
+   evidence, its verdict is unknown. So each lap gets exactly one of "not
+   judged", "passed", "failed", "failed (accepted at the ceiling)" or
+   "unknown", always from what the supervisor logged.
+5. **Map consistency** is the percentage of finite LiDAR endpoints that land
+   on or within one grid cell of an occupied wall in the final map. A higher
+   percentage means more of what the LiDAR saw lines up with those walls. It
+   is shown for the whole run and for each lap window. Each lap's scans are
+   placed using the poses SLAM published at that time, then compared with the
+   final map. Later loop closures can move the map, so early laps may score
+   lower even when the final map is not wrong. In the 19:49 run, laps 1 and 2
+   scored 19–27%, while lap 4 scored 55%. Compare corresponding laps between
+   runs rather than treating an early-to-late difference as a map fault.
+6. **Scan drops** counts dropped scan messages recorded on `/rosout`. The
+   10-second bins also show slam_toolbox CPU use when a system log exists;
+   100% means one full CPU core. A missing system log leaves CPU unknown.
+7. **Wheel vs scan-matched distance** compares the wheel path with SLAM's
+   map-frame path over the same time span. A ratio near 1 means their lengths
+   agree, though it does not establish that either path is accurate.
+
+For example, run `20261026-194913` used `odom_imu` in both the parameter
+snapshot and the transforms. The final heading difference between `/odom/imu`
+and SLAM was −16.44°, compared with 102.61° for `/odom` and SLAM. The report
+found 32 scan drops, but that older recording has no system log, so CPU use
+cannot be checked. Its map consistency was 34.1% overall, and three corrections
+moved the estimated car position by more than 1.5 m. Those low agreement and
+large corrections are reasons to investigate, rather than a healthy-map
+verdict. Laps 3 and 4 failed their heading quality check at 29.5° and 29.2°
+against a 15° limit; the run did not save a map.
+
+### Limitations
+
+The final map and SLAM poses are estimates, so consistency is not independent
+proof of map accuracy. Missing inputs are labelled in the report. If SLAM did
+not map the run, the report says so and still shows the other available data.
 
 ---
 

@@ -204,6 +204,45 @@ def parse_lap_progress(line: str):
     }
 
 
+def parse_lap_closed(line):
+    """Extract the recorded closure's distance, turning and correction counts."""
+    number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
+    pattern = (r'Closed mapping lap (\d+)/(\d+) detected \('
+               + number + r'm, ' + number + r'deg of turning, '
+               + number + r' revolutions, (\d+) samples, closest approach to the start '
+               + number + r'm against a ' + number + r'm gate, (\d+) SLAM corrections absorbed')
+    match = re.search(pattern, line) if isinstance(line, str) else None
+    if not match:
+        return None
+    lap, total, distance, turn, revolutions, samples, closest, gate, corrections = match.groups()
+    return {'lap': int(lap), 'of': int(total), 'distance_m': float(distance),
+            'turn_deg': float(turn), 'revolutions': float(revolutions),
+            'samples': int(samples), 'closest_m': float(closest), 'gate_m': float(gate),
+            'corrections': int(corrections)}
+
+
+def parse_lap_quality(line):
+    """Extract a failed lap-quality check, if present."""
+    # auto_map_race_node.py:1623-1654 logs failures but has no passing-quality line.
+    number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
+    pattern = (r'Lap (\d+) did not pass the quality check \((\w+)='
+               + number + r'deg > ' + number + r'deg')
+    match = re.search(pattern, line) if isinstance(line, str) else None
+    if not match:
+        return None
+    lap, metric, value, limit = match.groups()
+    return {'lap': int(lap), 'passed': False, 'metric': metric,
+            'value': float(value), 'limit': float(limit),
+            'accepted_at_ceiling': bool(re.search(
+                r'\d+-lap ceiling is reached -- accepting it anyway', line))}
+
+
+def parse_lap_unjudged(line):
+    """Parse the supervisor's intermediate-lap message."""
+    match = re.search(r'Lap (\d+)/(\d+) closed; keep holding LB\.', line) if isinstance(line, str) else None
+    return {'lap': int(match[1]), 'of': int(match[2]), 'judged': False} if match else None
+
+
 def blocking_gate(progress) -> str:
     """Which single gate is keeping this lap from closing, or '' if none.
 
