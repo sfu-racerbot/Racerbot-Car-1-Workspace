@@ -1,4 +1,12 @@
-"""Exact replay contracts. Runner: rb python3 -m pytest tools/run_analysis/tests/."""
+"""Exact replay contracts. Runner: rb python3 -m pytest tools/run_analysis/tests/.
+
+S4 step 6 mutation checks, observed failing individually and reverted:
+  a. silently skip missing scans -> missing_scan_refused_including_first_pose (both cases)
+  b. omit yaw wrapping -> yaw_wrap (359.98 degrees instead of 0.02)
+  c. omit PGM row flip -> map_bytes_and_yaml (first raster byte differs)
+  d. omit feeder child_env -> exact_children_isolated (domain 79 instead of 77)
+The added bracket and pose-edge tests also failed against deliberate function stubs.
+"""
 import math
 import os
 import sys
