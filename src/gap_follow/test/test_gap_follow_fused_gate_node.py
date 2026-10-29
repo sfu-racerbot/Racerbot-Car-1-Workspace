@@ -168,3 +168,71 @@ def test_fused_intent_refreshes_imu_state_on_deadman_denied_scan():
         assert commands[-1].drive.steering_angle == 0.0
         assert n.last_decision_state == 'deadman_released'
         assert 'fused_speed_imu: ok' in intents[-1]['reason']
+
+
+def _intent_gate_failure_history(held, broken):
+    with _node(False, FUSED) as n:
+        commands = _capture(n)
+        intents = _capture_intent(n)
+        original_gate = n._imu_gate
+        original_intent = n._publish_intent
+        publishing_intent = False
+        failure_after_commands = []
+
+        def intent_with_failure(*args, **kwargs):
+            nonlocal publishing_intent
+            publishing_intent = True
+            try:
+                return original_intent(*args, **kwargs)
+            finally:
+                publishing_intent = False
+
+        def raising_gate():
+            # Released LB has no control-gate consumers: every call is purely
+            # diagnostic. With LB held, preserve real control-gate calls and
+            # fail only inside the real intent path. The drive decision log
+            # also reads gated speed after publishing, so ordering alone is
+            # insufficient to identify the diagnostic-only refresh.
+            if not held or publishing_intent:
+                failure_after_commands.append(len(commands))
+                raise RuntimeError('injected diagnostic IMU gate failure')
+            return original_gate()
+
+        if broken:
+            n._imu_gate = raising_gate
+            n._publish_intent = intent_with_failure
+        limit = n._intent_failures.max_failures
+        history = []
+        for tick in range(limit + 2):
+            _feed_odom(n, 1.8)
+            _odom(n.wheel_odom_callback, 2.0)
+            _feed_imu(n, yaw_rate=0.0)
+            _hold_deadman(n, held=held)
+            _tick(n, tick)
+            assert len(commands) == tick + 1
+            history.append((commands[-1].drive.speed,
+                            commands[-1].drive.steering_angle,
+                            n.last_decision_state))
+        return (history, n._intent_failures.disabled,
+                failure_after_commands, len(intents), limit)
+
+
+@pytest.mark.parametrize('held', [False, True])
+def test_fused_intent_gate_exception_disables_intent_not_driving(held):
+    baseline, baseline_disabled, _, baseline_intents, limit = (
+        _intent_gate_failure_history(held, broken=False))
+    actual, disabled, failures, intents, _ = (
+        _intent_gate_failure_history(held, broken=True))
+    # oracle: spec docs/drive-intent.md safety contract: diagnostic failures
+    # cannot change any command or exit the node, including subsequent ticks;
+    # failures occur strictly after publication and eventually disable intent.
+    assert actual == baseline
+    assert not baseline_disabled
+    assert baseline_intents == limit + 2
+    assert disabled
+    assert intents == 0
+    assert failures == list(range(1, limit + 1))
+    if held:
+        assert all(speed > 0.0 for speed, _, _ in actual)
+    else:
+        assert actual == [(0.0, 0.0, 'deadman_released')] * (limit + 2)
