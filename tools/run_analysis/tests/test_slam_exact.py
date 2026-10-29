@@ -131,3 +131,42 @@ def test_nonfinite_pose_refused(value):
     # oracle: invariant - undefined error must not appear as zero error.
     with pytest.raises(ValueError, match='non-finite.*10'):
         replay.pose_sequence_error([(10, 0, 0, 0)], [(10, value, 0, 0)])
+
+
+def _write_map_bag(path, grids):
+    import rosbag2_py
+    from nav_msgs.msg import OccupancyGrid
+    from rclpy.serialization import serialize_message
+    writer = rosbag2_py.SequentialWriter()
+    writer.open(rosbag2_py.StorageOptions(uri=str(path), storage_id='mcap'),
+                rosbag2_py.ConverterOptions('', ''))
+    writer.create_topic(rosbag2_py.TopicMetadata(
+        id=0, name='/map', type='nav_msgs/msg/OccupancyGrid', serialization_format='cdr'))
+    for index, grid in enumerate(grids):
+        msg = OccupancyGrid()
+        msg.info.width, msg.info.height = 3, 2
+        msg.info.resolution = .5
+        msg.info.origin.position.x, msg.info.origin.position.y = -2., 3.
+        msg.info.origin.orientation.w = 1.
+        msg.data = grid
+        writer.write('/map', serialize_message(msg), index + 1)
+    del writer  # close and flush before the real reader opens it
+
+
+def test_fallback_uses_last_map(tmp_path):
+    # oracle: spec - use the LAST replay map, not the first; pixel conversion closed form.
+    bag = tmp_path / 'bag'
+    _write_map_bag(bag, [[0] * 6, [0, 100, -1, -1, 0, 100]])
+    out = tmp_path / 'out'
+    assert replay.save_map_from_bag(bag, out) == 'from_bag'
+    assert (out / 'map.pgm').read_bytes() == b'P5\n3 2\n255\n' + bytes([205, 254, 0, 254, 0, 205])
+    assert yaml.safe_load((out / 'map.yaml').read_text())['origin'] == [-2, 3, 0]
+
+
+def test_fallback_without_map(tmp_path):
+    # oracle: invariant - no recorded map cannot be reported as saved.
+    bag = tmp_path / 'bag'
+    _write_map_bag(bag, [])
+    out = tmp_path / 'out'
+    assert replay.save_map_from_bag(bag, out) is False
+    assert not out.exists()

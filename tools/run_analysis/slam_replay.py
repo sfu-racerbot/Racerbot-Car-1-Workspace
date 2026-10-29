@@ -190,6 +190,20 @@ def bag_pose_rows(bag):
     return rows
 
 
+def save_map_from_bag(bag, out_dir):
+    """Save the last recorded /map once the recorder has closed and flushed its bag."""
+    import numpy as np
+    last = None
+    for _, msg in bag_messages(bag, ['/map']):
+        last = msg
+    if last is None:
+        return False
+    grid = np.asarray(last.data).reshape(last.info.height, last.info.width)
+    origin = last.info.origin.position
+    map_from_bag_files(grid, last.info.resolution, (origin.x, origin.y), out_dir)
+    return 'from_bag'
+
+
 def bag_exact_plan(bag):
     stamps = {'/scan': [], '/pose': []}
     for topic, msg in bag_messages(bag, stamps):
@@ -617,6 +631,7 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     children: list[_Child] = []
     status, error = 'ok', None
     map_saved = posegraph_saved = False
+    map_save_exhausted = False
     exact = rate is None
     try:
         relay = _start(children, 'odom_tf_relay',
@@ -677,8 +692,9 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
         if map_saved:
             log(f'map saved on attempt {attempt}')
         else:
-            log(f'WARNING: map.yaml was not written in {MAP_SAVE_ATTEMPTS} attempts; the replay goes on '
-                'without it, and the map is still on /map in the bag')
+            map_save_exhausted = True
+            log(f'map saver exhausted {MAP_SAVE_ATTEMPTS} attempts; will save the last /map '
+                'after the recorder has flushed its bag')
         _require_slam(slam, env)
         try:
             _service_call(SERIALIZE_MAP, {'filename': str(out / 'posegraph')}, env, log)
@@ -699,6 +715,9 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     finally:
         for child in reversed(children):
             log(f'stopped {child.name} with exit {_stop(child)}')
+        if map_save_exhausted and (out / 'bag' / 'metadata.yaml').is_file():
+            map_saved = save_map_from_bag(out / 'bag', out)
+            log('map saved from the replay bag' if map_saved else 'WARNING: replay bag has no /map to save')
         log(f'replay {status}: {out}')
         summary = {
             'mode': 'exact' if exact else 'rate',
