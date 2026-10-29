@@ -181,7 +181,7 @@ Give the team the order: two-car wheels-off check, then a slow two-car floor run
 
 ## Outcome and lessons (2026-10-29)
 
-**Status:** R1-R7 done on `oc/part-b1-racing`, merged into `part-b1-racing`. R8 dropped. R9 handed to the team (outline item B10). The ledger with every ruling is `.oc-runs/part-b1-racing/progress.md` on the dev box.
+**Status:** R1-R7 done, merged to `main` on 2026-10-29 as PR #6 (`7842762`). R8 dropped. R9 handed to the team (outline item B10). The ledger with every ruling is `.oc-runs/part-b1-racing/progress.md` on the dev box.
 
 ### What changed from the plan
 
@@ -196,6 +196,7 @@ Give the team the order: two-car wheels-off check, then a slow two-car floor run
   - As first written, it stalled both cars: side by side, each capped below the other, down to zero (car 1's course reversed, 2.5 m/s leader: 0 of 2 finished). Now only the car whose centre is behind yields.
   - A wall segment briefly tracked as a mover beside the leader fired the abort for 2 ticks, and the 1 s follow memory held it, which led to a wedge (33 of 36 runs finished, against 36 of 36 without the abort). Now the memory holds only the follow law, and the abort applies only on scans that see the car.
 - **The simulator interlock got a clean-graph window (2026-10-29):** discovery took about 2.45 s against a 3 s hold, and a forged `/joy` occasionally got out beside a live `urg_node`. The graph must now read clean for 3 s after the hold.
+  - That made the interlock ROS test's 5 s "no leak" watch end before the simulator could open, so it would have passed without testing anything. The user approved a longer watch under Hard rule 2, and the windows are now computed from the nodes' own defaults (`LEAK_WINDOW_SEC` in `test_controlled_cars.py`). A late-leak break with a 15 s confirmation got past the old hard-coded 10 s window and is caught by the computed one.
 - **R7:** team A's `disparity_extender` hits the wall within 3-5 s in `racerbot_sim`. It turns in late at 3.0 m/s and asks for 0.56-0.67 rad, while car 1's servo stops at 0.45-0.51 rad. Car 1 ran those races with awareness off.
 - **R8 dropped** (user, 2026-10-28): no copy or edit of team A's code. They run from their own launch files under a `/car2` namespace with remaps, with their own deadman on, fed a forged `/car2/joy`.
 

@@ -17,6 +17,7 @@ for changes the team made.
 ### racerbot_sim
 
 - **New: `interlock_clear_confirm_sec: 3.0`** in `sim_joy_node` and `gym_bridge_node`. After the 3 s discovery hold, the graph must show no car on every check for 3 s before simulated `/joy`, `/scan` or `/odom` start, and again whenever the car's drivers leave. With the hold alone, a forged `/joy` sometimes got out beside a running `urg_node`. The simulator now starts about 6 s after launch. See `docs/ros-simulator.md`.
+- The interlock ROS test's "no leak" watch is computed from the nodes' own defaults (hold + confirmation + 4 s, so 10 s today). Raising either default lengthens the watch instead of letting the test pass without checking anything.
 - Simulator ROS tests drive `/test_only/...` topics, and `test/conftest.py` fails fast without an isolated ROS domain (`ROS_DOMAIN_ID` non-zero, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`).
 
 ## 2026-10-28 — gap_follow other-car layer on by default; follow hold, memory and outline
