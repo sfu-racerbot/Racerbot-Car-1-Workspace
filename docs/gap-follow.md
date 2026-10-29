@@ -458,19 +458,27 @@ The layer is on by default, so the `--set` only restates the default. To check t
 
 ### Racing team A in the simulator
 
-Four simulated races compared team A's shipped controller and safety parameters with car 1's shipped `gap_follow.yaml`. Each was set to 3 laps. These results are simulation only; they do not predict a physical race.
+Four simulated races compared team A's shipped controller and safety parameters with car 1's `gap_follow.yaml`, with opponent awareness off. Each was set to 3 laps. These results are simulation only; they do not predict a physical race.
 
 Team A's car touched a wall in every race, ending it before either car finished. These results were measured on 2026-10-28 with team A at commit `6bef23d`. Progress is rounded to three decimal places.
 
 To repeat all four races, complete the [simulator and team A setup](ros-simulator.md#race-team-a) first. Run the commands one at a time; each race ends before the next starts.
 
+**Terminal 1 — parameter copy**, from the workspace root: make a copy with awareness off to match the recorded races.
+
+```bash
+sed 's/^\([[:space:]]*enable_opponent_awareness:\) true/\1 false/' src/gap_follow/config/gap_follow.yaml > /tmp/gap-follow-team-a.yaml
+```
+
+**Working when:** `/tmp/gap-follow-team-a.yaml` exists and its `enable_opponent_awareness` entry reads `false`. If the source file is not found, check that the terminal is at the workspace root.
+
 **Terminal 1 — races**, from the workspace root, with ROS and the workspace sourced and no real drivers running:
 
 ```bash
-ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300
-ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300
-ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300
-ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=car1_course_2026_10_26 opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=false timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
+ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
 ```
 
 **Working when:** each race prints a standings table and writes a `race.json` under `~/.ros/racerbot_sim/races/`. A wall contact ends the race early. **If it doesn't:** check the terminal for missing team A packages or a hardware interlock message. Timing can vary between runs.
@@ -483,6 +491,8 @@ ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a 
 | `indoor_wide` | swapped | 2.850 | 0.146 | 0.162 |
 
 **Car 1's awareness setting in these four races: off.** They ran before the default changed on 2026-10-28, so car 1's `gap_follow` had `enable_opponent_awareness` off in all four.
+
+A rerun with today's defaults, which enable opponent awareness, may differ from this table.
 
 Normal starts put car 1 first; swapped starts put team A first. In all four files, car 2 has wall contact, neither car has car contact, both finish times are `null`, and `winner` is `null`.
 
