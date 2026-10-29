@@ -34,3 +34,15 @@ def test_missing_scans_keeps_partial_report_and_cli(tmp_path, capsys):
     with pytest.raises(ValueError, match='varying beam counts'):
         report.load_inputs(tmp_path, load_slam=no_slam, load_scans=malformed,
                            load_rosout=lambda p: [])
+
+
+def test_scan_drops_only_count_slam_toolbox_logger(tmp_path):
+    text = 'Message Filter dropping message: queue full'
+    records = [dict(t=1, name='slam_toolbox', msg=text),
+               dict(t=2, name='other_node', msg=text),
+               dict(t=3, name='slam_toolbox', msg='other message')]
+    run = report.load_inputs(tmp_path, load_slam=lambda p: {},
+                             load_scans=lambda p: None, load_rosout=lambda p: records)
+    # oracle: slam_launch.py names the node slam_toolbox; only its drop counts.
+    assert run['drops'] == [1]
+    assert report.build_report(run)[1]['Scan drops']['count'] == 1

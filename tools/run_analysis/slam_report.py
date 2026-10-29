@@ -243,7 +243,7 @@ def load_inputs(run_dir, log_path=None, load_slam=None, load_scans=None, load_ro
         q = parse_lap_quality(msg)
         if q:
             quality[q['lap']] = q
-        if 'Message Filter dropping message' in msg:
+        if record.get('name') == 'slam_toolbox' and 'Message Filter dropping message' in msg:
             drops.append(record['t'])
     # Launch output supplements rosout; its lap times are only needed if rosout lacks one.
     latest_lap = None
