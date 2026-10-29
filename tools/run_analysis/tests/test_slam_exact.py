@@ -346,3 +346,11 @@ def test_all_scans_keeps_recorded_admission():
     unchanged, audit = replay.exact_admission_parameters(params, 'all-scans')
     assert unchanged == params
     assert audit == {}
+
+
+def test_admission_audit_uses_snapshot_not_profile():
+    # oracle: spec - 'recorded' names the source snapshot, even if a profile changed a value.
+    params = {'slam_toolbox': {'ros__parameters': {'throttle_scans': 9}}}
+    changed, audit = replay.exact_admission_parameters(params, 'forced', {'throttle_scans': 2})
+    assert changed['slam_toolbox']['ros__parameters']['throttle_scans'] == 1
+    assert audit['throttle_scans'] == {'recorded': 2, 'override': 1}

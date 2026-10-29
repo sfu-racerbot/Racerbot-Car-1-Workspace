@@ -600,6 +600,54 @@ matches a distinct recorded scan. The SLAM report's **314 updates** count
 changes between successive `map → odom_imu` corrections; the initial
 correction is identity. That count does not mean a pose lacks its scan.
 
+#### Forced-admission result
+
+The `forced1` replay completed with **315 matched poses, none missing and none
+extra**. It sent 318 scans: the 315 planned inputs and three sacrificial scans,
+which produced no poses. All 318 had callback receipts. The map and pose graph
+were saved, and `exact.admission_overrides` records each changed gate and its
+original value.
+
+**The 1 mm / 0.1° bar was not met.** Maximum errors were **2.246775 m** and
+**3.625845°**, both at pose 59. The first exceedance was pose **20**, stamp
+**1793069383585897818 ns**, at **0.00998585 m** and **0.199962°**.
+
+The error history below uses one-based pose indices and rounded values.
+
+| Pose | Position error (m) | Yaw error (°) |
+|---|---:|---:|
+| 2 | 0.00004318 | < 0.000001 |
+| 10 | 0.00012115 | < 0.000001 |
+| 19 | 0.00000583 | < 0.000001 |
+| 20 | 0.00998585 | 0.199962 |
+| 50 | 0.01999860 | 0.399925 |
+| 59 | 2.24677468 | 3.625845 |
+| 100 | 0.12057477 | 0.586101 |
+| 315 | 0.72786463 | 0.065573 |
+
+There is a measurable input difference before scan matching: replay
+interpolates the composed `/odom/imu` pose, while the car's recorded TF tree
+composes separately interpolated `odom_imu → odom` and `odom → base_link`
+transforms. At pose 20, their odometry guesses differ by **0.00003035 m**,
+with no measured yaw difference.
+
+The first yaw discrepancy is one fine-search angular step, **0.00349 rad**
+(0.199962°). Karto passes this configured value as the angular resolution in
+[`Mapper.cpp:624–628`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/lib/karto_sdk/src/Mapper.cpp#L624-L628).
+Small interpolation differences selecting a different scan-match peak are the
+best explanation for the early divergence; this is evidence of sensitivity,
+not proof that every later error has the same cause.
+
+Ceres threading can also affect numerical reproducibility: reductions are not
+bit-identical across thread counts. In 2.8.5,
+[`ceres_solver.cpp:166`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/solvers/ceres_solver.cpp#L166)
+hard-codes `num_threads = 50`; the replay log reports Ceres capping that to
+**8**. The plugin exposes no thread-count parameter, so a controlled one-thread
+replay was not available. The car's effective thread count is unknown, and
+threading has not been isolated as the cause of the later errors.
+
+#### All-scans timing experiment
+
 The all-scan replay with slam_toolbox **2.8.5** sent **973 scans**, then stopped
 after **11 consecutive planned-pose timeouts**. Its bag contains **12 extra
 poses and no matching pose stamps**.
@@ -636,9 +684,10 @@ unbracketed scans** were also sent. A full feed would send **99 unbracketed
 scans**, including the final scan after odometry ends, but the consecutive
 timeout guard stopped this attempt before that final scan.
 
-Its
-`exact.lookahead_samples` count is **867**. The replay output label is
-`all-scans1`; the measured values above come from its `replay.json` and bag.
+Its `exact.lookahead_samples` count is **867**. The original output label was
+`all-scans1`. A repeat with the explicit `--exact-mode all-scans` flag, labelled
+`all-scans2`, reproduced these counts and retained all four recorded admission
+values with `exact.admission_overrides: {}`.
 
 ### When map saving fails
 
