@@ -26,7 +26,7 @@ What each does, how to turn each off, the results, and the order to bring them u
 
 Turn it off with `opponent_awareness:=false` on `gap_follow_launch.py`. The mapping launches (`map_course`, `auto_map_race`, `autonomous_mapping_launch.py`) read this YAML too, but they turn the layer off, because mapping is always one car.
 
-Each of them takes `opponent_awareness`, which defaults to `false`; `opponent_awareness:=true` turns the layer on there. TODO(verify-R2d): the argument is added by a separate code change.
+Each of them takes `opponent_awareness`, which defaults to `false`; `opponent_awareness:=true` turns the layer on there.
 
 The details and the first-run order are in [docs/gap-follow.md](../../docs/gap-follow.md#several-cars-at-once).
 

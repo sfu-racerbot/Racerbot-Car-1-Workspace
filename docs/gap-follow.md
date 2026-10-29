@@ -101,8 +101,8 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 - `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
 - `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does, so do not run the two together.
-- The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read. TODO(verify-R2d): the pass is in the separate code change.
-- Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run. TODO(verify-R2d): the argument is in the same separate code change; check the three launch files against these two bullets once it lands.
+- The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read.
+- Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run.
 
 ### Before the first run on the car
 

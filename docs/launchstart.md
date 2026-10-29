@@ -127,9 +127,9 @@ Opponent awareness is on by default, and it has only been tested in the simulato
 
 **Before you start:** put the car on the track, pointing the way it should lap.
 
-**Opponent awareness is off in mapping.** `map_course` starts `gap_follow` from `gap_follow.yaml`, but the mapping launches turn the layer off again, because mapping is always one car (decided 2026-10-28). Changing `enable_opponent_awareness` in the YAML does not change mapping. TODO(verify-R2d): this depends on the separate code change.
+**Opponent awareness is off in mapping.** `map_course` starts `gap_follow` from `gap_follow.yaml`, but the mapping launches turn the layer off again, because mapping is always one car (decided 2026-10-28). Changing `enable_opponent_awareness` in the YAML does not change mapping.
 
-To map with the layer on, add `opponent_awareness:=true` to the `map_course` command. TODO(verify-R2d): this argument is added by a separate code change, so check it against the three launch files once it lands. If `opponent mode=` shows with no other car on the track, let go of LB, then relaunch without `opponent_awareness:=true`.
+To map with the layer on, add `opponent_awareness:=true` to the `map_course` command. If `opponent mode=` shows with no other car on the track, let go of LB, then relaunch without `opponent_awareness:=true`.
 
 **Terminal 1** (leave it running for mapping *and* racing):
 
@@ -250,7 +250,7 @@ What the steering laws are: [steering-laws.md](steering-laws.md). A better racin
 
 ## Map and race in one go
 
-The same mapping, but it switches straight to racing as soon as lap 2 is clean, with no restart. Starts the hardware too. Opponent awareness is off during its mapping laps too; see [Map a course](#map-a-course-3-laps-then-stop). `opponent_awareness:=true` turns it on there. TODO(verify-R2d): `auto_map_race_launch.py` takes this argument in the separate code change.
+The same mapping, but it switches straight to racing as soon as lap 2 is clean, with no restart. Starts the hardware too. Opponent awareness is off during its mapping laps too; see [Map a course](#map-a-course-3-laps-then-stop). `opponent_awareness:=true` turns it on there.
 
 **Terminal 1:**
 

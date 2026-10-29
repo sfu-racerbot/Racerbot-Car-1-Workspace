@@ -22,7 +22,7 @@ The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s fol
 
 ### racerbot_launch
 
-- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML and turn the other-car layer off for their mapping laps, because mapping is always one car. Each takes an `opponent_awareness` argument that defaults to `false`; `opponent_awareness:=true` turns the layer on. TODO(verify-R2d): the argument is in a separate code change; check the three launch files against this bullet once it lands.
+- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML and turn the other-car layer off for their mapping laps, because mapping is always one car. Each takes an `opponent_awareness` argument that defaults to `false`; `opponent_awareness:=true` turns the layer on.
 
 ### Needs on-car validation
 
