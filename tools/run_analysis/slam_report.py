@@ -456,7 +456,7 @@ def main(argv=None, load_slam=None, load_scans=None, load_rosout=None):
             reports = [build_report(run)[1] for _, run in runs]
             print(f'{paths[0].name} | {paths[1].name}')
             for section in reports[0]:
-                print(f'{section}: {json.dumps(reports[0][section], default=_json_default)} | {json.dumps(reports[1][section], default=_json_default)}')
+                print(f'{section}: {json.dumps(_json_clean(reports[0][section]))} | {json.dumps(_json_clean(reports[1][section]))}')
             if not args.no_plots:
                 _plots(runs, out)
         return 0
@@ -466,17 +466,21 @@ def main(argv=None, load_slam=None, load_scans=None, load_rosout=None):
     out.mkdir(parents=True, exist_ok=True)
     text = '\n'.join(lines) + '\n'
     (out / 'slam_report.txt').write_text(text)
-    (out / 'summary.json').write_text(json.dumps(summary, indent=2, default=_json_default) + '\n')
+    (out / 'summary.json').write_text(json.dumps(_json_clean(summary), indent=2, allow_nan=False) + '\n')
     if not args.no_plots:
         _plots([(Path(args.run).name, run)], out)
     print(text, end='')
     return 0
 
 
-def _json_default(value):
+def _json_clean(value):
+    if isinstance(value, dict):
+        return {key: _json_clean(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_clean(item) for item in value]
     if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f'cannot serialize {type(value).__name__}')
+        value = value.item()
+    return None if isinstance(value, float) and not math.isfinite(value) else value
 
 
 if __name__ == '__main__':
