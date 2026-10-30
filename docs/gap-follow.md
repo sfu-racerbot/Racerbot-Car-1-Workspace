@@ -755,7 +755,8 @@ ros2 launch gap_follow gap_follow_launch.py
 
 To turn the gyro term off, add `steering_damping:=false` to the launch line.
 The IMU stack starts when any of `steering_damping`, `adaptive_grip`, `fused_speed`,
-`imu_understeer` or `imu_traction` is on, and stops only when all five are off.
+`imu_understeer`, `imu_traction` or `imu_impact_stop` is on.
+The stack is not started when all six are off.
 
 Do not also run `map_course`. It starts the same IMU stack, and two copies would fight over the sensor. Do not run `teleop_launch.py` beside it either: its `/teleop` always wins the mux, as in [Recording a floor run](#recording-a-floor-run).
 
@@ -884,7 +885,7 @@ TODO(verify): the simulator's results for the adaptive grip are not written in t
 `fused_speed:=true` makes `gap_follow` read its speed from `/odom/fused` instead of `/odom`. The fused speed combines wheel speed with the BNO085 IMU's forward acceleration, so it can account for wheelspin. It stays within 0.3 m/s of wheel speed. Position and heading remain the wheel odometry's own.
 
 The flag starts `vehicle_state_launch.py`, the IMU stack that publishes `/odom/fused`.
-All five IMU features share one copy of that stack, even when enabled together.
+All six IMU features share one copy of that stack, even when enabled together.
 
 When the IMU is untrusted, `gap_follow` drives on raw `/odom` instead, including its
 speed checks, acceleration ramp, time-to-collision brake and stale-odometry stop.
@@ -1273,8 +1274,9 @@ In `20261026-180228`, at 83.419 s, h reached 11.036402 m/s² and speed fell from
 2.444059 to 0.644802 m/s. Neither establishes a clear impact stopping the car.
 
 The provisional threshold comes from the 22.48381983126393 m/s² event in
-`20261029-132902` at 18.693069 s from bag start, with `/odom` speed
-4.215129 m/s at −0.5 s and 2.210027 m/s at +0.5 s, rather than a fall toward zero.
+`20261029-132902` at 18.693069 s from bag start.
+The `/odom` speed was 4.215129 m/s at −0.5 s and 2.210027 m/s at +0.5 s,
+rather than a fall toward zero.
 
 With no clear impact identified, the controller's 2026-10-29 ruling gives
 `max(15.0, 1.5 × 22.48381983126393)` = **33.7257297468959 m/s²**.
