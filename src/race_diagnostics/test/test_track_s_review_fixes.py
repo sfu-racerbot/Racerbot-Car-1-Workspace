@@ -2,6 +2,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,19 +31,18 @@ def test_error_file_failure_does_not_stop_other_metadata_writer(tmp_path, monkey
 
 
 def test_tegrastats_child_checks_parent_after_signal_registration():
-    from race_diagnostics import system_log
-    parent = os.getpid()
-    # Old preexec only registered the signal; it never checked the parent.
-    helper = getattr(system_log, '_prepare_tegrastats_child',
-                     lambda expected: system_log._set_parent_death_signal())
+    # Fresh interpreters avoid forking pytest's ROS/executor threads. Compute
+    # the real parent in the child, so this also checks the registration race.
+    code = (
+        'import os, sys; '
+        f'sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r}); '
+        'from race_diagnostics import system_log; '
+        'system_log._prepare_tegrastats_child(os.getppid() + int(sys.argv[1]))')
     statuses = []
-    for expected in (parent + 1, parent):
-        pid = os.fork()
-        if pid == 0:
-            helper(expected)
-            os._exit(0)
-        _, status = os.waitpid(pid, 0)
-        statuses.append(os.waitstatus_to_exitcode(status))
+    for offset in (1, 0):
+        result = subprocess.run([sys.executable, '-c', code, str(offset)],
+                                capture_output=True, text=True, timeout=5)
+        statuses.append(result.returncode)
     # oracle: a changed parent must exit 1; the original parent continues.
     assert statuses == [1, 0]
 
@@ -56,3 +56,23 @@ def test_backoff_stays_bounded_after_ten_thousand_failures():
     # counts above six have the same schedule and must not grow the exponent.
     assert watch._skip_polls['/unresponsive'] == 31
     assert watch._failures['/unresponsive'] <= 6
+
+
+def test_parent_death_cases_use_bounded_fresh_interpreters(monkeypatch):
+    def no_fork():
+        raise AssertionError('must not fork the multithreaded pytest process')
+
+    original = subprocess.run
+    statuses = []
+
+    def bounded_run(argv, **kwargs):
+        assert 0 < kwargs['timeout'] <= 10  # seconds, bounds a wedged child
+        result = original(argv, **kwargs)
+        statuses.append(result.returncode)
+        return result
+
+    monkeypatch.setattr(os, 'fork', no_fork)
+    monkeypatch.setattr(subprocess, 'run', bounded_run)
+    test_tegrastats_child_checks_parent_after_signal_registration()
+    # oracle: spec R5c: actual fresh-process results preserve the parent oracle.
+    assert statuses == [1, 0]

@@ -281,3 +281,68 @@ def test_analysis_failure_reports_command_without_changing_launch_status(tmp_pat
     assert 'exit 7' in output
     assert f"ros2 run race_diagnostics summarize_run '{run}'" in output
     assert 'slam_report' in output
+
+
+def _interrupt_analysis_at(boundary, tmp_path, monkeypatch, capsys):
+    import builtins
+    import pytest
+    run, maps, events, _, _ = _analysis_fixture(tmp_path, monkeypatch)
+    write_text, print_text = Path.write_text, builtins.print
+    interrupted = []
+
+    def write(path, *args, **kwargs):
+        if boundary == 'save' and path.name == 'summarize_run.txt':
+            interrupted.append('save')
+            raise KeyboardInterrupt
+        return write_text(path, *args, **kwargs)
+
+    def emit(*args, **kwargs):
+        if boundary == 'print' and args and str(args[0]).startswith('summarize_run:'):
+            interrupted.append('print')
+            raise KeyboardInterrupt
+        return print_text(*args, **kwargs)
+
+    monkeypatch.setattr(Path, 'write_text', write)
+    monkeypatch.setattr(builtins, 'print', emit)
+    try:
+        code = mc.main([f'output_directory:={maps}'])
+    except KeyboardInterrupt:
+        pytest.fail(f'analysis {boundary} interrupt escaped before final commands')
+    output = capsys.readouterr().out
+    # oracle: spec R5a: keep launch status and final commands; skip all
+    # remaining analyses after an interrupt anywhere in run/save/print.
+    assert code == 3
+    assert interrupted == [boundary]
+    assert events.read_text().splitlines() == [f'summarize_run {run}']
+    assert 'RACE-COMMANDS' in output
+    body, _, last = output.rstrip().rpartition('\n')
+    assert body.rstrip().endswith('RACE-COMMANDS')
+    assert last.startswith('Full log of this run: ')
+    log = Path(output.strip().split('Full log of this run: ')[-1])
+    assert 'RACE-COMMANDS' in log.read_text()
+
+
+def test_analysis_save_interrupt_preserves_commands_and_launch_status(tmp_path, monkeypatch, capsys):
+    _interrupt_analysis_at('save', tmp_path, monkeypatch, capsys)
+
+
+def test_analysis_print_interrupt_preserves_commands_and_launch_status(tmp_path, monkeypatch, capsys):
+    _interrupt_analysis_at('print', tmp_path, monkeypatch, capsys)
+
+
+def test_simulator_probe_matches_executable_not_shell_text(monkeypatch):
+    import re
+    from types import SimpleNamespace
+
+    for command, expected in [
+        ('/ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node --ros-args', True),
+        ('/usr/bin/python3 /ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node', True),
+        ('/bin/bash -c wait-for gym_bridge_node', False),
+        ('/bin/bash -c wait-for /ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node', False),
+    ]:
+        def probe(argv, **kwargs):
+            assert argv[:2] == ['pgrep', '-f']
+            return SimpleNamespace(returncode=0 if re.search(argv[2], command) else 1)
+        monkeypatch.setattr(mc.subprocess, 'run', probe)
+        # oracle: spec R5b: only an executable/script process argument counts.
+        assert mc._running(mc.SIM_DRIVER) is expected, command
