@@ -230,6 +230,9 @@ contact-and-distance verdict. Inspect `imu_validation` separately: that verdict
 does not apply the IMU acceptance thresholds below. Steering damping is on by
 default; adaptive grip is off. This launch has no `imu_all` argument.
 
+The explicit `imu_hardware:=false` selects the simulator's IMU even if the
+controller starts before automatic simulator detection completes.
+
 For the feature-off baseline, omit the four feature arguments and fault, and
 add `--gap-follow-arg steering_damping:=false`. For the no-fault comparison,
 omit only `--imu-fault stale`. Replace `stale` with `status_fault`, `zero` or
@@ -271,6 +274,11 @@ The stale and status-fault runs had 78 and 77 reason-bearing messages, all
 naming every expected fall-back. Zero had 78: two named `imu stale` for all
 five features, and a third named `imu stale` for fused speed and impact stop.
 Their complete texts and the first post-injection reason are in the JSON report.
+
+The first reason-bearing messages arrived at 43.742 s (`stale`), 43.970 s
+(`status_fault`) and 45.881 s (`zero`), measured from the start of driving.
+Each named the expected fall-back for all five features. The `missing_fallback`
+report counts mismatches for each feature and keeps the first three texts.
 
 The gym's tyres do not slide. These runs check the fall-back wiring, not
 whether grip or understeer behaviour is valid on the floor.
