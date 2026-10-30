@@ -32,9 +32,12 @@ DEFAULT_OUTPUT = '~/.ros/racerbot_auto'
 # from bringup_launch.py (VESC and LiDAR), or the simulator's bridge.
 REAL_DRIVERS = ('vesc_driver_node', 'urg_node_driver')
 SIM_DRIVER = 'gym_bridge_node'
+SIM_PROCESS = r'^([^ ]*python[0-9.]* +)?/[^ ]*/lib/racerbot_sim/gym_bridge_node( |$)'
 
 
 def _running(pattern) -> bool:
+    if pattern == SIM_DRIVER:
+        pattern = SIM_PROCESS
     return subprocess.run(['pgrep', '-f', pattern], capture_output=True).returncode == 0
 
 
@@ -200,7 +203,12 @@ def main(argv=None):
                 continue
         handle.flush()
         if analysis:
-            analyse(recorded_run, log, handle)
+            try:
+                analyse(recorded_run, log, handle)
+            except KeyboardInterrupt:
+                # Analysis is advisory, including saving/printing its output.
+                # Keep the launch status and always show the race commands.
+                print('Analysis interrupted; remaining reports skipped.', flush=True)
         text = report(output_directory(launch_argv), started)
         handle.write(text)
     print(text)

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
+from nav_msgs.msg import Odometry
 import pytest
 import rclpy
 from rclpy.duration import Duration
@@ -14,12 +15,23 @@ from rclpy.time import Time
 
 from gap_follow.gap_follow_node import GapFollowNode
 from test_gap_follow_steering_damping_node import (
-    _blocked_right, _capture, _feed_imu, _feed_odom, _hold_deadman, _scan)
+    _blocked_right, _capture, _feed_imu, _feed_odom as _feed_primary_odom,
+    _hold_deadman, _scan)
 
 CONFIG = str(Path(get_package_share_directory('gap_follow')) / 'config/gap_follow.yaml')
 TEST_ONLY_DRIVE = ['-p', 'drive_topic:=/test_only/drive']
 FUSED = ['-p', 'odom_topic:=/odom/fused']
 SPEED = 1.0  # m/s: synthetic wheel speed; well below the open scene's caps.
+
+
+def _feed_odom(node, speed):
+    # R1 requires fresh raw wheels beside fused odometry, as on the car.
+    # These scenes compare identical wheel/fused speeds, not estimator error.
+    _feed_primary_odom(node, speed)
+    if node.using_fused_speed:
+        wheel = Odometry()
+        wheel.twist.twist.linear.x = float(speed)
+        node.wheel_odom_callback(wheel)
 
 
 @contextmanager

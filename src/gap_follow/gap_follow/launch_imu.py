@@ -2,10 +2,15 @@
 
 import subprocess
 
+# Direct console script or Python's script argument, anchored at argv[0].
+# A waiting shell merely mentioning the bridge must not select simulated IMU.
+GYM_BRIDGE_PROCESS = (
+    r'^([^ ]*python[0-9.]* +)?/[^ ]*/lib/racerbot_sim/gym_bridge_node( |$)')
+
 
 def gym_bridge_running():
     """Use the same process probe as racerbot_launch/scripts/map_course."""
-    return subprocess.run(['pgrep', '-f', 'gym_bridge_node'],
+    return subprocess.run(['pgrep', '-f', GYM_BRIDGE_PROCESS],
                           capture_output=True).returncode == 0
 
 

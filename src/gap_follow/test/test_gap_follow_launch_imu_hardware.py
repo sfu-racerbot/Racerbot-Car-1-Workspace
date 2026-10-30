@@ -111,3 +111,25 @@ def test_no_imu_include_when_both_features_are_off(requested, running):
     assert includes == []
     assert logs == []
     assert calls == []
+
+
+@pytest.mark.parametrize('command,expected', [
+    ('/ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node --ros-args', True),
+    ('/usr/bin/python3 /ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node', True),
+    ('/bin/bash -c wait-for gym_bridge_node', False),
+    ('/bin/bash -c wait-for /ws/install/racerbot_sim/lib/racerbot_sim/gym_bridge_node', False),
+])
+def test_auto_probe_uses_bridge_executable_not_incidental_shell_text(command, expected, monkeypatch):
+    import re
+    from types import SimpleNamespace
+    from gap_follow import launch_imu
+
+    def probe(argv, **kwargs):
+        assert argv[:2] == ['pgrep', '-f']
+        return SimpleNamespace(returncode=0 if re.search(argv[2], command) else 1)
+
+    monkeypatch.setattr(launch_imu.subprocess, 'run', probe)
+    hardware, reason = launch_imu.select_imu_hardware('auto')
+    # oracle: spec R5b: a shell mentioning the bridge is still hardware mode.
+    assert hardware == ('false' if expected else 'true')
+    assert ('simulator detected' if expected else 'simulator not detected') in reason

@@ -418,6 +418,16 @@ class GapController:
                 current_speed, self.last_commanded_speed, command_age,
                 p["ttc_command_speed_timeout_sec"],
                 p["ttc_command_fallback_max_odom_speed"])
+            if (fused_speed is not None and math.isfinite(fused_speed)
+                    and yaw_rate is not None and math.isfinite(yaw_rate)):
+                # current_speed is raw wheels; an optional trusted fused
+                # sample can only add vigilance. Combine fallback results,
+                # never measurements, just as the node's fused path does.
+                fused_effective_speed = gap_logic.conservative_ttc_speed(
+                    fused_speed, self.last_commanded_speed, command_age,
+                    p["ttc_command_speed_timeout_sec"],
+                    p["ttc_command_fallback_max_odom_speed"])
+                effective_speed = max(effective_speed, fused_effective_speed)
             if effective_speed >= p["ttc_min_brake_speed"]:
                 min_ttc = gap_logic.minimum_ttc(
                     window, window_valid, beam_angles, effective_speed,
@@ -653,6 +663,9 @@ class GapController:
             desired_speed = understeer_cap
             binding = 'understeer'
 
+        off_basis = max(self.last_commanded_speed,
+                        min(abs(float(current_speed)), p['max_speed']))
+        traction_off_ceiling = off_basis + p['max_acceleration'] * dt
         holding = False
         basis_speed = abs(float(current_speed))
         if p['enable_imu_traction']:
@@ -676,6 +689,7 @@ class GapController:
             speed = min(desired_speed, accel_ceiling)
             if accel_ceiling < desired_speed:
                 binding = 'accel'
+        speed = min(speed, traction_off_ceiling)
         self.binding_cap = binding
         tel.update(target_angle=target_angle, target_distance=target_distance,
                    gap_width=(gap_end - gap_start + 1) * self.lidar.angle_increment,

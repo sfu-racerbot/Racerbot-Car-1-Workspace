@@ -25,7 +25,7 @@ import pytest
 
 _TOOLS = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 _WS = os.path.dirname(_TOOLS)
-for _p in (_TOOLS, os.path.join(_WS, 'src')):
+for _p in (_TOOLS, os.path.join(_WS, 'src', 'gap_follow')):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -303,8 +303,8 @@ def test_summarize_bands_and_fractions_closed_form():
     }
     s = grip_replay.summarize(r, BASE)
     assert s['ticks'] == 5
-    assert s['judged_fraction'] == pytest.approx(3.0 / 5.0)
-    assert s['trusted_fraction'] == pytest.approx(3.0 / 5.0)
+    assert s['judged_fraction'] == 3.0 / 5.0
+    assert s['trusted_fraction'] == 3.0 / 5.0
     assert s['limit_max'] == pytest.approx(2.6, abs=1e-9)
     assert s['limit_mean_when_cornering'] == pytest.approx(2.6, abs=1e-9)
     assert s['time_above_base_s'] == pytest.approx(2.0, abs=1e-9)

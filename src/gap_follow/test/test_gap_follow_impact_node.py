@@ -302,3 +302,62 @@ def test_deadman_refusal_command_without_intent_oracle(state, latched):
         # oracle: spec CLAUDE.md: every deadman refusal publishes zero speed,
         # irrespective of latch state. Assert the actual drive message only.
         assert commands[-1].drive.speed == 0.0
+
+
+def _diagnostic_failure_commands(held, broken=None):
+    with _node() as n:
+        commands, intents = _capture(n), _capture_intent(n)
+        gate = n._imu_gate
+        publish = n._publish_drive
+        after_drive = False
+        failures = []
+
+        def publish_then_mark(*args, **kwargs):
+            nonlocal after_drive
+            publish(*args, **kwargs)
+            after_drive = True
+
+        def raising_gate():
+            if after_drive:
+                failures.append(len(commands))
+                raise RuntimeError('injected post-drive IMU gate failure')
+            return gate()
+
+        def raising_reason():
+            failures.append(len(commands))
+            raise RuntimeError('injected impact reason failure')
+
+        n._publish_drive = publish_then_mark
+        if broken == 'gate':
+            n._imu_gate = raising_gate
+        elif broken == 'reason':
+            n._impact_detection_reason = raising_reason
+        limit = n._intent_failures.max_failures
+        for tick in range(limit + 2):
+            after_drive = False
+            _joy(n, held)
+            _imu(n)
+            _tick(n, tick)
+        return ([_command(c) for c in commands], n._intent_failures.disabled,
+                failures, len(intents), limit)
+
+
+@pytest.mark.parametrize('held', [False, True])
+@pytest.mark.parametrize('broken', ['gate', 'reason'])
+def test_impact_diagnostic_exception_never_changes_commands_or_next_tick(held, broken):
+    baseline, baseline_disabled, _, baseline_intents, limit = (
+        _diagnostic_failure_commands(held))
+    actual, disabled, failures, intents, _ = _diagnostic_failure_commands(held, broken)
+    # oracle: spec docs/drive-intent.md: the entire diagnostic is post-publish,
+    # failure-contained and disabled after repeated failures, without exiting.
+    assert actual == baseline
+    assert len(actual) == limit + 2
+    assert baseline_intents == limit + 2
+    assert not baseline_disabled
+    assert disabled
+    assert intents == 0
+    assert failures == list(range(1, limit + 1))
+    if held:
+        assert all(speed > 0 for _, speed in actual)
+    else:
+        assert actual == [(0.0, 0.0)] * (limit + 2)

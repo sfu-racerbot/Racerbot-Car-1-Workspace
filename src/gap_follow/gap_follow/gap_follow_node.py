@@ -1211,14 +1211,37 @@ class GapFollowNode(Node):
             and 0.0 <= command_age_sec <= self.ttc_command_speed_timeout_sec
         ):
             recent_command_speed = self.last_commanded_speed
-        effective_speed = gap_logic.conservative_ttc_speed(
-            self.current_speed,
+        command_args = (
             self.last_commanded_speed,
             command_age_sec,
             self.ttc_command_speed_timeout_sec,
             self.ttc_command_fallback_max_odom_speed,
         )
+        effective_speed = gap_logic.conservative_ttc_speed(
+            self.current_speed, *command_args)
+        if self.using_fused_speed:
+            # The near-zero command fallback is conditional: maxing the
+            # measurements first can switch it off. Preserve each source's
+            # independent result, especially the feature-off wheel result.
+            wheel_effective_speed = gap_logic.conservative_ttc_speed(
+                self.wheel_speed, *command_args)
+            effective_speed = max(wheel_effective_speed, effective_speed)
         return effective_speed, recent_command_speed
+
+    def _safety_speed(self):
+        """Measurement summary only; not an input to conditional safety checks."""
+        if not self.using_fused_speed:
+            return self.current_speed
+        return math.copysign(
+            max(abs(self.wheel_speed), abs(self.current_speed)), self.wheel_speed)
+
+    def _safety_odom_fresh(self):
+        if not self.using_fused_speed:
+            return self._odom_fresh()
+        if self.last_wheel_time is None or not math.isfinite(self.wheel_speed):
+            return False
+        age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+        return age < self.odom_timeout_sec and self._odom_fresh()
 
     def _check_odom_direction(self):
         """Warn once if /odom reports motion opposing the commanded direction.
@@ -1313,7 +1336,7 @@ class GapFollowNode(Node):
                 'release LB and press it again to resume')
             return
         self._check_odom_direction()
-        if self.enable_ttc and not self._odom_fresh():
+        if self.enable_ttc and not self._safety_odom_fresh():
             self._stop(
                 'odometry_stale',
                 f"TTC is enabled but no odometry newer than "
@@ -1829,6 +1852,12 @@ class GapFollowNode(Node):
         # a car that never actually slowed. Fresh odometry closes that gap. It
         # only ever raises the basis, is clamped to max_speed so a bad reading
         # cannot inflate it, and every ceiling above still applies.
+        # Counterfactual traction-off ramp for this same tick and speed source.
+        # Reuse the desired speed above; never run the scan pipeline twice.
+        off_basis = self.last_commanded_speed
+        if self._odom_fresh():
+            off_basis = max(off_basis, min(abs(self.current_speed), self.max_speed))
+        traction_off_ceiling = off_basis + self.max_acceleration * command_dt
         traction_holding, fused_basis, traction_off = self._traction_step(command_dt)
         if traction_holding:
             acceleration_ceiling = self.last_commanded_speed
@@ -1844,13 +1873,10 @@ class GapFollowNode(Node):
             acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
             speed = min(desired_speed, acceleration_ceiling)
 
+        speed = min(speed, traction_off_ceiling)
+        acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
-        impact_text = ''
-        if self.enable_imu_impact_stop:
-            impact_off = self._impact_detection_reason()
-            if impact_off is not None:
-                impact_text = f', imu_impact_stop_off: {impact_off}'
         if self.enable_imu_traction:
             if traction_off is not None:
                 traction_text = f', imu_traction_off: {traction_off}'
@@ -1966,7 +1992,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{grip_text}{understeer_text}{traction_text}{impact_text}"
+            f"{damping_text}{grip_text}{understeer_text}{traction_text}"
             f"{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
@@ -2543,6 +2569,14 @@ class GapFollowNode(Node):
         if not self._intent_throttle.should_publish(now):
             return
         try:
+            if self.enable_imu_impact_stop:
+                # Diagnostic-only trust/force explanation, including on early
+                # stops. Never let reason construction escape this boundary.
+                impact_off = self._impact_detection_reason()
+                if impact_off is not None:
+                    reason = lambda base=reason, why=impact_off: (
+                        (base() if callable(base) else base) or ''
+                    ) + f', imu_impact_stop_off: {why}'
             if self.using_fused_speed:
                 # Early stops may not read gated odometry. Refresh only here,
                 # after the drive command, inside diagnostic containment.
