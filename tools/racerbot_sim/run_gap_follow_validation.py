@@ -138,6 +138,7 @@ def inject_fault(node, launch_pid, fault, env, proc_root=Path('/proc')):
 
 def injection_environment(harness_env):
     env = dict(harness_env)
+    env.pop('ROS_STATIC_PEERS', None)
     env['ROS_DOMAIN_ID'] = harness_env.get('ROS_DOMAIN_ID', '0')
     env['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     return env
@@ -147,15 +148,19 @@ def injection_environment_refusal(harness_env, client_env):
     """Bind the service target to the owned local bridge before a write.
 
     The launches and graph-inspecting node must use LOCALHOST discovery on
-    the same ROS domain as the LOCALHOST parameter client. On that local
-    graph, the single root bridge name and single local bridge process,
-    checked by inject_fault, refer to the harness-owned descendant.
+    the same ROS domain as the LOCALHOST parameter client. Static peers can
+    reach remote hosts even with LOCALHOST, so the harness must have no
+    non-empty ROS_STATIC_PEERS and the client environment removes it. On
+    that local graph, the single root bridge name and single local bridge
+    process, checked by inject_fault, refer to the harness-owned descendant.
     """
     if (harness_env.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST'
             or client_env.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST'):
         return 'fault injection requires LOCALHOST discovery for harness and client'
     if harness_env.get('ROS_DOMAIN_ID', '0') != client_env.get('ROS_DOMAIN_ID', '0'):
         return 'fault injection refused: ROS domain mismatch'
+    if harness_env.get('ROS_STATIC_PEERS'):
+        return 'fault injection refused: ROS_STATIC_PEERS is non-empty'
     return None
 
 

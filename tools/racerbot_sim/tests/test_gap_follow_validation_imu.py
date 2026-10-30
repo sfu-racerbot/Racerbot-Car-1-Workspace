@@ -259,3 +259,30 @@ def test_injection_requires_local_client_even_if_harness_is_local():
     client['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     assert validation.injection_environment_refusal(harness, client) is None
     assert validation.injection_environment(harness)['ROS_DOMAIN_ID'] == '0'
+
+
+def test_injection_refuses_harness_static_peers():
+    # oracle: review fix round 3 refuses any configured harness static peers.
+    harness = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST',
+               'ROS_STATIC_PEERS': '10.0.0.5'}
+    client = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    assert 'ROS_STATIC_PEERS' in validation.inject_with_environment(
+        object(), 10, 'zero', harness, client)
+
+
+@pytest.mark.parametrize('peers', [None, ''])
+def test_empty_or_unset_harness_static_peers_are_allowed(peers):
+    # oracle: review fix round 3 permits an empty or absent peer list.
+    harness = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    if peers is not None:
+        harness['ROS_STATIC_PEERS'] = peers
+    client = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    assert validation.injection_environment_refusal(harness, client) is None
+
+
+def test_injection_client_drops_harness_static_peers():
+    # oracle: review fix round 3 requires the client to have no static peers.
+    harness = {'ROS_DOMAIN_ID': '64', 'ROS_STATIC_PEERS': '10.0.0.5'}
+    client = validation.injection_environment(harness)
+    assert 'ROS_STATIC_PEERS' not in client
+    assert harness['ROS_STATIC_PEERS'] == '10.0.0.5'
