@@ -286,3 +286,17 @@ def test_injection_client_drops_harness_static_peers():
     client = validation.injection_environment(harness)
     assert 'ROS_STATIC_PEERS' not in client
     assert harness['ROS_STATIC_PEERS'] == '10.0.0.5'
+
+
+def test_harness_selects_the_simulated_imu_for_gap_follow():
+    # oracle: spec (wrap-up M4): the simulator harness never leaves the IMU
+    # source to the auto probe, which can race the simulator's start-up.
+    assert validation.gap_follow_launch_args([]) == ['imu_hardware:=false']
+    assert validation.gap_follow_launch_args(None) == ['imu_hardware:=false']
+    assert validation.gap_follow_launch_args(['imu_all:=true']) == [
+        'imu_all:=true', 'imu_hardware:=false']
+
+
+def test_an_explicit_imu_hardware_argument_wins():
+    # oracle: spec, the docstring: an explicit imu_hardware:= is kept as given.
+    assert validation.gap_follow_launch_args(['imu_hardware:=true']) == ['imu_hardware:=true']

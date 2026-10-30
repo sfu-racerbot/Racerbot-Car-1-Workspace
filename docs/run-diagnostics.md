@@ -363,7 +363,7 @@ the log line reports every one as `value/limit`:
 | departed the start | `departure_distance` | never leaves the start area |
 | distance travelled | `minimum_lap_distance` | loop shorter than the minimum can never close |
 | turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session, and silently unreported by `summarize_run` before that day's regex fix |
-| elapsed time | `minimum_lap_duration_sec` (4.0 s) | The former 15 s floor blocked short, fast laps; the 300° turning gate still applies. |
+| elapsed time | `minimum_lap_duration_sec` (4.0 s), then also `minimum_lap_duration_fraction` (0.5) of the previous lap | The first lap needs 4 s. Later laps need the larger of 4 s and half the previous lap's time, so the gate follows the course length. The former fixed 15 s blocked short, fast laps; the 300° turning gate still applies. |
 | back near the start | `closure_distance` | passes the start but too wide |
 | heading matches start | `closure_heading_deg` | comes back the "wrong way round" |
 

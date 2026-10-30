@@ -689,6 +689,8 @@ class GapController:
             speed = min(desired_speed, accel_ceiling)
             if accel_ceiling < desired_speed:
                 binding = 'accel'
+        if traction_off_ceiling < speed:
+            binding = 'traction_off'
         speed = min(speed, traction_off_ceiling)
         self.binding_cap = binding
         tel.update(target_angle=target_angle, target_distance=target_distance,

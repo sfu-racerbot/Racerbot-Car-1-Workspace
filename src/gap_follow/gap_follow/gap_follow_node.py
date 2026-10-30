@@ -1243,6 +1243,26 @@ class GapFollowNode(Node):
         age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
         return age < self.odom_timeout_sec and self._odom_fresh()
 
+    def _stale_odom_detail(self) -> str:
+        """Name the odometry stream that is actually stale.
+
+        With fused speed in use both streams must be fresh, and naming the
+        fused topic when the wheel /odom stopped would send a reader to the
+        wrong node.
+        """
+        stale = []
+        if self.using_fused_speed:
+            wheel_age = math.inf
+            if self.last_wheel_time is not None and math.isfinite(self.wheel_speed):
+                wheel_age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+            if not wheel_age < self.odom_timeout_sec:
+                stale.append(self.wheel_odom_topic)
+        if not self._odom_fresh():
+            stale.append(self.odom_topic)
+        names = ', '.join(f"'{topic}'" for topic in stale) or f"'{self.odom_topic}'"
+        return (f"TTC is enabled but no odometry newer than "
+                f"{self.odom_timeout_sec:.2f}s is available on {names}")
+
     def _check_odom_direction(self):
         """Warn once if /odom reports motion opposing the commanded direction.
 
@@ -1337,12 +1357,7 @@ class GapFollowNode(Node):
             return
         self._check_odom_direction()
         if self.enable_ttc and not self._safety_odom_fresh():
-            self._stop(
-                'odometry_stale',
-                f"TTC is enabled but no odometry newer than "
-                f"{self.odom_timeout_sec:.2f}s is available on "
-                f"'{self.odom_topic}'",
-            )
+            self._stop('odometry_stale', self._stale_odom_detail())
             return
 
         if not scan.ranges:
@@ -1874,6 +1889,9 @@ class GapFollowNode(Node):
             speed = min(desired_speed, acceleration_ceiling)
 
         speed = min(speed, traction_off_ceiling)
+        # Name the traction-off ceiling when it, not traction's own ramp, is
+        # the lower one, so the dashboard says which cap actually held.
+        traction_off_binds = traction_off_ceiling < acceleration_ceiling
         acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
@@ -2014,8 +2032,10 @@ class GapFollowNode(Node):
             intent_factors.append(schema.factor('follow cap', follow_cap))
         if near_bearing is not None:
             intent_factors.append(schema.factor('anticipation cap', anticipated_speed))
-        intent_factors.append(schema.factor(
-            'traction hold' if traction_holding else 'accel ceiling', acceleration_ceiling))
+        ceiling_name = ('traction hold' if traction_holding
+                        else 'traction-off ceiling' if traction_off_binds
+                        else 'accel ceiling')
+        intent_factors.append(schema.factor(ceiling_name, acceleration_ceiling))
         self._publish_intent(
             gap_mode,
             decision_detail,
