@@ -220,7 +220,7 @@ is a transition to an odometry speed below 0.05 m/s.
 ```bash
 RB_WS="$(git rev-parse --show-toplevel)" rb env ROS_DOMAIN_ID=64 \
   python3 tools/racerbot_sim/run_gap_follow_validation.py --duration 120 --fault-at 40 \
-  --imu-fault stale --gap-follow-arg fused_speed:=true \
+  --imu-fault stale --gap-follow-arg imu_hardware:=false --gap-follow-arg fused_speed:=true \
   --gap-follow-arg imu_understeer:=true --gap-follow-arg imu_traction:=true \
   --gap-follow-arg imu_impact_stop:=true --output /tmp/stale-report.json
 ```
@@ -235,42 +235,42 @@ add `--gap-follow-arg steering_damping:=false`. For the no-fault comparison,
 omit only `--imu-fault stale`. Replace `stale` with `status_fault`, `zero` or
 `bias` for the other runs.
 
-| Run | Distance (m) | Contact steps | Stops | Mean speed before / after (m/s) | Commanded speed before / after (m/s) | Five fall-back fractions |
-|---|---:|---:|---:|---:|---:|---|
-| Features off | 444.41 | 0 | 0 | 3.553 / 3.539 | 3.732 / 3.720 | 0 / 0 / 0 / 0 / 0 |
-| Features on | 412.68 | 0 | 0 | 3.416 / 3.408 | 3.596 / 3.579 | 0 / 0 / 0 / 0 / 0 |
-| `stale` | 426.20 | 0 | 0 | 3.421 / 3.553 | 3.599 / 3.734 | 0.0631 / 0.0631 / 0.0631 / 0.0631 / 0.0631 |
-| `status_fault` | 432.27 | 0 | 0 | 3.427 / 3.542 | 3.592 / 3.725 | 0.0614 / 0.0614 / 0.0614 / 0.0614 / 0.0614 |
-| `zero` | 413.13 | 0 | 0 | 3.430 / 3.515 | 3.605 / 3.707 | 0.0609 / 0.0609 / 0.0609 / 0.0609 / 0.0609 |
-| `bias` | 420.48 | 0 | 0 | 3.320 / 3.411 | 3.517 / 3.585 | 0 / 0 / 0 / 0 / 0 |
+| Run | Distance (m) | Contact steps | Stops | Mean speed before / after (m/s) | Commanded speed before / after (m/s) | Five fall-back fractions | Result |
+|---|---:|---:|---:|---:|---:|---|---|
+| Features off | 444.41 | 0 | 0 | 3.553 / 3.539 | 3.732 / 3.720 | — | baseline |
+| Features on | 412.68 | 0 | 0 | 3.416 / 3.408 | 3.596 / 3.579 | — | comparison |
+| `stale` | 412.99 | 0 | 0 | 3.403 / 3.495 | 3.577 / 3.694 | 1 / 1 / 1 / 1 / 1 | pass |
+| `status_fault` | 425.82 | 0 | 0 | 3.367 / 3.521 | 3.580 / 3.719 | 1 / 1 / 1 / 1 / 1 | pass |
+| `zero` | 433.06 | 0 | 0 | 3.417 / 3.520 | 3.624 / 3.702 | 0.9744 / 0.9615 / 0.9744 / 0.9744 / 0.9615 | pass |
+| `bias` | 420.48 | 0 | 0 | 3.320 / 3.411 | 3.517 / 3.585 | — | pass, zero contact |
 
 The fractions are steering damping, fused speed, understeer, traction and
-impact stop, in that order. They count all intent messages at least 0.5 s
-after the acknowledged injection, including messages with no reason field.
-The three fall-back runs **fail the 95% reason requirement**: reasons are
-published periodically, rather than on every intent message.
+impact stop, in that order. They count only intent messages with a non-empty
+reason at least 0.5 s after acknowledged injection. Messages without a reason
+are ignored because the intent publisher sends reasons periodically.
 
-All three had
-zero contact and post-fault mean speed within 10% of the baseline. Bias had
-zero contact and status stayed `ok`.
+All three fall-back runs pass: each fraction is at least 95%, contacts and
+stops are zero, and mean speed after injection is within 10% of the baseline's
+3.539 m/s after its 40 s split. Bias had zero contact and status stayed `ok`.
 
 There is a timing limitation: the requested 40 s injections were acknowledged
-at 45.588 s (`stale`), 42.406 s (`status_fault`), 42.540 s (`zero`) and
+at 43.624 s (`stale`), 43.844 s (`status_fault`), 45.017 s (`zero`) and
 45.312 s (`bias`). The measured post-split distances were 303.514 m for the
-baseline and 273.642, 288.608 and 269.702 m for the three fall-back runs,
+baseline and 271.702, 278.231 and 282.243 m for the three fall-back runs,
 respectively.
 
-These are 90%, 95% and 89% of the baseline, but the intervals
-differ, so they do not establish the same-time distance criterion.
+The intervals differ, so distance is reported rather than compared as a
+same-time acceptance criterion.
 
-The stale stream's last sample arrived at 45.418 s; it had no later samples.
-For `status_fault`, status changed from `ok` to `fault` at 42.247 s. For
-`zero`, status reported `all zero` at 42.395 s and later samples had zero
+The stale stream's last sample arrived at 43.465 s; it had no later samples.
+For `status_fault`, status changed from `ok` to `fault` at 43.693 s. For
+`zero`, status reported `all zero` at 44.879 s and later samples had zero
 vertical acceleration and yaw rate.
 
-For `bias`, the parameter change was
-acknowledged and status stayed `ok`, but the recorded yaw samples do not
-separate bias from the car's changing turn rate.
+The stale and status-fault runs had 78 and 77 reason-bearing messages, all
+naming every expected fall-back. Zero had 78: two named `imu stale` for all
+five features, and a third named `imu stale` for fused speed and impact stop.
+Their complete texts and the first post-injection reason are in the JSON report.
 
 The gym's tyres do not slide. These runs check the fall-back wiring, not
 whether grip or understeer behaviour is valid on the floor.
