@@ -536,7 +536,15 @@ def plan_replay(run_dir, odom_frame: str, profile_path, out_root, label: str = '
     if missing:
         raise ReplayRefused(f'{run} bag has no {", ".join(missing)}; cannot replay on odometry {odom_frame}')
 
-    out_dir = Path(out_root) / f'{run.name}-replay-{odom_frame}-{label}'
+    out_dir = (Path(out_root).expanduser() / f'{run.name}-replay-{odom_frame}-{label}').resolve()
+    # record_run.py:111-116 always creates metadata/, including probe-only
+    # recordings; :180-183 optionally creates bag/. Either directory marks
+    # an existing run. Check every resolved ancestor, including nested runs.
+    for existing_run in out_dir.parents:
+        if (existing_run / 'bag').is_dir() or (existing_run / 'metadata').is_dir():
+            if not out_dir.is_relative_to(existing_run / 'analysis'):
+                raise ReplayRefused(f'{out_dir} is inside existing run {existing_run}; '
+                                    'only its analysis/ directory may receive replay output')
     if out_dir.exists():
         raise ReplayRefused(f'{out_dir} already exists; use another --label (replays are never overwritten)')
 

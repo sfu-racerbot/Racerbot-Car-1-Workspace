@@ -449,3 +449,82 @@ def test_prepare_recorded_tf_preserves_payloads_and_reports_mixed_message():
     assert ends == [3]
     assert info == {'needed_tf_pairs': [['world_odom', 'wheels'], ['wheels', 'chassis']],
                     'map_transforms_dropped': 1, 'mixed_tf_messages': 1, 'tf_messages_available': 3}
+
+
+@pytest.mark.parametrize('location', ['source', 'source-child', 'other-child'])
+def test_replay_output_inside_existing_run_refused(tmp_path, location):
+    from .test_slam_replay import make_run
+    # oracle: spec storage constraint - only analysis/ may receive files inside existing runs.
+    source = make_run(tmp_path / 'source')
+    other = make_run(tmp_path / 'other')
+    roots = {'source': source, 'source-child': source / 'products',
+             'other-child': other / 'products'}
+    with pytest.raises(replay.ReplayRefused, match=r'inside existing run.*analysis/'):
+        replay.plan_replay(source, 'odom', None, roots[location])
+
+
+@pytest.mark.parametrize('marker', ['bag', 'metadata'])
+def test_output_containment_recognizes_either_run_marker(tmp_path, marker):
+    from .test_slam_replay import make_run
+    # oracle: spec record_run.py:111-116,180-183 - metadata exists even with record_bag=false.
+    source = make_run(tmp_path / 'source')
+    other = tmp_path / 'probe-only-or-partial-run'
+    (other / marker).mkdir(parents=True)
+    with pytest.raises(replay.ReplayRefused, match=r'inside existing run.*analysis/'):
+        replay.plan_replay(source, 'odom', None, other / 'products')
+
+
+def test_output_symlink_into_existing_run_refused(tmp_path):
+    from .test_slam_replay import make_run
+    # oracle: invariant - a symlink alias cannot evade physical output containment.
+    source = make_run(tmp_path / 'source')
+    other = make_run(tmp_path / 'other')
+    (other / 'products').mkdir()
+    alias = tmp_path / 'output-alias'
+    alias.symlink_to(other / 'products', target_is_directory=True)
+    with pytest.raises(replay.ReplayRefused, match=r'inside existing run.*analysis/'):
+        replay.plan_replay(source, 'odom', None, alias)
+
+
+@pytest.mark.parametrize('which_run', ['source', 'other'])
+def test_replay_output_under_analysis_allowed(tmp_path, which_run):
+    from .test_slam_replay import make_run
+    # oracle: spec - the analysis/ exception permits nested analysis outputs in any run.
+    source = make_run(tmp_path / 'source')
+    other = make_run(tmp_path / 'other')
+    root = {'source': source, 'other': other}[which_run] / 'analysis' / 'replays'
+    plan = replay.plan_replay(source, 'odom', None, root)
+    assert plan.out_dir == root / f'{source.name}-replay-odom-default'
+    assert not root.exists()  # planning is read-only
+
+
+def test_analysis_symlink_escape_to_another_run_refused(tmp_path):
+    from .test_slam_replay import make_run
+    # oracle: invariant - a logical analysis/ name does not authorize another run's data directory.
+    source = make_run(tmp_path / 'source')
+    other = make_run(tmp_path / 'other')
+    (source / 'analysis').symlink_to(other, target_is_directory=True)
+    with pytest.raises(replay.ReplayRefused, match=r'inside existing run.*analysis/'):
+        replay.plan_replay(source, 'odom', None, source / 'analysis' / 'products')
+
+
+def test_output_containment_checks_every_run_ancestor(tmp_path):
+    from .test_slam_replay import make_run
+    # oracle: invariant - an inner analysis/ exception cannot bypass an outer run's boundary.
+    source = make_run(tmp_path / 'source')
+    outer = make_run(tmp_path / 'outer')
+    inner = make_run(outer / 'nested')
+    with pytest.raises(replay.ReplayRefused, match=r'inside existing run.*analysis/'):
+        replay.plan_replay(source, 'odom', None, inner / 'analysis')
+
+
+def test_replay_output_path_is_resolved(tmp_path):
+    from .test_slam_replay import make_run
+    # oracle: invariant - store the resolved destination, not an alias that can later be retargeted.
+    source = make_run(tmp_path / 'source')
+    physical = tmp_path / 'physical-output'
+    physical.mkdir()
+    alias = tmp_path / 'alias-output'
+    alias.symlink_to(physical, target_is_directory=True)
+    plan = replay.plan_replay(source, 'odom', None, alias)
+    assert plan.out_dir == physical / f'{source.name}-replay-odom-default'

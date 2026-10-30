@@ -513,6 +513,8 @@ are refused, so use a different `--label` for another attempt. Add
 `--out-root /tmp/slam-replays` to put results in a scratch directory instead.
 The source run is read without being modified.
 
+Resolved output paths may enter an existing run only under its `analysis/` directory; a `bag/` or `metadata/` directory marks a run.
+
 ### Forced admission: the default exact mode
 
 `--exact` selects `--exact-mode forced` by default. It starts `sync_slam_toolbox_node` and
