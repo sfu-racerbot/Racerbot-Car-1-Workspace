@@ -145,3 +145,26 @@ def test_main_no_slam_exit_zero(tmp_path):
                        load_scans=lambda path: None, load_rosout=lambda path: []) == 0
     assert (tmp_path / 'analysis' / 'slam_report' / 'slam_report.txt').read_text().startswith(
         'No SLAM in this run: SLAM did not map this run')
+
+
+def test_failed_revolutions_lap_at_ceiling_never_becomes_passed(tmp_path):
+    failure = 'Lap 5 did not pass the quality check (revolutions=2.04 > 1.50 (closed over roughly two overlapping laps, not one)), but the 5-lap ceiling is reached -- accepting it anyway rather than mapping indefinitely.'
+    closed = ('Closed mapping lap 5/3 detected (58.6m, 734deg of turning, '
+              '2.04 revolutions, 326 samples, closest approach to the start '
+              '0.08m against a 2.68m gate, 0 SLAM corrections absorbed).')
+    profile = 'Generated 100-point racing profile at /tmp/profile.csv (1.0-3.0m/s).'
+    log = tmp_path / 'launch.log'
+    log.write_text('\n'.join((closed, failure, profile)))
+    run = report.load_inputs(tmp_path, log_path=log,
+                             load_slam=lambda path: {},
+                             load_scans=lambda path: None,
+                             load_rosout=lambda path: [])
+    lines, summary = report.build_report(run)
+    # oracle: spec, accepting a failed lap at the ceiling is not a pass,
+    # even when the supervisor subsequently saves a racing profile.
+    assert summary['Laps'][0]['verdict'] == 'failed (accepted at the ceiling)'
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert 'quality failed revolutions=2.04 > 1.5' in lap_line
+    assert 'accepted at the ceiling' in lap_line
+    assert 'passed' not in lap_line
+    assert 'deg' not in lap_line

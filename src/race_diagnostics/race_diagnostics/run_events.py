@@ -222,19 +222,51 @@ def parse_lap_closed(line):
 
 
 def parse_lap_quality(line):
-    """Extract a failed lap-quality check, if present."""
-    # auto_map_race_node.py:1623-1654 logs failures but has no passing-quality line.
-    number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
-    pattern = (r'Lap (\d+) did not pass the quality check \((\w+)='
-               + number + r'deg > ' + number + r'deg')
-    match = re.search(pattern, line) if isinstance(line, str) else None
+    """Extract every failed comparison and whether the ceiling accepted it.
+
+    Single-metric results retain the original dictionary contract. Multiple
+    comparisons also expose an ordered ``metrics`` list; the legacy fields
+    always describe its first entry.
+    """
+    if not isinstance(line, str) or len(line) > 65536:
+        return None
+    match = re.search(r'Lap (\d+) did not pass the quality check \(', line)
     if not match:
         return None
-    lap, metric, value, limit = match.groups()
-    return {'lap': int(lap), 'passed': False, 'metric': metric,
-            'value': float(value), 'limit': float(limit),
-            'accepted_at_ceiling': bool(re.search(
-                r'\d+-lap ceiling is reached -- accepting it anyway', line))}
+    # Explanations have their own parentheses. Find the outer close rather
+    # than interpreting a truncated comparison as a complete quality verdict.
+    start = match.end()
+    depth = 1
+    for end in range(start, len(line)):
+        if line[end] == '(':
+            depth += 1
+        elif line[end] == ')':
+            depth -= 1
+            if depth == 0:
+                break
+    else:
+        return None
+    tail = line[end + 1:]
+    accepted = re.match(
+        r', but the \d+-lap ceiling is reached -- accepting it anyway\b', tail)
+    if not accepted and not re.match(
+            r' and the \d+-lap ceiling has not been reached -- ', tail):
+        return None
+    number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
+    pattern = (r'(\w+)=' + number + r'(?:deg)? > '
+               + number + r'(?:deg)?(?:\s+\(.*\))?')
+    metrics = []
+    for comparison in line[start:end].split(';'):
+        metric_match = re.fullmatch(pattern, comparison.strip())
+        if not metric_match:
+            return None
+        metric, value, limit = metric_match.groups()
+        metrics.append({'metric': metric, 'value': float(value), 'limit': float(limit)})
+    result = {'lap': int(match[1]), 'passed': False, **metrics[0],
+              'accepted_at_ceiling': bool(accepted)}
+    if len(metrics) > 1:
+        result['metrics'] = metrics
+    return result
 
 
 def parse_lap_unjudged(line):
