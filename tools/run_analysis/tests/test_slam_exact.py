@@ -384,7 +384,7 @@ def _tf(parent, child, stamp=0):
 
 
 def test_tf_filter_drops_only_map_parented_transforms():
-    # oracle: controller rule - retain exact non-map payloads, including in a mixed message.
+    # oracle: spec round-3 ruling - retain exact non-map payloads, including in a mixed message.
     correction = _tf('map', 'world_odom')
     imu = _tf('world_odom', 'wheels')
     wheel = _tf('wheels', 'chassis')
@@ -395,7 +395,7 @@ def test_tf_filter_drops_only_map_parented_transforms():
 
 
 def test_tf_chain_derived_from_recorded_tree_and_static_edges():
-    # oracle: synthetic tree - the sensor edge is static; the two dynamic edges need brackets.
+    # oracle: closed form - sensor edge is static; the two dynamic edges need brackets.
     assert replay.needed_tf_pairs(
         [('wheels', 'chassis'), ('world_odom', 'wheels'), ('elsewhere', 'camera')],
         [('chassis', 'sensor')], 'world_odom', 'sensor') == [

@@ -1,18 +1,20 @@
 """Replay a recorded run through slam_toolbox with the car parked, to tune SLAM without driving.
 
     python3 tools/run_analysis/slam_replay.py ~/.ros/racerbot_runs/<ts> \
-        [--odom odom|odom_imu] [--profile FILE] [--rate R] [--label NAME]
+        [--odom odom|odom_imu] [--profile FILE] [--rate R | --exact] [--label NAME]
 
 The run's bag is played into a slam_toolbox started from the run's own recorded settings, with
-the profile's overrides laid over them. Only /scan, /tf_static and one odometry topic are played,
-never the recorded /tf, and odom_tf_relay.py rebuilds the odometry transform from that topic.
+the profile's overrides laid over them. Rate mode and --exact-mode all-scans publish /scan,
+/tf_static and one odometry topic, with odom_tf_relay.py rebuilding odometry TF. Forced exact
+mode instead publishes original /tf payloads minus map-parented transforms, bracketed per
+needed dynamic pair, plus /tf_static and only the forced scan plan. SLAM recomputes map TF.
 
 Refuses while a driver process is alive. DRIVER_MARKERS are matched against every process's whole
 command line, so a driver started under another name still counts. Every child runs on the
 replay's own ROS domain (REPLAY_DOMAIN_ID), so a replay never joins the car's graph.
 
-plan_replay and the functions it calls do no ROS and import without rclpy. A replay starts ros2 and
-odom_tf_relay.py, so it needs the ROS environment sourced (ros2 on PATH).
+plan_replay and the pure planning helpers import without rclpy. Running a replay starts ROS
+children, so it needs the ROS environment sourced (ros2 on PATH).
 """
 from __future__ import annotations
 

@@ -481,7 +481,7 @@ whether SLAM can reproduce the recorded poses without another drive.
 **Highlights**
 
 - Starts SLAM with the recording's parameter snapshot, plus optional profile overrides.
-- Rebuilds odometry transforms instead of playing the car's recorded map corrections.
+- Preserves the recorded odometry TF tree in forced mode and recomputes map corrections.
 - Forces the recorded scan-admission sequence for stamp-by-stamp pose comparison.
 - Saves a replay bag, logs, map files when available, and a `replay.json` summary.
 
@@ -552,13 +552,35 @@ configuration.
 `exact.admission_overrides`, each original snapshot value and its override.
 The original value comes from the recording even if a profile changed it.
 
-Before every planned or sacrificial scan, replay publishes odometry through
-the first sample at or after its stamp, so
-[TF](glossary.md#tf--transform--frame) can interpolate the pose at that time.
-`/clock` advances to the scan stamp, not to the future odometry sample.
+A [TF transform](glossary.md#tf--transform--frame) relates a child coordinate
+frame to its parent.
 
-`exact.lookahead_samples` counts odometry messages first sent beyond the
-current scan's stamp. A bracket already sent for an earlier scan is reused.
+Forced mode publishes the recorded `/tf` messages, keeping their order and
+transform payloads. It removes every transform whose parent frame is `map`,
+so the car's map corrections cannot replace the replay's new corrections.
+
+If a message mixes map and non-map transforms, only the map entries are
+removed. `/tf_static` is published with its recorded transforms as before.
+
+The needed chain is derived from the configured `odom_frame` and `base_frame`,
+using the recorded dynamic and static tree. For the 19:49 run this is
+`odom_imu → odom → base_link → laser`. The final edge is a fixed, static mount; both earlier
+edges need dynamic interpolation brackets.
+
+Each needed dynamic pair gets a sample at or before the scan and the first
+sample at or after it. Before a planned or sacrificial scan, the feeder
+publishes a recorded-message prefix that covers all those brackets. It keeps
+message order rather than replaying the pairs as separate streams.
+
+This lets [TF](glossary.md#tf--transform--frame) perform the same interpolation
+and composition as on the car. Forced mode starts no `odom_tf_relay.py` and
+does not publish the odometry topic. `exact.tf_source` is `"recorded"`, and
+`exact.needed_tf_pairs` lists the derived dynamic pairs.
+
+`/clock` advances to the scan stamp, never to a future bracket's stamp.
+`exact.lookahead_samples` counts newly sent TF transforms beyond that stamp
+in forced mode, or newly sent odometry messages in all-scans mode. Already
+sent brackets are reused.
 
 Both exact modes log a planned pose missing after its 10-second pose timeout
 and continue. **More than ten consecutive missing planned poses ends replay
@@ -567,10 +589,13 @@ as failed**, naming the stamps.
 A later pose can resolve an earlier timeout
 in the final accounting; `exact.timed_out_stamps` retains its history.
 
-Forced mode refuses before starting if a pose's matching scan was not recorded,
-scan stamps are duplicated, or a planned or sacrificial scan lacks odometry
-coverage. It also refuses when there are fewer than three recorded scans
-before the second planned scan. Errors name the relevant stamp.
+Forced mode refuses before starting if a pose's matching scan was not recorded
+or scan stamps are duplicated. It also refuses if the tree has no needed chain
+or a pair lacks a planned or sacrificial scan's bracket. Bracket errors
+name the pair and scan stamp.
+
+It also refuses when there are fewer than three recorded scans before the
+second planned scan, naming that second stamp.
 
 A missing processed scan means the recording cannot reproduce that run;
 even the first pose has no exception. Both exact modes refuse `--rate`
@@ -582,6 +607,11 @@ Use `all-scans` to investigate SLAM's timing-dependent admission behaviour.
 It sends **every recorded scan in bag order**, keeps the recorded admission
 parameters, and waits for poses only at planned checkpoints. Extra poses are
 recorded without stopping. `exact.admission_overrides` is empty in this mode.
+
+All-scans mode keeps the odometry relay, as does rate mode. This preserves the
+round-1 experiment, including its composed-odometry interpolation, instead of
+changing both admission and the TF source at once. Its `exact.tf_source` is
+`"odom_relay"`.
 
 In the same terminal, replace `RUN_DIR` as above and choose a fresh label:
 
@@ -598,6 +628,9 @@ because recorded header stamps do not reproduce transform arrival timing.
 Unplanned scans outside odometry coverage are sent with the available odometry,
 without complete brackets. SLAM's TF message filter decides their fate.
 `exact.unbracketed_scans` counts these sends; forced mode sends no such scans.
+
+For each covered all-scans input, the feeder sends odometry through the first
+message at or after that scan, letting the relay build its transform.
 
 The 19:49 bag has 98 scans before odometry starts and one after it ends, so
 a complete all-scans feed would send 99 unbracketed scans. Planned scans still
@@ -653,7 +686,9 @@ It sent 318 scans: the 315 planned inputs and three sacrifices, which produced
 no poses. All 318 had callback receipts. The map and pose graph were saved.
 
 The dynamic pairs derived from the recording are `odom_imu → odom` and
-`odom → base_link`; the final `base_link → laser` edge is static. The replay
+`odom → base_link`; the final `base_link → laser` edge is static.
+
+The replay
 bag retained **9,475 non-map TF messages**, verified to have identical payloads
 and order to the required source prefix. The source contains 9,487 such
 messages in total; the remaining tail is beyond the last required bracket.
@@ -688,13 +723,13 @@ TF tree interpolates `odom_imu → odom` and `odom → base_link` separately, th
 composes them. At pose 20, those odometry guesses differed by **0.00003035 m**,
 with no measured yaw difference. Round 3 preserves the recorded tree instead.
 
-The first yaw discrepancy is one fine-search angular step, **0.00349 rad**
+Round 2's first yaw discrepancy was one fine-search angular step, **0.00349 rad**
 (0.199962°). Karto passes this configured value as the angular resolution in
 [`Mapper.cpp:624–628`](https://github.com/SteveMacenski/slam_toolbox/blob/2.8.5/lib/karto_sdk/src/Mapper.cpp#L624-L628).
 
-The round-2 yaw discrepancy was one fine-search angular step. The recorded-TF
-result removes that discrepancy and the later large errors, supporting the
-interpolation difference as the cause of the earlier scan-match divergence.
+The recorded-TF result removes that discrepancy and the later large errors.
+This supports the interpolation difference as the cause of the earlier
+scan-match divergence.
 
 Ceres threading can also affect numerical reproducibility: reductions are not
 bit-identical across thread counts. In 2.8.5,
@@ -748,6 +783,10 @@ Its `exact.lookahead_samples` count is **867**. The original output label was
 `all-scans1`. A repeat with the explicit `--exact-mode all-scans` flag, labelled
 `all-scans2`, reproduced these counts and retained all four recorded admission
 values with `exact.admission_overrides: {}`.
+
+The round-3 `all-scans3` smoke replay also started the relay and reached the
+same eleven-missing guard, confirming that this experiment kept its earlier
+TF source and admission behaviour.
 
 ### When map saving fails
 
