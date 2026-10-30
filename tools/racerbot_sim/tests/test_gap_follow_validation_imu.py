@@ -221,3 +221,41 @@ def test_owned_injection_refuses_before_parameter_write(tmp_path, monkeypatch):
     graph.nodes = [('gym_bridge_node', '/')]
     assert 'descendant' in validation.inject_fault(graph, 11, 'zero', {}, tmp_path)
     assert len(calls) == 1
+
+
+def test_injection_environment_uses_localhost_and_harness_domain():
+    # oracle: review fix round 2 requires a localhost client on the harness domain.
+    harness = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET'}
+    client = validation.injection_environment(harness)
+    assert client['ROS_DOMAIN_ID'] == '64'
+    assert client['ROS_AUTOMATIC_DISCOVERY_RANGE'] == 'LOCALHOST'
+    assert harness['ROS_AUTOMATIC_DISCOVERY_RANGE'] == 'SUBNET'
+
+
+@pytest.mark.parametrize('discovery', [None, 'SUBNET'])
+def test_injection_refuses_nonlocal_harness_discovery(discovery):
+    # oracle: review fix round 2 prohibits injection unless the harness is local.
+    harness = {'ROS_DOMAIN_ID': '64'}
+    if discovery is not None:
+        harness['ROS_AUTOMATIC_DISCOVERY_RANGE'] = discovery
+    client = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    assert 'LOCALHOST' in validation.inject_with_environment(
+        object(), 10, 'zero', harness, client)
+
+
+def test_injection_refuses_domain_mismatch():
+    # oracle: review fix round 2 binds the client to the harness's ROS domain.
+    harness = {'ROS_DOMAIN_ID': '64', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    client = {'ROS_DOMAIN_ID': '65', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    assert 'domain' in validation.inject_with_environment(
+        object(), 10, 'zero', harness, client).lower()
+
+
+def test_injection_requires_local_client_even_if_harness_is_local():
+    # oracle: both participants must use LOCALHOST, including a default domain.
+    harness = {'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST'}
+    client = {'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET'}
+    assert 'LOCALHOST' in validation.injection_environment_refusal(harness, client)
+    client['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
+    assert validation.injection_environment_refusal(harness, client) is None
+    assert validation.injection_environment(harness)['ROS_DOMAIN_ID'] == '0'

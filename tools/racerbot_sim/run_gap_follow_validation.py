@@ -136,6 +136,36 @@ def inject_fault(node, launch_pid, fault, env, proc_root=Path('/proc')):
     return write_fault(fault, env)
 
 
+def injection_environment(harness_env):
+    env = dict(harness_env)
+    env['ROS_DOMAIN_ID'] = harness_env.get('ROS_DOMAIN_ID', '0')
+    env['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
+    return env
+
+
+def injection_environment_refusal(harness_env, client_env):
+    """Bind the service target to the owned local bridge before a write.
+
+    The launches and graph-inspecting node must use LOCALHOST discovery on
+    the same ROS domain as the LOCALHOST parameter client. On that local
+    graph, the single root bridge name and single local bridge process,
+    checked by inject_fault, refer to the harness-owned descendant.
+    """
+    if (harness_env.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST'
+            or client_env.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST'):
+        return 'fault injection requires LOCALHOST discovery for harness and client'
+    if harness_env.get('ROS_DOMAIN_ID', '0') != client_env.get('ROS_DOMAIN_ID', '0'):
+        return 'fault injection refused: ROS domain mismatch'
+    return None
+
+
+def inject_with_environment(node, launch_pid, fault, harness_env, client_env):
+    refusal = injection_environment_refusal(harness_env, client_env)
+    if refusal:
+        return refusal
+    return inject_fault(node, launch_pid, fault, client_env)
+
+
 def injection_failure(fault, injected_at, fatal):
     if fatal:
         return fatal
@@ -301,11 +331,11 @@ class Launch:
         self.process = None
         self.handle = None
 
-    def start(self):
+    def start(self, env=None):
         self.handle = open(self.log_path, 'w')
         self.process = subprocess.Popen(
             self.args, stdout=self.handle, stderr=subprocess.STDOUT,
-            cwd=str(ROOT), start_new_session=True)
+            cwd=str(ROOT), start_new_session=True, env=env)
 
     def text(self) -> str:
         try:
@@ -344,8 +374,8 @@ FATAL_PATTERNS = (
 
 def run(args) -> dict:
     stop_everything()
-    injection_env = os.environ.copy()
-    injection_env['ROS_DOMAIN_ID'] = os.environ.get('ROS_DOMAIN_ID', '0')
+    harness_env = os.environ.copy()
+    injection_env = injection_environment(harness_env)
     log_dir = Path(args.log_directory)
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -373,8 +403,8 @@ def run(args) -> dict:
     recorder = Recorder() if args.fault_at is not None else None
     injected_at = None
     try:
-        bringup.start()
-        controller.start()
+        bringup.start(env=harness_env)
+        controller.start(env=harness_env)
         while True:
             elapsed = time.monotonic() - started
             for launch in (bringup, controller):
@@ -406,8 +436,9 @@ def run(args) -> dict:
                     break
                 if (args.imu_fault and injected_at is None
                         and time.monotonic() - driving_since >= args.fault_at):
-                    error = inject_fault(recorder.node, bringup.process.pid,
-                                         args.imu_fault, injection_env)
+                    error = (injection_environment_refusal(os.environ, injection_env)
+                             or inject_with_environment(recorder.node, bringup.process.pid,
+                                                        args.imu_fault, harness_env, injection_env))
                     if error:
                         fatal = f'fault injection failed: {error}'
                         break
