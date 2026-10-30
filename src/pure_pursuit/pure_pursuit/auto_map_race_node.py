@@ -485,7 +485,7 @@ class AutoMapRaceNode(Node):
         # as motion it becomes a corner nothing can steer; see
         # LapRecorder._reanchor. 0 disables the check.
         self.declare_parameter('max_pose_jump_m', 0.12)
-        self.declare_parameter('minimum_lap_duration_sec', 15.0)
+        self.declare_parameter('minimum_lap_duration_sec', 4.0)
         self.declare_parameter('departure_distance', 2.0)
         self.declare_parameter('closure_distance', 0.75)
         self.declare_parameter('closure_heading_deg', 30.0)
