@@ -229,6 +229,7 @@ RB_WS="$(git rev-parse --show-toplevel)" rb env ROS_DOMAIN_ID=64 \
 contact-and-distance verdict. Inspect `imu_validation` separately: that verdict
 does not apply the IMU acceptance thresholds below. Steering damping is on by
 default; adaptive grip is off. This launch has no `imu_all` argument.
+
 For the feature-off baseline, omit the four feature arguments and fault, and
 add `--gap-follow-arg steering_damping:=false`. For the no-fault comparison,
 omit only `--imu-fault stale`. Replace `stale` with `status_fault`, `zero` or
@@ -247,7 +248,9 @@ The fractions are steering damping, fused speed, understeer, traction and
 impact stop, in that order. They count all intent messages at least 0.5 s
 after the acknowledged injection, including messages with no reason field.
 The three fall-back runs **fail the 95% reason requirement**: reasons are
-published periodically, rather than on every intent message. All three had
+published periodically, rather than on every intent message.
+
+All three had
 zero contact and post-fault mean speed within 10% of the baseline. Bias had
 zero contact and status stayed `ok`.
 
@@ -255,13 +258,17 @@ There is a timing limitation: the requested 40 s injections were acknowledged
 at 45.588 s (`stale`), 42.406 s (`status_fault`), 42.540 s (`zero`) and
 45.312 s (`bias`). The measured post-split distances were 303.514 m for the
 baseline and 273.642, 288.608 and 269.702 m for the three fall-back runs,
-respectively. These are 90%, 95% and 89% of the baseline, but the intervals
+respectively.
+
+These are 90%, 95% and 89% of the baseline, but the intervals
 differ, so they do not establish the same-time distance criterion.
 
 The stale stream's last sample arrived at 45.418 s; it had no later samples.
 For `status_fault`, status changed from `ok` to `fault` at 42.247 s. For
 `zero`, status reported `all zero` at 42.395 s and later samples had zero
-vertical acceleration and yaw rate. For `bias`, the parameter change was
+vertical acceleration and yaw rate.
+
+For `bias`, the parameter change was
 acknowledged and status stayed `ok`, but the recorded yaw samples do not
 separate bias from the car's changing turn rate.
 
