@@ -108,18 +108,26 @@ def forced_scan_plan(scan_stamps_ns, pose_stamps_ns):
     2.8.5 src/slam_toolbox_common.cpp:795 shouldProcessScan rejects callback counts
     below 5 after accepting the first measurement. The three recorded scans
     immediately before the second pose consume those callbacks without adding
-    nodes to the map. A false flag means sacrificial, not a pose checkpoint.
+    nodes to the map. They must lie strictly after the first planned scan;
+    the entire feed must advance in stamp. A false flag means sacrificial,
+    not a pose checkpoint.
     """
     scans = list(scan_stamps_ns)
     planned = exact_scan_plan(scans, pose_stamps_ns)
     if len(planned) < 2:
         return [(stamp, True) for stamp in planned]
-    second = scans.index(planned[1])
-    if second < 3:
-        raise ReplayRefused(f'need three recorded sacrificial scans before second planned stamp {planned[1]}')
-    return ([(planned[0], True)]
+    first, second = scans.index(planned[0]), scans.index(planned[1])
+    if second - first - 1 < 3:
+        raise ReplayRefused(f'need three distinct intervening scans after first planned stamp {planned[0]} '
+                            f'before second planned stamp {planned[1]}')
+    feed = ([(planned[0], True)]
             + [(stamp, False) for stamp in scans[second - 3:second]]
             + [(stamp, True) for stamp in planned[1:]])
+    for (previous, _), (current, _) in zip(feed, feed[1:]):
+        if current <= previous:
+            raise ReplayRefused(f'forced scan stamps must be strictly increasing: {previous} -> {current}; '
+                                f'second planned stamp {planned[1]}')
+    return feed
 
 
 def exact_admission_parameters(params, exact_mode, recorded=None):

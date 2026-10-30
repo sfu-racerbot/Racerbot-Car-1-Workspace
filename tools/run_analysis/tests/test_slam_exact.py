@@ -528,3 +528,28 @@ def test_replay_output_path_is_resolved(tmp_path):
     alias.symlink_to(physical, target_is_directory=True)
     plan = replay.plan_replay(source, 'odom', None, alias)
     assert plan.out_dir == physical / f'{source.name}-replay-odom-default'
+
+
+def test_forced_plan_refuses_reusing_first_scan_as_sacrifice():
+    # oracle: spec review regression - no scans between 3 and 4, so startup cannot be consumed.
+    with pytest.raises(replay.ReplayRefused, match='second planned stamp 4'):
+        replay.forced_scan_plan([1, 2, 3, 4], [3, 4])
+
+
+def test_forced_plan_accepts_exactly_three_intervening_scans_in_order():
+    # oracle: closed form - 2,3,4 are the three distinct intervening scans; unused 6,7 stay out.
+    plan = replay.forced_scan_plan([0, 1, 2, 3, 4, 5, 6, 7, 8], [1, 5, 8])
+    assert plan == [(1, True), (2, False), (3, False), (4, False), (5, True), (8, True)]
+    stamps = [stamp for stamp, _ in plan]
+    assert all(left < right for left, right in zip(stamps, stamps[1:]))
+
+
+@pytest.mark.parametrize('scans,poses,bad_stamp', [
+    ([1, 2, 3, 4, 5, 6], [1, 5, 4], 4),  # later planned pose would rewind the clock
+    ([1, 3, 2, 4, 5], [1, 5], 2),  # sacrificial stamps themselves are out of order
+    ([1, 2, 3, 4, 5], [1, 5, 5], 5),  # equality is not strict progress
+])
+def test_forced_plan_refuses_non_increasing_feed(scans, poses, bad_stamp):
+    # oracle: invariant - all planned and sacrificial timestamps must strictly advance replay time.
+    with pytest.raises(replay.ReplayRefused, match=f'strictly increasing.*{bad_stamp}'):
+        replay.forced_scan_plan(scans, poses)
