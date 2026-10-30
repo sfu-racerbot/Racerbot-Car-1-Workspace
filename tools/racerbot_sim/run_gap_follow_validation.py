@@ -153,10 +153,14 @@ def recorder_report(rec, start, split, fault):
     after = [s for t, s in rec.sim if t >= start + split]
     distance = (after[-1]['distance_travelled_m'] - before[-1]['distance_travelled_m']
                 if before and after else None)
-    # Keep evidence around injection, including last sample and first samples after it.
+    # Include later samples: the parameter request and the simulator tick are
+    # asynchronous, and a stale fault stops the stream altogether.
     imu_before = [x for x in rec.imu if x[0] < start + split]
     imu_after = [x for x in rec.imu if x[0] >= start + split]
-    evidence = (imu_before[-1:] + imu_after[:3])
+    later = [x for x in imu_after if x[0] >= start + split + 1.0]
+    evidence = imu_before[-1:] + imu_after[:3] + later[:1]
+    if imu_after and imu_after[-1] not in evidence:
+        evidence.append(imu_after[-1])
     stopped = 0
     was_stopped = False
     for _, speed, _ in speeds:

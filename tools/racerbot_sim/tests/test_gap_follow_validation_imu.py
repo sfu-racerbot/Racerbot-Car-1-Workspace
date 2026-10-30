@@ -44,3 +44,27 @@ def test_speed_summary_rejects_nonfinite_samples():
     assert result['before']['mean_speed'] == 2.0
     assert result['after']['mean_speed'] == 4.0
     assert result['after']['mean_commanded_speed'] == 5.0
+
+
+def test_fault_evidence_includes_later_and_last_imu_sample():
+    # oracle: a fault may take effect after the parameter request completes;
+    # a stale stream must expose its final sample and zero must show later zeros.
+    from types import SimpleNamespace
+    rec = SimpleNamespace(intent=[], odom=[], sim=[], status=[], imu=[
+        (139.9, 9.8, 0.2), (140.1, 9.8, 0.3),
+        (141.1, 0.0, 0.0), (150.0, 0.0, 0.0)])
+    evidence = validation.recorder_report(rec, 100.0, 40.0, 'zero')['imu_evidence']
+    assert [41.1, 0.0, 0.0] in evidence
+    assert [50.0, 0.0, 0.0] in evidence
+
+
+def test_evidence_does_not_stop_at_first_three_post_fault_samples():
+    # oracle: after a dense stream of pre-transition samples, the output must
+    # still show the later zero reading and last available sample.
+    from types import SimpleNamespace
+    rec = SimpleNamespace(intent=[], odom=[], sim=[], status=[], imu=[
+        (139.9, 9.8, 0.2), (140.1, 9.8, 0.2), (140.2, 9.8, 0.2),
+        (140.3, 9.8, 0.2), (141.1, 0.0, 0.0), (150.0, 0.0, 0.0)])
+    evidence = validation.recorder_report(rec, 100.0, 40.0, 'zero')['imu_evidence']
+    assert [41.1, 0.0, 0.0] in evidence
+    assert [50.0, 0.0, 0.0] in evidence
