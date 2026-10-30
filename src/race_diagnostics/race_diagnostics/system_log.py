@@ -154,8 +154,8 @@ def main(argv=None) -> int:
     previous_handlers = {}
     for sig in (signal.SIGINT, signal.SIGTERM):
         previous_handlers[sig] = signal.signal(sig, lambda *_: stop.set())
-    # ros2 run is a wrapper and can exit without forwarding launch's signal.
-    # Linux delivers SIGTERM if that parent dies, including during setup.
+    # The parent (launch, or a `ros2 run` wrapper) can die without signalling
+    # us. Linux delivers SIGTERM if it does, including during setup.
     parent = os.getppid()
     if sys.platform.startswith('linux'):
         if not _set_parent_death_signal():
