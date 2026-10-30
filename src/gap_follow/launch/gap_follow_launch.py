@@ -59,6 +59,15 @@ def generate_launch_description():
                     'simulator-validated only, not yet run on the floor '
                     '(docs/gap-follow.md#adaptive-grip-imu).')
 
+    launch_boost_arg = DeclareLaunchArgument(
+        'launch_boost', default_value='true',
+        description='true (the default since 2026-10-30): full speed off the start '
+                    'line on the first LB press, once per launch -- no ramp, corner, '
+                    'corridor or opponent caps until the end of the straight makes the '
+                    'car brake, or 3 s / 5 m pass. Deadman, TTC, emergency clearance and '
+                    'the braking and curvature ceilings still apply. false turns it off '
+                    '(docs/gap-follow.md#launch-boost). Simulator-validated only.')
+
     def node(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
@@ -68,6 +77,8 @@ def generate_launch_description():
                         LaunchConfiguration('steering_damping').perform(context))
         grip = _flag('adaptive_grip',
                      LaunchConfiguration('adaptive_grip').perform(context))
+        boost = _flag('launch_boost',
+                      LaunchConfiguration('launch_boost').perform(context))
         speed = speed_cap_overrides(
             yaml_parameters(gap_follow_config),
             LaunchConfiguration('max_speed').perform(context))
@@ -79,7 +90,8 @@ def generate_launch_description():
             parameters=[gap_follow_config,
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
-                         'enable_adaptive_grip': grip},
+                         'enable_adaptive_grip': grip,
+                         'enable_launch_boost': boost},
                         speed],
         )]
         if damping or grip:
@@ -92,4 +104,4 @@ def generate_launch_description():
         return actions
 
     return LaunchDescription([opponent_arg, max_speed_arg, steering_damping_arg,
-                              adaptive_grip_arg, OpaqueFunction(function=node)])
+                              adaptive_grip_arg, launch_boost_arg, OpaqueFunction(function=node)])

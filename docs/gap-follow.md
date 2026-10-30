@@ -28,6 +28,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 15. [Keeping the mirror honest](#keeping-the-mirror-honest)
 16. [Steering damping (gyro)](#steering-damping-gyro)
 17. [Adaptive grip (IMU)](#adaptive-grip-imu)
+18. [Launch boost](#launch-boost) — full speed off the start line, once per race
 
 ## Highlights
 
@@ -41,6 +42,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 
 - **No more false hard stops in corridors (2026-10-20).** On the 2026-10-19 run, all 97 stop ticks were the TTC brake reacting to the inside wall of a bend 0.12–0.18 m *beside* the car. Replayed through the final config, the same scans produce none.
 - **Other cars: on by default since 2026-10-28.** Two simulated cars on the shipped settings passed 32 of 32 runs, with no contact and no stalls. With the layer off, 24 of 32 passed, with 3 contacts and 5 stalls. It follows slower cars and rarely passes them. Off switch: `opponent_awareness:=false`. It has never run on the floor. See [Several cars at once](#several-cars-at-once).
+- **Launch boost: full speed off the start line (2026-10-30).** The first LB press goes straight to full speed and ignores other cars until the straight ends. Simulated on car 1's course it is about 1 m ahead after 2 s, with no contact in 44 runs. Never run on the floor. Off: `launch_boost:=false`, see [Launch boost](#launch-boost).
 - **More of every track completes (2026-10-20).** Across 11 simulated tracks, 6 seeds each, both directions, 108 of 132 runs pass, against 96 for the 2026-10-19 config. The hall loop `levine_blocked` laps in 23.6 s instead of 34.7 s.
 
 **Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, then to 2.5 m/s² on 2026-10-26.
@@ -211,6 +213,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 | `enable_opponent_awareness` (launch: `opponent_awareness`) | `true` (since 2026-10-28; was `false`) | The other-car layer is off, and the node's commands are what they were before the layer existed (2026-10-22). Launch with `opponent_awareness:=false`. See [Several cars at once](#several-cars-at-once). |
 | `opponent_follow_memory_sec` | `1.0` s (since 2026-10-28; was none) | The follow cap is dropped the moment its car is lost, with the layer still on. Set it to `0.0` to get that. |
+| `enable_launch_boost` (launch: `launch_boost`) | `true` (since 2026-10-30) | The first LB press ramps up like every other one. Launch with `launch_boost:=false`. See [Launch boost](#launch-boost). |
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
@@ -862,6 +865,97 @@ Do these in order, as in [Validation](#validation). Each step needs the one befo
 TODO(verify): the simulator's results for the adaptive grip are not written in this doc yet. The controller's solo and head-to-head runs will fill this in.
 
 `tools/f1tenth_sim/gap_mirror.py` has the same rule, and `test_gap_mirror_parity.py` checks it against the node. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay. So the car may do worse than the simulator says.
+
+## Launch boost
+
+Cars in a race start side by side, and the first corner can be as little as 2 m away. Whoever gets there first takes the racing line, and everyone behind has to find room to pass. The launch boost makes our car go as fast as it safely can for that first stretch.
+
+### What it does, in plain words
+
+The **first** time you press LB after starting `gap_follow_launch.py`, the car:
+
+- asks for full speed (`max_speed`, 5.0 m/s) straight away, instead of climbing to it at `max_acceleration` (5 m/s²). Some wheelspin is expected and fine.
+- skips the comfort limits: the corner cap, the narrow-corridor cap and the speed hold.
+- ignores the other cars as *cars*: no following, no passing logic, no braking for a car alongside.
+- **holds straight** while its own straight path is clear. A car alongside whose nose is ahead of ours does not make it veer away.
+  - "Clear" means nothing inside the band the body sweeps driving straight: its width plus 5 cm a side.
+  - It has to be clear for as far as the car needs to stop, at least 1 m and at most 3 m.
+- if something gets into that straight path, such as a car cutting across or the wall at the end of the straight, it steers round it with the normal gap logic.
+
+It stops being a launch at the first of:
+
+- **The end of the straight.** The braking limit (how fast the car may go and still stop before the wall it sees) drops to the car's own speed. From then on it has to slow down, so normal driving takes over.
+- **3 seconds or 5 metres**, whichever comes first. A backstop for a long straight.
+- **Any stop**: LB released, the collision-time brake, emergency clearance, no gap, stale sensors.
+
+After that it is ordinary `gap_follow` until you restart the launch file.
+
+**Once per launch.** Releasing LB and pressing it again does *not* launch again: that press ramps up as normal. For the next race, restart `gap_follow_launch.py`. A stop before the car has actually driven (for example a stale sensor in the instant LB goes down) does not use the launch up. The first tick that really drives does.
+
+### What it never does
+
+These still apply on every tick of the launch, exactly as they do the rest of the time:
+
+- **The LB deadman.** No LB, no motion, launch or not. Let go and the car stops, and the launch is over.
+- **The collision-time (TTC) brake and emergency clearance.** If another car cuts right in front of us on a collision path, these brake the car and end the launch.
+- **The braking limit**, so the car can still stop before the wall at the end of the straight.
+- **The curvature (grip) limit**, so it never takes a bend faster than the tyres can hold.
+
+<details>
+<summary>Why "the car starts turning" is not an end condition (safe to skip)</summary>
+
+The first plan also ended the launch when the steering request went past 0.15 rad. The simulator showed that this ends the launch on a dead-straight track.
+
+When a car alongside gets its nose ahead of ours, plain gap_follow aims at the middle of the free space next to it. In the test scene that is about 0.23 rad of steering, which is no corner at all.
+
+(The launch now holds straight in that case, but the request it would have made is the same.) Ending the launch there brings the follow cap back at the exact moment the other cars are supposed to be ignored.
+
+The check is still there as `launch_boost_end_steering`, but it ships at `0.0`, which is off.
+
+A real corner does not need it. The curvature limit keeps the speed down while turning, and the wall at the end of the straight ends the launch through the braking limit.
+
+</details>
+
+### Turning it off
+
+In terminal 2, with `bringup_launch.py` already running in terminal 1:
+
+```bash
+# terminal 2, instead of the plain gap_follow launch
+ros2 launch gap_follow gap_follow_launch.py launch_boost:=false
+```
+
+It worked if the first decision line after LB shows the state `gap_follow`, not `launch_boost`. The mapping launches (`map_course`, `auto_map_race`, `autonomous_mapping_launch.py`) always have it off: mapping is one car with no race start.
+
+The knobs are in `src/gap_follow/config/gap_follow.yaml`, under `# --- Launch boost`: `launch_boost_max_sec` (3.0 s), `launch_boost_max_distance` (5.0 m) and `launch_boost_end_steering` (0.0, off).
+
+### How you can tell it ran
+
+- The decision line's state is `launch_boost`, with `LAUNCH BOOST (<seconds>, <metres>; ...)` in its detail. The dashboard shows the same state.
+- When it ends, the terminal prints one line: `launch boost ended (<reason>) after <s> and <m>`. The reason is `braking`, `time`, `distance`, or the stop that ended it (`deadman_released`, `ttc_brake`, ...).
+
+### The car test order
+
+**Wheels off the ground first, and know what the first press does.** With the car on a stand, the first LB press spins the wheels straight up to the full 5 m/s command, with no ramp. Keep hands and cables clear of the wheels before you press. Then, in order:
+
+1. **Wheels off.** Press LB once and check for the `launch_boost` state, then the `launch boost ended` line. With the wheels in the air the car never reaches a wall, so expect `time` after 3 s. Release, press again, and check that the wheels now ramp up.
+2. **Floor, low speed.** `ros2 launch gap_follow gap_follow_launch.py max_speed:=1.0`. The launch then asks for 1.0 m/s, not 5.0. Do a standing start down a straight with nobody in front of the car.
+3. **Floor, full speed, alone.** Shipped settings, a straight of at least 2 m, nobody in front.
+4. **Then side by side** with another car, with a person on each controller.
+
+### What the simulator says
+
+The simulator's copy (`tools/f1tenth_sim/gap_mirror.py`) has the same launch logic, and `test_gap_mirror_parity.py` checks a whole launch against the real node, tick by tick. Measured 2026-10-30:
+
+- **The start itself.** On car 1's course (`car1_course_2026_10_26`) from standstill, the launch car is 0.91 m further along at 1.4 s (3.44 m against 2.53 m), and 0.95 m further at 2.0 s.
+- **Over a whole solo lap it costs nothing.** Across 8 indoor tracks × 4 seeds the mean lap is 0.09 s faster, which is within seed noise.
+  - Faster on most: `narrow_1p2` −0.27 s, `car1_course_2026_10_26` −0.21 s, `indoor_tight` −0.14 s.
+  - Slightly slower on two: `asb_sharp` +0.09 s, `asb_10000` +0.07 s.
+  - The point is the lead at the first corner, not the lap time.
+  - Before the car held straight (it steered with the gap logic through the launch), `asb_sharp` was +0.64 s and car 1's course +0.38 s.
+- **No contact.** 32 solo runs, plus 12 two-car runs with the cars 1 m apart nose to tail (launch car against no-launch car, both start orders): no wall or car contact.
+
+**Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on the car. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
 
 ## See also
 
