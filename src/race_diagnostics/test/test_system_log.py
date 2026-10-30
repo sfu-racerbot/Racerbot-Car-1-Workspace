@@ -205,8 +205,12 @@ def test_record_run_wiring(tmp_path):
         return [[perform_substitutions(context, part) for part in action.cmd]
                 for action in actions if type(action) is ExecuteProcess]
 
-    # oracle: requested launch contract, with the run's system directory.
-    assert commands() == [['ros2', 'run', 'race_diagnostics', 'system_log',
-                           '--output', str(tmp_path / 'run' / 'system')]]
+    # oracle: setup.py's console script at ament's install path, with the
+    # run's system directory. Not `ros2 run`: it swallows launch's SIGINT
+    # (ros2run/api/__init__.py run_executable; test_record_run_shutdown.py).
+    from ament_index_python.packages import get_package_prefix
+    script = os.path.join(get_package_prefix('race_diagnostics'), 'lib',
+                          'race_diagnostics', 'system_log')
+    assert commands() == [[script, '--output', str(tmp_path / 'run' / 'system')]]
     context.launch_configurations['system_log'] = 'false'
     assert commands() == []

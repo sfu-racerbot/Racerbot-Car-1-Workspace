@@ -24,6 +24,7 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, Opaqu
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import ExecutableInPackage
 from race_diagnostics.auto_record import recorder_node_names
 from race_diagnostics.run_metadata import (
     find_repo_root, imu_calibration_files, team_repos, write_packages,
@@ -191,8 +192,13 @@ def _setup(context, *args, **kwargs):
             output='screen',
         ))
     if LaunchConfiguration('system_log', default='true').perform(context).lower() in ('true', '1'):
+        # The executable itself, not `ros2 run`: that wrapper swallows SIGINT
+        # and waits for a terminal to signal the whole group, so launch's
+        # SIGINT never reached system_log and every stop waited for the 5 s
+        # SIGTERM escalation (and a stop after auto_record was killed could
+        # hang on that timer).
         actions.append(ExecuteProcess(
-            cmd=['ros2', 'run', 'race_diagnostics', 'system_log',
+            cmd=[ExecutableInPackage('system_log', 'race_diagnostics'),
                  '--output', os.path.join(run_dir, 'system')],
             name=f'{prefix}system_log',
             output='screen',

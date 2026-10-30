@@ -74,8 +74,10 @@ def test_late_node_restart_namespace_and_sigterm(tmp_path):
         assert yaml.safe_load(base.read_text())['/b23s1/late_node']['ros__parameters']['marker'] == 41.5
         assert yaml.safe_load(twin.read_text())['/b23s1/dup/late_node']['ros__parameters']['marker'] == 43.5
         # ros2 run is a wrapper; signal its executable, not the wrapper itself.
-        children = (f'/proc/{proc.pid}/task/{proc.pid}/children')
-        child_pids = open(children).read().split()
+        # Not /proc/<pid>/task/<pid>/children: it needs CONFIG_PROC_CHILDREN,
+        # which the Jetson (L4T) kernel leaves unset.
+        child_pids = subprocess.run(['ps', '-o', 'pid=', '--ppid', str(proc.pid)],
+                                    capture_output=True, text=True).stdout.split()
         assert len(child_pids) == 1, child_pids
         os.kill(int(child_pids[0]), signal.SIGTERM)
         stdout, stderr = proc.communicate(timeout=10.0)
