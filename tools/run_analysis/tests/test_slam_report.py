@@ -168,3 +168,16 @@ def test_failed_revolutions_lap_at_ceiling_never_becomes_passed(tmp_path):
     assert 'accepted at the ceiling' in lap_line
     assert 'passed' not in lap_line
     assert 'deg' not in lap_line
+
+
+def test_report_lists_every_failed_quality_comparison():
+    failure = 'Lap 4 did not pass the quality check (heading_error=19.2deg > 15.0deg (50% of the 30deg gate); revolutions=2.09 > 1.50 (...)) and the 5-lap ceiling has not been reached -- ...'
+    run = dict(slam=None, laps=[dict(lap=4, of=3)],
+               quality=[report.parse_lap_quality(failure)])
+    lines, summary = report.build_report(run)
+    # oracle: spec, both failing comparisons must be visible to the reader.
+    assert summary['Laps'][0]['verdict'] == 'failed'
+    lap_line, = [line for line in lines if line.startswith('  lap 4/')]
+    assert 'heading_error=19.2 deg > 15.0 deg' in lap_line
+    assert 'revolutions=2.09 > 1.5' in lap_line
+    assert 'accepted at the ceiling' not in lap_line
