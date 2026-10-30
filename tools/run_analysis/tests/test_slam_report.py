@@ -214,3 +214,24 @@ def test_widened_closure_failure_overrides_profile_evidence(tmp_path, accepted, 
     if combined:
         assert 'reanchor_count=21 > 20' in lap_line
         assert 'revolutions=2.09 > 1.5' in lap_line
+
+
+def test_ceiling_report_retains_all_four_quality_comparisons():
+    failure = (
+        'Lap 5 did not pass the quality check (reanchor_count=21 > 20; '
+        'closed only after the proximity gate widened '
+        '(closest_approach=1.80m > the original closure_distance=1.50m); '
+        'heading_error=19.2deg > 15.0deg (50% of the 30deg gate); '
+        'revolutions=2.09 > 1.50 (closed over roughly two overlapping laps, not one)), '
+        'but the 5-lap ceiling is reached -- accepting it anyway rather than mapping indefinitely.')
+    run = dict(slam=None, laps=[dict(lap=5, of=3)], profile_laps=[5],
+               quality=[report.parse_lap_quality(failure)])
+    lines, summary = report.build_report(run)
+    # oracle: spec, a ceiling-accepted failure must display all four producer
+    # comparisons, with their original values/limits and applicable units.
+    assert summary['Laps'][0]['verdict'] == 'failed (accepted at the ceiling)'
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert ('quality failed reanchor_count=21 > 20; closest_approach=1.8 m > 1.5 m; '
+            'heading_error=19.2 deg > 15.0 deg; revolutions=2.09 > 1.5 '
+            '(accepted at the ceiling)') in lap_line
+    assert 'passed' not in lap_line
