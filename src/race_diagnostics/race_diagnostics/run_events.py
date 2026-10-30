@@ -255,8 +255,17 @@ def parse_lap_quality(line):
     number = r'(-?(?:\d+(?:\.\d*)?|\.\d+))'
     pattern = (r'(\w+)=' + number + r'(?:deg)? > '
                + number + r'(?:deg)?(?:\s+\(.*\))?')
+    widened = (r'closed only after the proximity gate widened '
+               r'\(closest_approach=' + number
+               + r'm > the original closure_distance=' + number + r'm\)')
     metrics = []
     for comparison in line[start:end].split(';'):
+        widened_match = re.fullmatch(widened, comparison.strip())
+        if widened_match:
+            value, limit = widened_match.groups()
+            metrics.append({'metric': 'closest_approach',
+                            'value': float(value), 'limit': float(limit)})
+            continue
         metric_match = re.fullmatch(pattern, comparison.strip())
         if not metric_match:
             return None

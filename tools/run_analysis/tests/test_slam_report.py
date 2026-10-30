@@ -181,3 +181,36 @@ def test_report_lists_every_failed_quality_comparison():
     assert 'heading_error=19.2 deg > 15.0 deg' in lap_line
     assert 'revolutions=2.09 > 1.5' in lap_line
     assert 'accepted at the ceiling' not in lap_line
+
+
+@pytest.mark.parametrize('accepted', [False, True])
+@pytest.mark.parametrize('combined', [False, True])
+def test_widened_closure_failure_overrides_profile_evidence(tmp_path, accepted, combined):
+    clause = ('closed only after the proximity gate widened '
+              '(closest_approach=1.80m > the original closure_distance=1.50m)')
+    if combined:
+        clause = 'reanchor_count=21 > 20; ' + clause + '; revolutions=2.09 > 1.50'
+    tail = (', but the 5-lap ceiling is reached -- accepting it anyway rather '
+            'than mapping indefinitely.' if accepted else
+            ' and the 5-lap ceiling has not been reached -- recording one more lap.')
+    failure = 'Lap 5 did not pass the quality check (' + clause + ')' + tail
+    closed = ('Closed mapping lap 5/3 detected (29.0m, 360deg of turning, '
+              '1.00 revolutions, 160 samples, closest approach to the start '
+              '1.80m against a 1.90m gate, 21 SLAM corrections absorbed).')
+    profile = 'Generated 100-point racing profile at /tmp/profile.csv (1.0-3.0m/s).'
+    log = tmp_path / 'launch.log'
+    log.write_text('\n'.join((closed, failure, profile)))
+    run = report.load_inputs(tmp_path, log_path=log, load_slam=lambda path: {},
+                             load_scans=lambda path: None, load_rosout=lambda path: [])
+    lines, summary = report.build_report(run)
+    # oracle: spec, the failed proximity comparison remains a failure even
+    # when a saved profile supplies otherwise positive acceptance evidence.
+    wanted = 'failed (accepted at the ceiling)' if accepted else 'failed'
+    assert summary['Laps'][0]['verdict'] == wanted
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert 'closest_approach=1.8 m > 1.5 m' in lap_line
+    assert 'passed' not in lap_line
+    assert ('accepted at the ceiling' in lap_line) == accepted
+    if combined:
+        assert 'reanchor_count=21 > 20' in lap_line
+        assert 'revolutions=2.09 > 1.5' in lap_line
