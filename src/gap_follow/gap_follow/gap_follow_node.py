@@ -1869,11 +1869,6 @@ class GapFollowNode(Node):
         acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
-        impact_text = ''
-        if self.enable_imu_impact_stop:
-            impact_off = self._impact_detection_reason()
-            if impact_off is not None:
-                impact_text = f', imu_impact_stop_off: {impact_off}'
         if self.enable_imu_traction:
             if traction_off is not None:
                 traction_text = f', imu_traction_off: {traction_off}'
@@ -1989,7 +1984,7 @@ class GapFollowNode(Node):
             f"curvature={limited_curvature:+.3f}/m, closest={closest_text}, "
             f"odom={self.current_speed:+.2f}m/s; "
             f"{cap_text}{swept_text}{adaptive_text}{centering_text}{setup_text}"
-            f"{damping_text}{grip_text}{understeer_text}{traction_text}{impact_text}"
+            f"{damping_text}{grip_text}{understeer_text}{traction_text}"
             f"{guard_text}{steering_shape_text}{speed_shape_text}")
         self._log_decision(gap_mode, decision_detail, steering_angle, speed)
 
@@ -2566,6 +2561,14 @@ class GapFollowNode(Node):
         if not self._intent_throttle.should_publish(now):
             return
         try:
+            if self.enable_imu_impact_stop:
+                # Diagnostic-only trust/force explanation, including on early
+                # stops. Never let reason construction escape this boundary.
+                impact_off = self._impact_detection_reason()
+                if impact_off is not None:
+                    reason = lambda base=reason, why=impact_off: (
+                        (base() if callable(base) else base) or ''
+                    ) + f', imu_impact_stop_off: {why}'
             if self.using_fused_speed:
                 # Early stops may not read gated odometry. Refresh only here,
                 # after the drive command, inside diagnostic containment.
