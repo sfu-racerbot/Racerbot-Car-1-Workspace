@@ -136,6 +136,20 @@ def inject_fault(node, launch_pid, fault, env, proc_root=Path('/proc')):
     return write_fault(fault, env)
 
 
+def gap_follow_launch_args(requested):
+    """The gap_follow launch arguments, with the simulated IMU selected.
+
+    imu_hardware:=auto probes for gym_bridge_node when the launch starts and
+    can lose that race against the simulator's own start-up (it then picks
+    the real IMU, and the interlock refuses). This harness only ever drives
+    the simulator, so it says so explicitly; an explicit imu_hardware:= wins.
+    """
+    args = list(requested or [])
+    if not any(arg.split(':=', 1)[0] == 'imu_hardware' for arg in args):
+        args.append('imu_hardware:=false')
+    return args
+
+
 def injection_environment(harness_env):
     env = dict(harness_env)
     env.pop('ROS_STATIC_PEERS', None)
@@ -391,7 +405,7 @@ def run(args) -> dict:
         'imu_fault:=none',
     ])
     controller = Launch(log_dir / 'gap_follow.log', 'gap_follow', 'gap_follow_launch.py',
-                        args.gap_follow_arg)
+                        gap_follow_launch_args(args.gap_follow_arg))
 
     result = {
         'controller': 'gap_follow',

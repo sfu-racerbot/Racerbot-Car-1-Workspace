@@ -183,7 +183,11 @@ When `steering_damping` or `adaptive_grip` is on, `gap_follow_launch.py` starts
 this estimator. In the simulator it chooses the simulated IMU by itself:
 `imu_hardware` defaults to `auto`, which sees the running simulator and starts
 neither `imu_bridge_node` nor the BNO085 bridge. `imu_hardware:=false` forces
-the simulated IMU.
+the simulated IMU. The `auto` check runs once, when gap_follow starts. If you
+start gap_follow within a few seconds of `sim_bringup_launch.py`, the simulator
+may not be up yet and `auto` picks the real IMU (the simulator then refuses to
+run beside it). Pass `imu_hardware:=false` in that case; the validation
+harness always does.
 
 `map_course` also uses the simulated IMU. With `sim_bringup_launch.py`
 running, the wrapper adds `imu_hardware:=false` for you, so the estimator
@@ -240,15 +244,16 @@ is a transition to an odometry speed below 0.05 m/s.
 ```bash
 RB_WS="$(git rev-parse --show-toplevel)" rb env ROS_DOMAIN_ID=64 \
   python3 tools/racerbot_sim/run_gap_follow_validation.py --duration 120 --fault-at 40 \
-  --imu-fault stale --gap-follow-arg imu_hardware:=false --gap-follow-arg fused_speed:=true \
-  --gap-follow-arg imu_understeer:=true --gap-follow-arg imu_traction:=true \
-  --gap-follow-arg imu_impact_stop:=true --output /tmp/stale-report.json
+  --imu-fault stale --gap-follow-arg imu_all:=true --output /tmp/stale-report.json
 ```
 
 **Working when:** the command writes the JSON report and prints its ordinary
 contact-and-distance verdict. Inspect `imu_validation` separately: that verdict
 does not apply the IMU acceptance thresholds below. Steering damping is on by
-default; adaptive grip is off. This launch has no `imu_all` argument.
+default; adaptive grip is off and `imu_all` leaves it off. The harness passes
+`imu_hardware:=false` itself. Its own tests run with the other tool suites:
+`python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q`
+(sourced, on an isolated domain; see CLAUDE.md). `colcon test` does not run them.
 
 The explicit `imu_hardware:=false` selects the simulator's IMU even if the
 controller starts before automatic simulator detection completes.
