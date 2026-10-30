@@ -208,6 +208,66 @@ non-zero correction against the gyro's turn rate while cornering. With
 while driving continues; setting the fault back to `none` restores damping.
 Reasons appear periodically, so some messages omit that field.
 
+### IMU fall-backs, closed loop
+
+On 2026-10-29, the validation harness ran `gap_follow` on `indoor_wide`
+with a requested 120 seconds of driving and each fault requested at 40 seconds.
+It uses the simulator's chassis-versus-map check for wall contacts. A stop
+is a transition to an odometry speed below 0.05 m/s.
+
+**Terminal 1**, from the workspace root, run the stale-fault case:
+
+```bash
+RB_WS="$(git rev-parse --show-toplevel)" rb env ROS_DOMAIN_ID=64 \
+  python3 tools/racerbot_sim/run_gap_follow_validation.py --duration 120 --fault-at 40 \
+  --imu-fault stale --gap-follow-arg fused_speed:=true \
+  --gap-follow-arg imu_understeer:=true --gap-follow-arg imu_traction:=true \
+  --gap-follow-arg imu_impact_stop:=true --output /tmp/stale-report.json
+```
+
+**Working when:** the command writes the JSON report and prints its ordinary
+contact-and-distance verdict. Inspect `imu_validation` separately: that verdict
+does not apply the IMU acceptance thresholds below. Steering damping is on by
+default; adaptive grip is off. This launch has no `imu_all` argument.
+For the feature-off baseline, omit the four feature arguments and fault, and
+add `--gap-follow-arg steering_damping:=false`. For the no-fault comparison,
+omit only `--imu-fault stale`. Replace `stale` with `status_fault`, `zero` or
+`bias` for the other runs.
+
+| Run | Distance (m) | Contact steps | Stops | Mean speed before / after (m/s) | Commanded speed before / after (m/s) | Five fall-back fractions |
+|---|---:|---:|---:|---:|---:|---|
+| Features off | 444.41 | 0 | 0 | 3.553 / 3.539 | 3.732 / 3.720 | 0 / 0 / 0 / 0 / 0 |
+| Features on | 412.68 | 0 | 0 | 3.416 / 3.408 | 3.596 / 3.579 | 0 / 0 / 0 / 0 / 0 |
+| `stale` | 426.20 | 0 | 0 | 3.421 / 3.553 | 3.599 / 3.734 | 0.0631 / 0.0631 / 0.0631 / 0.0631 / 0.0631 |
+| `status_fault` | 432.27 | 0 | 0 | 3.427 / 3.542 | 3.592 / 3.725 | 0.0614 / 0.0614 / 0.0614 / 0.0614 / 0.0614 |
+| `zero` | 413.13 | 0 | 0 | 3.430 / 3.515 | 3.605 / 3.707 | 0.0609 / 0.0609 / 0.0609 / 0.0609 / 0.0609 |
+| `bias` | 420.48 | 0 | 0 | 3.320 / 3.411 | 3.517 / 3.585 | 0 / 0 / 0 / 0 / 0 |
+
+The fractions are steering damping, fused speed, understeer, traction and
+impact stop, in that order. They count all intent messages at least 0.5 s
+after the acknowledged injection, including messages with no reason field.
+The three fall-back runs **fail the 95% reason requirement**: reasons are
+published periodically, rather than on every intent message. All three had
+zero contact and post-fault mean speed within 10% of the baseline. Bias had
+zero contact and status stayed `ok`.
+
+There is a timing limitation: the requested 40 s injections were acknowledged
+at 45.588 s (`stale`), 42.406 s (`status_fault`), 42.540 s (`zero`) and
+45.312 s (`bias`). The measured post-split distances were 303.514 m for the
+baseline and 273.642, 288.608 and 269.702 m for the three fall-back runs,
+respectively. These are 90%, 95% and 89% of the baseline, but the intervals
+differ, so they do not establish the same-time distance criterion.
+
+The stale stream's last sample arrived at 45.418 s; it had no later samples.
+For `status_fault`, status changed from `ok` to `fault` at 42.247 s. For
+`zero`, status reported `all zero` at 42.395 s and later samples had zero
+vertical acceleration and yaw rate. For `bias`, the parameter change was
+acknowledged and status stayed `ok`, but the recorded yaw samples do not
+separate bias from the car's changing turn rate.
+
+The gym's tyres do not slide. These runs check the fall-back wiring, not
+whether grip or understeer behaviour is valid on the floor.
+
 **All simulated IMU output sits behind the hardware interlock.**
 The simulator refuses to send readings beside `imu_bridge_node`, including in
 other namespaces, because mixing real and simulated gyros would mislead
