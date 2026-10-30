@@ -174,7 +174,7 @@ With `imu_lap_turns` enabled, short odometry gaps use map heading provisionally.
 
 Reconciliation requires a gap of at most 0.25 s with provisional turning kept within 90°. Other gaps retain the map estimate because a wrapped heading difference can hide a full turn.
 
-The minimum lap duration is 4 s, alongside the 300° turning gate. The former 15 s floor blocked the first return on the simulator's roughly 29 m oval, forcing two circuits into each recorded lap.
+A lap must take at least 4 s, alongside the 300° turning gate. From the second lap on, it must also take at least half as long as the lap before. That way the minimum follows the course: on car 1's 29 m course at mapping speed it is about 8 s, and on a longer course it grows with it. The former fixed 15 s blocked the first return on the simulator's roughly 29 m oval, forcing two circuits into each recorded lap.
 
 The corrected `imu_all:=true` simulator run `20261029-170502` recorded 363°, 360° and 359° (1.01, 1.00 and 1.00 revolutions). Its final lap passed and saved a racing profile. See [the simulator results](ros-simulator.md#simulated-imu) for the first-run diagnosis and repeat-run paths.
 
