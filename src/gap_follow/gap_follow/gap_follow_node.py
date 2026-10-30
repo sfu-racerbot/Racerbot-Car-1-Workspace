@@ -1211,17 +1211,25 @@ class GapFollowNode(Node):
             and 0.0 <= command_age_sec <= self.ttc_command_speed_timeout_sec
         ):
             recent_command_speed = self.last_commanded_speed
-        effective_speed = gap_logic.conservative_ttc_speed(
-            self._safety_speed(),
+        command_args = (
             self.last_commanded_speed,
             command_age_sec,
             self.ttc_command_speed_timeout_sec,
             self.ttc_command_fallback_max_odom_speed,
         )
+        effective_speed = gap_logic.conservative_ttc_speed(
+            self.current_speed, *command_args)
+        if self.using_fused_speed:
+            # The near-zero command fallback is conditional: maxing the
+            # measurements first can switch it off. Preserve each source's
+            # independent result, especially the feature-off wheel result.
+            wheel_effective_speed = gap_logic.conservative_ttc_speed(
+                self.wheel_speed, *command_args)
+            effective_speed = max(wheel_effective_speed, effective_speed)
         return effective_speed, recent_command_speed
 
     def _safety_speed(self):
-        """Safety never discounts wheel motion because of a fused estimate."""
+        """Measurement summary only; not an input to conditional safety checks."""
         if not self.using_fused_speed:
             return self.current_speed
         return math.copysign(

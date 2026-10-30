@@ -418,6 +418,16 @@ class GapController:
                 current_speed, self.last_commanded_speed, command_age,
                 p["ttc_command_speed_timeout_sec"],
                 p["ttc_command_fallback_max_odom_speed"])
+            if (fused_speed is not None and math.isfinite(fused_speed)
+                    and yaw_rate is not None and math.isfinite(yaw_rate)):
+                # current_speed is raw wheels; an optional trusted fused
+                # sample can only add vigilance. Combine fallback results,
+                # never measurements, just as the node's fused path does.
+                fused_effective_speed = gap_logic.conservative_ttc_speed(
+                    fused_speed, self.last_commanded_speed, command_age,
+                    p["ttc_command_speed_timeout_sec"],
+                    p["ttc_command_fallback_max_odom_speed"])
+                effective_speed = max(effective_speed, fused_effective_speed)
             if effective_speed >= p["ttc_min_brake_speed"]:
                 min_ttc = gap_logic.minimum_ttc(
                     window, window_valid, beam_angles, effective_speed,
