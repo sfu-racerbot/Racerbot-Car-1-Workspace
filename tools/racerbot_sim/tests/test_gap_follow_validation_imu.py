@@ -120,3 +120,69 @@ def test_proc_snapshot_parses_parent_and_bridge_executable(tmp_path):
     bridges, parents = validation.process_snapshot(tmp_path)
     assert bridges == [12]
     assert parents == {12: 7, 13: 1}
+
+
+@pytest.mark.parametrize('time_arg', ['0', '-1', '10', '11', 'nan', 'inf'])
+def test_fault_time_must_be_inside_driving_window(time_arg):
+    # oracle: review fix round 1 requires 0 < fault-at < duration.
+    with pytest.raises(SystemExit) as exc:
+        validation.parse_args(['--duration', '10', '--fault-at', time_arg, '--imu-fault', 'zero'])
+    assert exc.value.code == 2
+
+
+def test_missed_fault_is_failure_and_no_requested_split_is_used():
+    # oracle: a requested but unacknowledged injection cannot pass or be a split.
+    assert 'not acknowledged' in validation.injection_failure('zero', None, None)
+    assert validation.injection_failure('zero', 4.2, None) is None
+    assert validation.injection_failure(None, None, None) is None
+    assert validation.injection_failure('zero', None, 'launch crashed') == 'launch crashed'
+    assert validation.validation_split('zero', 4.0, None) is None
+    assert validation.validation_split('zero', 4.0, 4.2) == 4.2
+    assert validation.validation_split(None, 4.0, None) == 4.0
+
+
+def test_parameter_write_failures_are_returned(monkeypatch):
+    import subprocess
+    # oracle: every parameter-client failure becomes a named injection failure.
+    def timed_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 15)
+    monkeypatch.setattr(subprocess, 'run', timed_out)
+    assert 'timed out' in validation.write_fault('stale', {'ROS_DOMAIN_ID': '64'})
+    def unavailable(*args, **kwargs):
+        raise OSError('client missing')
+    monkeypatch.setattr(subprocess, 'run', unavailable)
+    assert 'client missing' in validation.write_fault('stale', {'ROS_DOMAIN_ID': '64'})
+
+
+def test_parameter_client_uses_given_domain_and_requires_success(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    # oracle: the client uses the harness domain and must acknowledge the set.
+    calls = []
+    def run_client(command, **kwargs):
+        calls.append((command, kwargs['env']))
+        return SimpleNamespace(returncode=0, stdout='Set parameter successful', stderr='')
+    monkeypatch.setattr(subprocess, 'run', run_client)
+    assert validation.write_fault('zero', {'ROS_DOMAIN_ID': '64'}) is None
+    assert calls == [(['ros2', 'param', 'set', '/gym_bridge_node', 'imu_fault', 'zero'],
+                      {'ROS_DOMAIN_ID': '64'})]
+    def rejected(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout='Set parameter failed', stderr='')
+    monkeypatch.setattr(subprocess, 'run', rejected)
+    assert 'failed' in validation.write_fault('zero', {'ROS_DOMAIN_ID': '64'})
+
+
+def test_injection_target_refuses_hardware_and_unreadable_graph():
+    # oracle: HardwareInterlock rejects any namespaced real hardware or unreadable graph.
+    class Graph:
+        def __init__(self, nodes):
+            self.nodes = nodes
+        def get_node_names_and_namespaces(self):
+            if self.nodes is None:
+                raise RuntimeError('graph unavailable')
+            return self.nodes
+    assert 'hardware' in validation.check_injection_target(
+        Graph([('joy', '/car')]), 123)
+    assert 'hardware' in validation.check_injection_target(
+        Graph([('vesc_driver_node', '/'), ('urg_node', '/')]), 123)
+    assert 'graph' in validation.check_injection_target(Graph(None), 123)

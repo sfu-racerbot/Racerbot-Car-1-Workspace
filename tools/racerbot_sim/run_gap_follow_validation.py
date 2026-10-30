@@ -114,6 +114,33 @@ def check_injection_target(node, launch_pid):
     return injection_guard(hardware, bridges, launch_pid, parents)
 
 
+def write_fault(fault, env):
+    """Return an error for any parameter-client failure, or None on success."""
+    try:
+        completed = subprocess.run(
+            ['ros2', 'param', 'set', '/gym_bridge_node', 'imu_fault', fault],
+            capture_output=True, text=True, timeout=15, cwd=str(ROOT), env=env)
+    except subprocess.TimeoutExpired:
+        return 'parameter client timed out'
+    except Exception as exc:  # noqa: BLE001 -- still clean up and report failures
+        return f'parameter client error: {exc}'
+    if completed.returncode or 'successful' not in completed.stdout.lower():
+        return f'parameter client failed: {completed.stdout} {completed.stderr}'
+    return None
+
+
+def injection_failure(fault, injected_at, fatal):
+    if fatal:
+        return fatal
+    if fault and injected_at is None:
+        return 'fault injection failed: injection was not acknowledged'
+    return None
+
+
+def validation_split(fault, requested, injected_at):
+    return injected_at if fault else requested
+
+
 def reason_report(log, fault_at, fault):
     expected = 'imu stale' if fault == 'stale' else 'imu fault'
     eligible = [reason for t, reason in log
@@ -368,22 +395,19 @@ def run(args) -> dict:
                     fatal = f'never started driving within {args.startup_timeout:.0f}s'
                     break
             else:
+                if time.monotonic() - driving_since >= args.duration:
+                    break
                 if (args.imu_fault and injected_at is None
                         and time.monotonic() - driving_since >= args.fault_at):
                     refusal = check_injection_target(recorder.node, bringup.process.pid)
                     if refusal:
                         fatal = f'fault injection failed: {refusal}'
                         break
-                    completed = subprocess.run(
-                        ['ros2', 'param', 'set', '/gym_bridge_node', 'imu_fault', args.imu_fault],
-                        capture_output=True, text=True, timeout=15, cwd=str(ROOT),
-                        env=injection_env)
-                    if completed.returncode or 'successful' not in completed.stdout.lower():
-                        fatal = f'fault injection failed: {completed.stdout} {completed.stderr}'
+                    error = write_fault(args.imu_fault, injection_env)
+                    if error:
+                        fatal = f'fault injection failed: {error}'
                         break
                     injected_at = time.monotonic() - driving_since
-                if time.monotonic() - driving_since >= args.duration:
-                    break
             time.sleep(1.0)
 
         status = sim_status()
@@ -404,10 +428,13 @@ def run(args) -> dict:
     result['driving_seconds'] = (
         round(time.monotonic() - driving_since, 1) if driving_since else 0.0)
     if recorder and driving_since is not None:
-        split = injected_at if injected_at is not None else args.fault_at
-        result['imu_validation'] = recorder_report(recorder, driving_since, split, args.imu_fault)
+        split = validation_split(args.imu_fault, args.fault_at, injected_at)
+        result['imu_validation'] = (recorder_report(recorder, driving_since, split, args.imu_fault)
+                                    if split is not None else
+                                    {'fault': args.imu_fault, 'fault_at_s': None})
         result['imu_validation']['injected_at_s'] = injected_at
 
+    fatal = injection_failure(args.imu_fault, injected_at, fatal)
     if fatal:
         result['failure'] = fatal
     elif status.get('ever_contacted'):
@@ -445,8 +472,10 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.imu_fault and args.fault_at is None:
         parser.error('--imu-fault requires --fault-at')
-    if args.fault_at is not None and (not math.isfinite(args.fault_at) or args.fault_at < 0):
-        parser.error('--fault-at must be finite and non-negative')
+    if args.fault_at is not None and (not math.isfinite(args.fault_at)
+                                      or not math.isfinite(args.duration)
+                                      or not 0 < args.fault_at < args.duration):
+        parser.error('--fault-at must be finite and strictly between 0 and --duration')
     if any(':=' not in arg or not arg.split(':=', 1)[0] for arg in args.gap_follow_arg):
         parser.error('--gap-follow-arg must be NAME:=VALUE')
     return args
