@@ -43,3 +43,25 @@ def test_both_stale_names_both_topics():
     # oracle: spec (wrap-up M1).
     assert (speed, state) == (0.0, 'odometry_stale')
     assert f"'{wheel}'" in detail and f"'{fused}'" in detail
+
+
+def _review_case_ceiling(enabled):
+    from test_gap_follow_steering_damping_node import _capture_intent
+    with _node(enabled, ()) as n:
+        intents = _capture_intent(n)
+        _feed_imu(n, yaw_rate=0.0)
+        _feed_odom(n, 2.0)
+        _odom(n.wheel_odom_callback, 2.0)
+        _odom(n.fused_odom_callback, 2.2)
+        _hold_deadman(n)
+        n.last_commanded_speed = 1.5
+        _tick(n)
+        return [f['name'] for f in intents[-1]['factors'] if f['binding']]
+
+
+def test_dashboard_names_the_traction_off_ceiling_when_it_binds():
+    # oracle: closed form (final review's case): traction's own ramp from the
+    # fused 2.2 m/s is 2.325 m/s, the traction-off ramp from the wheel 2.0
+    # m/s is 2.125 m/s, so the traction-off ceiling is the binding factor.
+    assert _review_case_ceiling(True) == ['traction-off ceiling']
+    assert 'traction-off ceiling' not in _review_case_ceiling(False)

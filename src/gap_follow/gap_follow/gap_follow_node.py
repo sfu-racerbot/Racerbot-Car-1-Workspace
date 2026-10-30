@@ -1889,6 +1889,9 @@ class GapFollowNode(Node):
             speed = min(desired_speed, acceleration_ceiling)
 
         speed = min(speed, traction_off_ceiling)
+        # Name the traction-off ceiling when it, not traction's own ramp, is
+        # the lower one, so the dashboard says which cap actually held.
+        traction_off_binds = traction_off_ceiling < acceleration_ceiling
         acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
@@ -2029,8 +2032,10 @@ class GapFollowNode(Node):
             intent_factors.append(schema.factor('follow cap', follow_cap))
         if near_bearing is not None:
             intent_factors.append(schema.factor('anticipation cap', anticipated_speed))
-        intent_factors.append(schema.factor(
-            'traction hold' if traction_holding else 'accel ceiling', acceleration_ceiling))
+        ceiling_name = ('traction hold' if traction_holding
+                        else 'traction-off ceiling' if traction_off_binds
+                        else 'accel ceiling')
+        intent_factors.append(schema.factor(ceiling_name, acceleration_ceiling))
         self._publish_intent(
             gap_mode,
             decision_detail,
