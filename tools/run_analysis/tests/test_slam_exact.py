@@ -24,6 +24,11 @@ Round-3 step 4, observed failing separately, reverted and rerun green:
   b. bracket only the first pair -> test_tf_brackets_cover_every_needed_pair_in_recorded_order
 Chain/preparation stubs and a constant bracket result failed the remaining new
 TF edge and integration tests. All original assertions remain in place.
+
+Review step 3: review-fix1 on the copied 20261026-194913 matched all 315 poses,
+with zero missing/extra and exactly the round-3 maxima: 1.171361057304152e-13 m,
+3.053332494204976e-13 degrees, no first_over_bar. The unchanged bag fallback
+also ran after three service failures and recorded map_saved='from_bag'.
 """
 import math
 import os
