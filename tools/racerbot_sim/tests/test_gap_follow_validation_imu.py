@@ -25,6 +25,10 @@ def test_unknown_fault_is_rejected_before_run():
 
 
 def test_fraction_uses_only_messages_after_settle():
+    # A6: /home/bryan/racerbot-ws/.oc-runs/part-b23-slam-imu/task-I2b-answer-1.md
+    # corrects the old denominator. IntentThrottle in
+    # src/drive_intent/drive_intent/throttle.py sends reasons only on state
+    # changes and periodically; counting all messages was therefore wrong.
     log = [(39.0, 'steering_damping_off: imu stale'),
            (40.5, 'steering_damping_off: imu stale'), (41.0, 'other reason')]
     # oracle: two eligible reason-bearing messages, one names the fallback.
