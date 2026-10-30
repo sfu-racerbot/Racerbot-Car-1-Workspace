@@ -796,6 +796,14 @@ The gain of 0.10 that ships is in the [race table](#race-defaults-2026-10-27). T
 
 Adaptive grip is **off by default**. It lets the car take corners a little faster while the gyro says the tires are holding. It backs off when they start to slide.
 
+It ships off because the recorded car 1 runs `20261026-194514` and
+`20261026-194913` leave little speed to gain. Replaying those runs would have
+raised the lateral limit by at most 0.09 m/s², roughly 1% of corner speed.
+
+The grip ratio falls below the 0.90 slip line above about 2.0–2.5 m/s², so
+there is no demonstrated grip to take above the 2.5 m/s² `max_lateral_accel`.
+The Part A simulator comparison was slower with adaptive grip enabled.
+
 ### What it does, in plain words
 
 Every corner has a sideways limit: how hard the tires can push the car before it slides. The node uses a number for that limit, `max_lateral_accel`, which is 2.5 m/s² (metres per second squared) in the shipped config. The speed cap for a corner comes from that number.
@@ -875,7 +883,10 @@ Do these in order, as in [Validation](#validation). Each step needs the one befo
 
 ### What the simulator says
 
-TODO(verify): the simulator's results for the adaptive grip are not written in this doc yet. The controller's solo and head-to-head runs will fill this in.
+On car 1's simulated course, the Part A comparison with relaxed thresholds
+measured a 12.30 s lap with adaptive grip against 12.04 s at the fixed
+2.5 m/s² limit. The simulator's tyres do not slide, so this comparison does
+not establish the grip available on the floor.
 
 `tools/f1tenth_sim/gap_mirror.py` has the same rule, and `test_gap_mirror_parity.py` checks it against the node. The simulator gives the controller the gym's true yaw rate, with no sensor noise and no delay. So the car may do worse than the simulator says.
 
