@@ -29,6 +29,13 @@ Review step 3: review-fix1 on the copied 20261026-194913 matched all 315 poses,
 with zero missing/extra and exactly the round-3 maxima: 1.171361057304152e-13 m,
 3.053332494204976e-13 degrees, no first_over_bar. The unchanged bag fallback
 also ran after three service failures and recorded map_saved='from_bag'.
+
+Review step 4: reverting containment failed nine cases, including
+test_replay_output_inside_existing_run_refused[source]; reverting the forced
+plan fix failed four, including test_forced_plan_refuses_reusing_first_scan_as_sacrifice.
+Removing the analysis exception failed both test_replay_output_under_analysis_allowed
+cases; a <=3 fencepost break failed the exact-three-intervening acceptance test.
+Every deliberate break was restored and its focused tests rerun green.
 """
 import math
 import os
