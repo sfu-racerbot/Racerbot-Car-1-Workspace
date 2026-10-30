@@ -95,11 +95,11 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 ### Going back
 
-- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off. The IMU stack stops only when all five IMU features are off: steering damping, adaptive grip, fused speed, understeer and traction. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
+- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off. The IMU stack stops only when all six IMU features are off: steering damping, adaptive grip, fused speed, understeer, traction and impact stop. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
 - **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
   - `enable_steering_damping: false`, `steering_damping_gain: 0.03` and `enable_corner_setup: true`.
   - `max_speed: 3.5`, `min_speed: 1.0`, `corner_speed: 1.5`, `corner_speed_wide: 1.9`, `narrow_corridor_speed: 2.5` and `max_acceleration: 3.0`.
-- Launch arguments include `max_speed`, `steering_damping`, `adaptive_grip`, `fused_speed`, `imu_hardware` and `opponent_awareness`. The other settings listed above need the file.
+- Launch arguments include `max_speed`, the [IMU flags](#imu-launch-flags) and `opponent_awareness`. The other settings listed above need the file.
 
 ### Other launches that read the same file
 
@@ -219,6 +219,16 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
 `max_lateral_accel` (shipped 2.5; 1.0 before 2026-10-19, 2.0 until 2026-10-26) is live-tunable from the dashboard.
+
+### IMU launch flags
+
+`imu` defaults to `true`. Steering damping is on by default and starts the IMU stack. Use `imu:=false` to turn damping off and start without the IMU stack, provided all other IMU features are off.
+
+`imu_all:=true` turns on `fused_speed`, `imu_understeer`, `imu_traction` and `imu_impact_stop`. Steering damping is already on by default. An explicit `false` for any feature wins over `imu_all`, for example `imu_all:=true imu_traction:=false`.
+
+Adaptive grip stays off unless explicitly requested with `adaptive_grip:=true`. On car 1's floor it raises the limit by at most 0.09 m/s², about 1% in corner speed. The grip ratio falls below the slip line above about 2.0–2.5 m/s², and the simulator was slower with it on.
+
+The launch refuses `imu:=false` if any IMU feature is enabled, including one enabled by `imu_all`. Set `imu:=true` or turn the named feature off. Invalid boolean values are also refused.
 
 ## The 2026-10-19 run
 
