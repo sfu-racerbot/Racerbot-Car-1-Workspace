@@ -1212,13 +1212,28 @@ class GapFollowNode(Node):
         ):
             recent_command_speed = self.last_commanded_speed
         effective_speed = gap_logic.conservative_ttc_speed(
-            self.current_speed,
+            self._safety_speed(),
             self.last_commanded_speed,
             command_age_sec,
             self.ttc_command_speed_timeout_sec,
             self.ttc_command_fallback_max_odom_speed,
         )
         return effective_speed, recent_command_speed
+
+    def _safety_speed(self):
+        """Safety never discounts wheel motion because of a fused estimate."""
+        if not self.using_fused_speed:
+            return self.current_speed
+        return math.copysign(
+            max(abs(self.wheel_speed), abs(self.current_speed)), self.wheel_speed)
+
+    def _safety_odom_fresh(self):
+        if not self.using_fused_speed:
+            return self._odom_fresh()
+        if self.last_wheel_time is None or not math.isfinite(self.wheel_speed):
+            return False
+        age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+        return age < self.odom_timeout_sec and self._odom_fresh()
 
     def _check_odom_direction(self):
         """Warn once if /odom reports motion opposing the commanded direction.
@@ -1313,7 +1328,7 @@ class GapFollowNode(Node):
                 'release LB and press it again to resume')
             return
         self._check_odom_direction()
-        if self.enable_ttc and not self._odom_fresh():
+        if self.enable_ttc and not self._safety_odom_fresh():
             self._stop(
                 'odometry_stale',
                 f"TTC is enabled but no odometry newer than "

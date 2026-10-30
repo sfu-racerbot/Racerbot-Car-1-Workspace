@@ -105,8 +105,8 @@ def test_fused_gate_changes_published_stop_at_ttc_boundary():
     raw = _boundary_command('fault', fused=False)
     # oracle: closed form above and I5 fallback invariant: untrusted fused
     # odometry must produce exactly the raw-wheel node's TTC stop command.
-    assert trusted[0] > 0.0
-    assert trusted[2] != 'ttc_brake'
+    assert trusted == raw
+    assert trusted[2] == 'ttc_brake'
     assert fault == raw
     assert fault[0] == 0.0
     assert fault[2] == 'ttc_brake'
