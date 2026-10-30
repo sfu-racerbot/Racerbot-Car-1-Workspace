@@ -268,6 +268,10 @@ separate bias from the car's changing turn rate.
 The gym's tyres do not slide. These runs check the fall-back wiring, not
 whether grip or understeer behaviour is valid on the floor.
 
+The ROS-free harness tests also caught two deliberate in-memory breaks:
+counting pre-fault messages failed the fraction test, and allowing an unknown
+fault failed the argument-refusal test. The unmodified tests passed.
+
 **All simulated IMU output sits behind the hardware interlock.**
 The simulator refuses to send readings beside `imu_bridge_node`, including in
 other namespaces, because mixing real and simulated gyros would mislead
