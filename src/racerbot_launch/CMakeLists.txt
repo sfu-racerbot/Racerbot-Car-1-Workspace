@@ -24,6 +24,8 @@ if(BUILD_TESTING)
     test/test_map_course_imu.py)
   ament_add_pytest_test(test_map_course_imu_hardware
     test/test_map_course_imu_hardware.py)
+  ament_add_pytest_test(test_imu_flags_both_launches
+    test/test_imu_flags_both_launches.py)
 endif()
 
 ament_package()
