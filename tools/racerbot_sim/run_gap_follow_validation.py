@@ -99,13 +99,13 @@ def injection_guard(hardware, bridges, launch_pid, parents):
     return None
 
 
-def check_injection_target(node, launch_pid):
+def check_injection_target(node, launch_pid, proc_root=Path('/proc')):
     hardware = conflicting_hardware_nodes(node)
     if hardware is None or hardware:
         return injection_guard(hardware, [], launch_pid, {})
     try:
         nodes = node.get_node_names_and_namespaces()
-        bridges, parents = process_snapshot()
+        bridges, parents = process_snapshot(proc_root)
     except Exception:  # noqa: BLE001 -- unknown graph/process state must refuse
         return 'cannot inspect bridge processes or ROS graph'
     if sum(name == 'gym_bridge_node' for name, _ in nodes) != 1 or (
@@ -127,6 +127,13 @@ def write_fault(fault, env):
     if completed.returncode or 'successful' not in completed.stdout.lower():
         return f'parameter client failed: {completed.stdout} {completed.stderr}'
     return None
+
+
+def inject_fault(node, launch_pid, fault, env, proc_root=Path('/proc')):
+    refusal = check_injection_target(node, launch_pid, proc_root)
+    if refusal:
+        return refusal
+    return write_fault(fault, env)
 
 
 def injection_failure(fault, injected_at, fatal):
@@ -399,11 +406,8 @@ def run(args) -> dict:
                     break
                 if (args.imu_fault and injected_at is None
                         and time.monotonic() - driving_since >= args.fault_at):
-                    refusal = check_injection_target(recorder.node, bringup.process.pid)
-                    if refusal:
-                        fatal = f'fault injection failed: {refusal}'
-                        break
-                    error = write_fault(args.imu_fault, injection_env)
+                    error = inject_fault(recorder.node, bringup.process.pid,
+                                         args.imu_fault, injection_env)
                     if error:
                         fatal = f'fault injection failed: {error}'
                         break

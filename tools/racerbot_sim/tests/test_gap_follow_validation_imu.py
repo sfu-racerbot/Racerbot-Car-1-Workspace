@@ -186,3 +186,34 @@ def test_injection_target_refuses_hardware_and_unreadable_graph():
     assert 'hardware' in validation.check_injection_target(
         Graph([('vesc_driver_node', '/'), ('urg_node', '/')]), 123)
     assert 'graph' in validation.check_injection_target(Graph(None), 123)
+
+
+def test_owned_injection_refuses_before_parameter_write(tmp_path, monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    # oracle: the write must occur only for the unique owned bridge and clean graph.
+    proc = tmp_path / '21'
+    proc.mkdir()
+    (proc / 'stat').write_text('21 (bridge) S 10 0 0\n')
+    (proc / 'cmdline').write_bytes(b'/usr/bin/python3\0/opt/gym_bridge_node\0')
+    class Graph:
+        nodes = [('gym_bridge_node', '/')]
+        def get_node_names_and_namespaces(self):
+            return self.nodes
+    graph = Graph()
+    calls = []
+    def client(cmd, **kwargs):
+        calls.append((cmd, kwargs['env']['ROS_DOMAIN_ID']))
+        return SimpleNamespace(returncode=0, stdout='Set parameter successful', stderr='')
+    monkeypatch.setattr(subprocess, 'run', client)
+    assert validation.inject_fault(graph, 10, 'zero', {'ROS_DOMAIN_ID': '64'}, tmp_path) is None
+    assert len(calls) == 1 and calls[0][1] == '64'
+    graph.nodes.append(('joy', '/car'))
+    assert 'hardware' in validation.inject_fault(graph, 10, 'zero', {}, tmp_path)
+    assert len(calls) == 1
+    graph.nodes = [('gym_bridge_node', '/'), ('gym_bridge_node', '/other')]
+    assert 'exactly one root' in validation.inject_fault(graph, 10, 'zero', {}, tmp_path)
+    assert len(calls) == 1
+    graph.nodes = [('gym_bridge_node', '/')]
+    assert 'descendant' in validation.inject_fault(graph, 11, 'zero', {}, tmp_path)
+    assert len(calls) == 1
