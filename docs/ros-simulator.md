@@ -278,6 +278,7 @@ whether grip or understeer behaviour is valid on the floor.
 The ROS-free harness tests also caught two deliberate in-memory breaks:
 counting pre-fault messages failed the fraction test, and allowing an unknown
 fault failed the argument-refusal test. The unmodified tests passed.
+Counting reason-less messages again also failed the new denominator test.
 
 **All simulated IMU output sits behind the hardware interlock.**
 The simulator refuses to send readings beside `imu_bridge_node`, including in
