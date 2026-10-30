@@ -200,6 +200,20 @@ On 2026-10-29, `map_course imu_all:=true` on the default simulator track saved a
 
 The final lap was accepted at the five-lap ceiling despite failing its quality check. The optimized line was rejected for wall clearance. This run verifies the wiring and report pipeline, not map quality.
 
+The repeat run `20261029-170502` used `indoor_oval` with `imu_all:=true` and the corrected 4 s minimum lap duration. Each recorded lap covered one circuit:
+
+| Lap | Distance | Turning | Revolutions | Quality result |
+|---|---|---|---|---|
+| 1 | 29.2 m | 363° | 1.01 | Discovery lap discarded |
+| 2 | 29.2 m | 360° | 1.00 | Intermediate lap, not judged |
+| 3 | 29.0 m | 359° | 1.00 | Passed |
+
+`map_course` exited 0 and saved an accepted, optimized 204-point profile at `/tmp/oc-part-b23-j1/auto2/20261029-170540/raceline_profiled.csv`. No lap exceeded the 1.5-revolution quality limit.
+
+The recorder and launch log are under `/tmp/oc-part-b23-j1/acceptance-home/.ros/racerbot_runs/`. This run redirected `HOME` to keep writes out of the user's real `~/.ros`.
+
+Its SLAM report named `odom_imu` and measured 19.19° maximum gyro-to-SLAM heading difference. This was a mapping acceptance run, not a racing or physical-car trial.
+
 Steering damping is active in the simulator: `/drive_intent` reports a
 non-zero correction against the gyro's turn rate while cornering. With
 `imu_fault:=stale`, its reason changes to `steering_damping_off: imu stale`
