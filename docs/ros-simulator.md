@@ -200,6 +200,14 @@ On 2026-10-29, `map_course imu_all:=true` on the default simulator track saved a
 
 The final lap was accepted at the five-lap ceiling despite failing its quality check. The optimized line was rejected for wall clearance. This run verifies the wiring and report pipeline, not map quality.
 
+Its five recorded laps counted 724°, 719°, 751°, 752° and 734° (2.01, 2.00, 2.09, 2.09 and 2.04 revolutions). Those were two real circuits each, about 58.5 m combined, rather than a doubling of one circuit's turning.
+
+At the first return, the log showed 362° of turning, 1.12 m from the start and 5.7° heading error, but only 11.2 s elapsed. The 15 s duration floor blocked closure until the second return. The floor is now 4 s; the 300° turning gate remains.
+
+The odometry lookup worked: a scratch-instrumented supervisor made 1,499 successful `odom_imu` lookups with no exceptions. No lookup change was needed. Integration of the first run's gyro and `/odom/imu` samples also confirmed roughly 720° per recorded lap.
+
+A separate intermittent-odometry bug did count turns twice: it added map heading during a gap, then the same motion again when odometry returned. Bounded gap reconciliation fixes that bug, but it was not the cause of this run's two-circuit laps.
+
 The repeat run `20261029-170502` used `indoor_oval` with `imu_all:=true` and the corrected 4 s minimum lap duration. Each recorded lap covered one circuit:
 
 | Lap | Distance | Turning | Revolutions | Quality result |
