@@ -94,3 +94,29 @@ def test_only_empty_reasons_cannot_establish_fraction():
     # oracle: no non-empty post-settle reasons means no observations.
     assert validation.fallback_fractions([(41, None), (42, '')], 40, 'stale')[
         'steering_damping'] is None
+
+
+def test_injection_guard_requires_owned_unique_process_and_clean_graph():
+    # oracle: review fix round 1 requires a unique descendant and no hardware.
+    parents = {21: 15, 15: 10, 99: 1}
+    assert validation.injection_guard([], [21], 10, parents) is None
+    assert 'hardware' in validation.injection_guard(['joy'], [21], 10, parents)
+    assert 'graph' in validation.injection_guard(None, [21], 10, parents)
+    assert 'exactly one' in validation.injection_guard([], [], 10, parents)
+    assert 'exactly one' in validation.injection_guard([], [21, 99], 10, parents)
+    assert 'descendant' in validation.injection_guard([], [99], 10, parents)
+    assert 'descendant' in validation.injection_guard([], [21], 10, {21: 15})
+    assert 'descendant' in validation.injection_guard([], [21], 10, {21: 15, 15: 21})
+
+
+def test_proc_snapshot_parses_parent_and_bridge_executable(tmp_path):
+    # oracle: Linux proc stat field 4 is ppid; comm may contain spaces and ')'.
+    for pid, ppid, command in [(12, 7, b'/usr/bin/python3\0/opt/gym_bridge_node\0'),
+                               (13, 1, b'/usr/bin/python3\0/tmp/not_gym_bridge_node\0')]:
+        proc = tmp_path / str(pid)
+        proc.mkdir()
+        (proc / 'stat').write_text(f'{pid} (name ) with spaces) S {ppid} 0 0\n')
+        (proc / 'cmdline').write_bytes(command)
+    bridges, parents = validation.process_snapshot(tmp_path)
+    assert bridges == [12]
+    assert parents == {12: 7, 13: 1}

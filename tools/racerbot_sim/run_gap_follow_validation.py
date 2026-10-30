@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 import threading
@@ -49,6 +50,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src' / 'racerbot_sim'))
 sys.path.insert(0, str(ROOT / 'src' / 'imu_bridge'))
 from racerbot_sim.sim_imu import FAULTS
+from racerbot_sim.hardware_guard import conflicting_hardware_nodes
 
 FEATURES = {
     'steering_damping': 'steering_damping_off',
@@ -57,6 +59,59 @@ FEATURES = {
     'traction': 'imu_traction_off',
     'impact_stop': 'imu_impact_stop_off',
 }
+
+
+def process_snapshot(proc_root=Path('/proc')):
+    """Read local process parents and bridge executables; fail closed on errors."""
+    parents, bridges = {}, []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / 'stat').read_text()
+            # comm is parenthesised and can contain whitespace or ')'.
+            fields = stat[stat.rindex(')') + 1:].split()
+            ppid = int(fields[1])
+            argv = (entry / 'cmdline').read_bytes().split(b'\0')
+        except FileNotFoundError:
+            continue  # process exited while inspecting it
+        pid = int(entry.name)
+        parents[pid] = ppid
+        if any(Path(os.fsdecode(arg)).name == 'gym_bridge_node' for arg in argv[:2] if arg):
+            bridges.append(pid)
+    return sorted(bridges), parents
+
+
+def injection_guard(hardware, bridges, launch_pid, parents):
+    """Return a refusal reason unless the single bridge belongs to the launch."""
+    if hardware is None:
+        return 'cannot read hardware graph'
+    if hardware:
+        return f'real hardware detected: {", ".join(hardware)}'
+    if len(bridges) != 1:
+        return f'expected exactly one gym_bridge_node process, found {len(bridges)}'
+    pid, seen = bridges[0], set()
+    while pid != launch_pid and pid not in seen and pid in parents:
+        seen.add(pid)
+        pid = parents[pid]
+    if pid != launch_pid or bridges[0] == launch_pid:
+        return 'gym_bridge_node is not a descendant of this launch'
+    return None
+
+
+def check_injection_target(node, launch_pid):
+    hardware = conflicting_hardware_nodes(node)
+    if hardware is None or hardware:
+        return injection_guard(hardware, [], launch_pid, {})
+    try:
+        nodes = node.get_node_names_and_namespaces()
+        bridges, parents = process_snapshot()
+    except Exception:  # noqa: BLE001 -- unknown graph/process state must refuse
+        return 'cannot inspect bridge processes or ROS graph'
+    if sum(name == 'gym_bridge_node' for name, _ in nodes) != 1 or (
+            'gym_bridge_node', '/') not in nodes:
+        return 'expected exactly one root /gym_bridge_node on the ROS graph'
+    return injection_guard(hardware, bridges, launch_pid, parents)
 
 
 def reason_report(log, fault_at, fault):
@@ -255,6 +310,8 @@ FATAL_PATTERNS = (
 
 def run(args) -> dict:
     stop_everything()
+    injection_env = os.environ.copy()
+    injection_env['ROS_DOMAIN_ID'] = os.environ.get('ROS_DOMAIN_ID', '0')
     log_dir = Path(args.log_directory)
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,9 +370,14 @@ def run(args) -> dict:
             else:
                 if (args.imu_fault and injected_at is None
                         and time.monotonic() - driving_since >= args.fault_at):
+                    refusal = check_injection_target(recorder.node, bringup.process.pid)
+                    if refusal:
+                        fatal = f'fault injection failed: {refusal}'
+                        break
                     completed = subprocess.run(
                         ['ros2', 'param', 'set', '/gym_bridge_node', 'imu_fault', args.imu_fault],
-                        capture_output=True, text=True, timeout=15, cwd=str(ROOT))
+                        capture_output=True, text=True, timeout=15, cwd=str(ROOT),
+                        env=injection_env)
                     if completed.returncode or 'successful' not in completed.stdout.lower():
                         fatal = f'fault injection failed: {completed.stdout} {completed.stderr}'
                         break
