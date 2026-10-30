@@ -1844,6 +1844,12 @@ class GapFollowNode(Node):
         # a car that never actually slowed. Fresh odometry closes that gap. It
         # only ever raises the basis, is clamped to max_speed so a bad reading
         # cannot inflate it, and every ceiling above still applies.
+        # Counterfactual traction-off ramp for this same tick and speed source.
+        # Reuse the desired speed above; never run the scan pipeline twice.
+        off_basis = self.last_commanded_speed
+        if self._odom_fresh():
+            off_basis = max(off_basis, min(abs(self.current_speed), self.max_speed))
+        traction_off_ceiling = off_basis + self.max_acceleration * command_dt
         traction_holding, fused_basis, traction_off = self._traction_step(command_dt)
         if traction_holding:
             acceleration_ceiling = self.last_commanded_speed
@@ -1859,6 +1865,8 @@ class GapFollowNode(Node):
             acceleration_ceiling = ramp_basis + self.max_acceleration * command_dt
             speed = min(desired_speed, acceleration_ceiling)
 
+        speed = min(speed, traction_off_ceiling)
+        acceleration_ceiling = min(acceleration_ceiling, traction_off_ceiling)
         self._publish_drive(steering_angle, speed, now=now)
         traction_text = ''
         impact_text = ''

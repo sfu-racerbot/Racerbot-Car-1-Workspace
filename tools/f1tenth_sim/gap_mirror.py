@@ -653,6 +653,9 @@ class GapController:
             desired_speed = understeer_cap
             binding = 'understeer'
 
+        off_basis = max(self.last_commanded_speed,
+                        min(abs(float(current_speed)), p['max_speed']))
+        traction_off_ceiling = off_basis + p['max_acceleration'] * dt
         holding = False
         basis_speed = abs(float(current_speed))
         if p['enable_imu_traction']:
@@ -676,6 +679,7 @@ class GapController:
             speed = min(desired_speed, accel_ceiling)
             if accel_ceiling < desired_speed:
                 binding = 'accel'
+        speed = min(speed, traction_off_ceiling)
         self.binding_cap = binding
         tel.update(target_angle=target_angle, target_distance=target_distance,
                    gap_width=(gap_end - gap_start + 1) * self.lidar.angle_increment,
