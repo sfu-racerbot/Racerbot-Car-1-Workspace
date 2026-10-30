@@ -365,7 +365,15 @@ def build_report(run):
         q = quality.get(lap['lap'])
         if q and not q.get('passed'):
             verdict = 'failed (accepted at the ceiling)' if q.get('accepted_at_ceiling') else 'failed'
-            status = f"failed {q['metric']}={q['value']:.1f} deg > {q['limit']:.1f} deg"
+            comparisons = []
+            for metric in q.get('metrics', [q]):
+                if metric['metric'] == 'heading_error':
+                    comparisons.append(f"{metric['metric']}={metric['value']:.1f} deg > {metric['limit']:.1f} deg")
+                elif metric['metric'] == 'closest_approach':
+                    comparisons.append(f"{metric['metric']}={metric['value']:g} m > {metric['limit']:g} m")
+                else:
+                    comparisons.append(f"{metric['metric']}={metric['value']:g} > {metric['limit']:g}")
+            status = 'failed ' + '; '.join(comparisons)
             if q.get('accepted_at_ceiling'):
                 status += ' (accepted at the ceiling)'
         elif q and q.get('passed'):

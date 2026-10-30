@@ -190,17 +190,37 @@ running, the wrapper adds `imu_hardware:=false` for you, so the estimator
 runs without starting the real sensor readers. You can use `gyro_odom:=true`
 to give SLAM the gyro's heading. `imu:=false` explicitly disables the estimator.
 
-In the first comparison on 2026-10-29, three-lap runs on
-`car1_course_2026_10_26` at a 2.0 m/s cap
-used a deliberately wrong yaw-rate scale of 1.1. Wheel odometry (heading
-estimated from speed and steering, [glossary](glossary.md#odometry--odom)) drifted
-43°, 93° and 128° after successive revolutions; gyro heading stayed within
-0.36°. All runs saved maps, including a scale-1.0 control. Only the gyro-mapping
-run generated a racing profile, but it still reported steering and wall-clearance
-problems. This demonstrates the heading benefit, not a clean map.
+The first comparison on 2026-10-29 used `car1_course_2026_10_26` at a 2.0 m/s cap. Its yaw-rate scale was deliberately wrong at 1.1. In the no-gyro mapping run, wheel odometry (estimated from speed and steering, [glossary](glossary.md#odometry--odom)) drifted 43°, 93° and 128° after successive revolutions.
 
-The comparison used `diagnostics:=false` because the recorder include
-overrides the map output directory when enabled.
+The no-gyro run's maximum gyro heading error was 0.353°. The gyro-mapping run's maximum gyro error was 0.472° (I1b step 4, commit `b980e82`).
+
+All runs saved maps, including a scale-1.0 control. Only the gyro-mapping run generated a racing profile. It still reported steering and wall-clearance problems, so the result demonstrates heading fidelity rather than a clean map. That comparison used `diagnostics:=false` to avoid the recorder directory leak, since fixed.
+
+On 2026-10-29, `map_course imu_all:=true` on the default simulator track saved a map and profile to `/tmp/oc-part-b23-j1/auto/20261029-163557`. The recorded run was `20261029-163357`. SLAM used `odom_imu`, and its report measured a maximum 72.40° difference between gyro odometry and SLAM.
+
+The final lap was accepted at the five-lap ceiling despite failing its quality check. The optimized line was rejected for wall clearance. This run verifies the wiring and report pipeline, not map quality.
+
+Its five recorded laps counted 724°, 719°, 751°, 752° and 734° (2.01, 2.00, 2.09, 2.09 and 2.04 revolutions). Those were two real circuits each, about 58.5 m combined, rather than a doubling of one circuit's turning.
+
+At the first return, the log showed 362° of turning, 1.12 m from the start and 5.7° heading error, but only 11.2 s elapsed. The 15 s duration floor blocked closure until the second return. The floor is now 4 s; the 300° turning gate remains.
+
+The odometry lookup worked: a scratch-instrumented supervisor made 1,499 successful `odom_imu` lookups with no exceptions. No lookup change was needed. Integration of the first run's gyro and `/odom/imu` samples also confirmed roughly 720° per recorded lap.
+
+A separate intermittent-odometry bug did count turns twice: it added map heading during a gap, then the same motion again when odometry returned. Bounded gap reconciliation fixes that bug, but it was not the cause of this run's two-circuit laps.
+
+The repeat run `20261029-170502` used `indoor_oval` with `imu_all:=true` and the corrected 4 s minimum lap duration. Each recorded lap covered one circuit:
+
+| Lap | Distance | Turning | Revolutions | Quality result |
+|---|---|---|---|---|
+| 1 | 29.2 m | 363° | 1.01 | Discovery lap discarded |
+| 2 | 29.2 m | 360° | 1.00 | Intermediate lap, not judged |
+| 3 | 29.0 m | 359° | 1.00 | Passed |
+
+`map_course` exited 0 and saved an accepted, optimized 204-point profile at `/tmp/oc-part-b23-j1/auto2/20261029-170540/raceline_profiled.csv`. No lap exceeded the 1.5-revolution quality limit.
+
+The recorder and launch log are under `/tmp/oc-part-b23-j1/acceptance-home/.ros/racerbot_runs/`. This run redirected `HOME` to keep writes out of the user's real `~/.ros`.
+
+Its SLAM report named `odom_imu` and measured 19.19° maximum gyro-to-SLAM heading difference. This was a mapping acceptance run, not a racing or physical-car trial.
 
 Steering damping is active in the simulator: `/drive_intent` reports a
 non-zero correction against the gyro's turn rate while cornering. With

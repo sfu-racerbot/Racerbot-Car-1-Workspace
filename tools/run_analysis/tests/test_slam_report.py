@@ -145,3 +145,93 @@ def test_main_no_slam_exit_zero(tmp_path):
                        load_scans=lambda path: None, load_rosout=lambda path: []) == 0
     assert (tmp_path / 'analysis' / 'slam_report' / 'slam_report.txt').read_text().startswith(
         'No SLAM in this run: SLAM did not map this run')
+
+
+def test_failed_revolutions_lap_at_ceiling_never_becomes_passed(tmp_path):
+    failure = 'Lap 5 did not pass the quality check (revolutions=2.04 > 1.50 (closed over roughly two overlapping laps, not one)), but the 5-lap ceiling is reached -- accepting it anyway rather than mapping indefinitely.'
+    closed = ('Closed mapping lap 5/3 detected (58.6m, 734deg of turning, '
+              '2.04 revolutions, 326 samples, closest approach to the start '
+              '0.08m against a 2.68m gate, 0 SLAM corrections absorbed).')
+    profile = 'Generated 100-point racing profile at /tmp/profile.csv (1.0-3.0m/s).'
+    log = tmp_path / 'launch.log'
+    log.write_text('\n'.join((closed, failure, profile)))
+    run = report.load_inputs(tmp_path, log_path=log,
+                             load_slam=lambda path: {},
+                             load_scans=lambda path: None,
+                             load_rosout=lambda path: [])
+    lines, summary = report.build_report(run)
+    # oracle: spec, accepting a failed lap at the ceiling is not a pass,
+    # even when the supervisor subsequently saves a racing profile.
+    assert summary['Laps'][0]['verdict'] == 'failed (accepted at the ceiling)'
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert 'quality failed revolutions=2.04 > 1.5' in lap_line
+    assert 'accepted at the ceiling' in lap_line
+    assert 'passed' not in lap_line
+    assert 'deg' not in lap_line
+
+
+def test_report_lists_every_failed_quality_comparison():
+    failure = 'Lap 4 did not pass the quality check (heading_error=19.2deg > 15.0deg (50% of the 30deg gate); revolutions=2.09 > 1.50 (...)) and the 5-lap ceiling has not been reached -- ...'
+    run = dict(slam=None, laps=[dict(lap=4, of=3)],
+               quality=[report.parse_lap_quality(failure)])
+    lines, summary = report.build_report(run)
+    # oracle: spec, both failing comparisons must be visible to the reader.
+    assert summary['Laps'][0]['verdict'] == 'failed'
+    lap_line, = [line for line in lines if line.startswith('  lap 4/')]
+    assert 'heading_error=19.2 deg > 15.0 deg' in lap_line
+    assert 'revolutions=2.09 > 1.5' in lap_line
+    assert 'accepted at the ceiling' not in lap_line
+
+
+@pytest.mark.parametrize('accepted', [False, True])
+@pytest.mark.parametrize('combined', [False, True])
+def test_widened_closure_failure_overrides_profile_evidence(tmp_path, accepted, combined):
+    clause = ('closed only after the proximity gate widened '
+              '(closest_approach=1.80m > the original closure_distance=1.50m)')
+    if combined:
+        clause = 'reanchor_count=21 > 20; ' + clause + '; revolutions=2.09 > 1.50'
+    tail = (', but the 5-lap ceiling is reached -- accepting it anyway rather '
+            'than mapping indefinitely.' if accepted else
+            ' and the 5-lap ceiling has not been reached -- recording one more lap.')
+    failure = 'Lap 5 did not pass the quality check (' + clause + ')' + tail
+    closed = ('Closed mapping lap 5/3 detected (29.0m, 360deg of turning, '
+              '1.00 revolutions, 160 samples, closest approach to the start '
+              '1.80m against a 1.90m gate, 21 SLAM corrections absorbed).')
+    profile = 'Generated 100-point racing profile at /tmp/profile.csv (1.0-3.0m/s).'
+    log = tmp_path / 'launch.log'
+    log.write_text('\n'.join((closed, failure, profile)))
+    run = report.load_inputs(tmp_path, log_path=log, load_slam=lambda path: {},
+                             load_scans=lambda path: None, load_rosout=lambda path: [])
+    lines, summary = report.build_report(run)
+    # oracle: spec, the failed proximity comparison remains a failure even
+    # when a saved profile supplies otherwise positive acceptance evidence.
+    wanted = 'failed (accepted at the ceiling)' if accepted else 'failed'
+    assert summary['Laps'][0]['verdict'] == wanted
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert 'closest_approach=1.8 m > 1.5 m' in lap_line
+    assert 'passed' not in lap_line
+    assert ('accepted at the ceiling' in lap_line) == accepted
+    if combined:
+        assert 'reanchor_count=21 > 20' in lap_line
+        assert 'revolutions=2.09 > 1.5' in lap_line
+
+
+def test_ceiling_report_retains_all_four_quality_comparisons():
+    failure = (
+        'Lap 5 did not pass the quality check (reanchor_count=21 > 20; '
+        'closed only after the proximity gate widened '
+        '(closest_approach=1.80m > the original closure_distance=1.50m); '
+        'heading_error=19.2deg > 15.0deg (50% of the 30deg gate); '
+        'revolutions=2.09 > 1.50 (closed over roughly two overlapping laps, not one)), '
+        'but the 5-lap ceiling is reached -- accepting it anyway rather than mapping indefinitely.')
+    run = dict(slam=None, laps=[dict(lap=5, of=3)], profile_laps=[5],
+               quality=[report.parse_lap_quality(failure)])
+    lines, summary = report.build_report(run)
+    # oracle: spec, a ceiling-accepted failure must display all four producer
+    # comparisons, with their original values/limits and applicable units.
+    assert summary['Laps'][0]['verdict'] == 'failed (accepted at the ceiling)'
+    lap_line, = [line for line in lines if line.startswith('  lap 5/')]
+    assert ('quality failed reanchor_count=21 > 20; closest_approach=1.8 m > 1.5 m; '
+            'heading_error=19.2 deg > 15.0 deg; revolutions=2.09 > 1.5 '
+            '(accepted at the ceiling)') in lap_line
+    assert 'passed' not in lap_line
