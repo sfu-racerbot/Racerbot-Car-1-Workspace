@@ -59,15 +59,26 @@ FEATURES = {
 }
 
 
-def fallback_fractions(log, fault_at, fault):
+def reason_report(log, fault_at, fault):
     expected = 'imu stale' if fault == 'stale' else 'imu fault'
-    eligible = [reason or '' for t, reason in log if t >= fault_at + 0.5]
-    result = {}
+    eligible = [reason for t, reason in log
+                if t >= fault_at + 0.5 and isinstance(reason, str) and reason.strip()]
+    first = next(((t, reason) for t, reason in log
+                  if t >= fault_at and isinstance(reason, str) and reason.strip()), None)
+    fractions, missing = {}, {}
     for feature, label in FEATURES.items():
         value = expected.removeprefix('imu ') if feature == 'fused_speed' else expected
-        result[feature] = (sum(f'{label}: {value}' in r for r in eligible) / len(eligible)
-                           if eligible else None)
-    return result
+        absent = [r for r in eligible if f'{label}: {value}' not in r]
+        fractions[feature] = (1 - len(absent) / len(eligible)) if eligible else None
+        missing[feature] = {'count': len(absent), 'first_three': absent[:3]}
+    return {'fallback_fractions': fractions, 'reason_messages_after_settle': len(eligible),
+            'first_reason_after_fault': ({'time_s': round(first[0], 3), 'text': first[1]}
+                                         if first else None),
+            'missing_fallback': missing}
+
+
+def fallback_fractions(log, fault_at, fault):
+    return reason_report(log, fault_at, fault)['fallback_fractions']
 
 
 def speed_summary(samples, split):
@@ -169,7 +180,7 @@ def recorder_report(rec, start, split, fault):
             stopped += 1
         was_stopped = is_stopped
     return {'fault': fault, 'fault_at_s': split,
-            'fallback_fractions': fallback_fractions(intents, split, fault),
+            **reason_report(intents, split, fault),
             'intent_messages_after_settle': sum(t >= split + 0.5 for t, _ in intents),
             'speeds': speed_summary(speeds, split), 'distance_after_m': distance,
             'stops': stopped,

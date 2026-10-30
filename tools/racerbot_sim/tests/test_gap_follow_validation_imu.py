@@ -26,8 +26,8 @@ def test_unknown_fault_is_rejected_before_run():
 
 def test_fraction_uses_only_messages_after_settle():
     log = [(39.0, 'steering_damping_off: imu stale'),
-           (40.5, 'steering_damping_off: imu stale'), (41.0, '')]
-    # oracle: two eligible messages, one names the reason.
+           (40.5, 'steering_damping_off: imu stale'), (41.0, 'other reason')]
+    # oracle: two eligible reason-bearing messages, one names the fallback.
     assert validation.fallback_fractions(log, 40.0, 'stale')['steering_damping'] == 0.5
 
 
@@ -68,3 +68,29 @@ def test_evidence_does_not_stop_at_first_three_post_fault_samples():
     evidence = validation.recorder_report(rec, 100.0, 40.0, 'zero')['imu_evidence']
     assert [41.1, 0.0, 0.0] in evidence
     assert [50.0, 0.0, 0.0] in evidence
+
+
+def test_fraction_ignores_reasonless_but_counts_other_reasons():
+    # oracle: the revised brief counts non-empty reasons only after settling.
+    log = [(40.1, 'early reason'), (40.5, 'steering_damping_off: imu stale'),
+           (40.6, None), (40.7, ''), (40.8, 'ordinary driving')]
+    assert validation.fallback_fractions(log, 40, 'stale')['steering_damping'] == 0.5
+
+
+def test_reason_report_first_and_missing_examples():
+    # oracle: first reason is measured from injection, not from settling;
+    # missing examples include only post-settle, non-empty reasons.
+    log = [(40.1, 'early reason'), (40.5, 'steering_damping_off: imu stale'),
+           (40.6, None), (40.7, ''), (40.8, 'ordinary driving'),
+           (41.0, 'another reason'), (41.2, 'third'), (41.4, 'fourth')]
+    report = validation.reason_report(log, 40, 'stale')
+    assert report['reason_messages_after_settle'] == 5
+    assert report['first_reason_after_fault'] == {'time_s': 40.1, 'text': 'early reason'}
+    assert report['missing_fallback']['steering_damping'] == {
+        'count': 4, 'first_three': ['ordinary driving', 'another reason', 'third']}
+
+
+def test_only_empty_reasons_cannot_establish_fraction():
+    # oracle: no non-empty post-settle reasons means no observations.
+    assert validation.fallback_fractions([(41, None), (42, '')], 40, 'stale')[
+        'steering_damping'] is None
