@@ -1,0 +1,22 @@
+diff --git a/config/car.yaml b/config/car.yaml
+index 771451f..c7b55f9 100644
+--- a/config/car.yaml
++++ b/config/car.yaml
+@@ -21,11 +21,13 @@ imus:
+     rate_hz: 200
+     can_id: null                 # set if this VESC is reached through another one over CAN
+     calib: calib/vesc_calib.json
+-  bno:                           # BNO085 via microcontroller (front)
+-    position: [0.14, 0.00, 0.06]
+-    rpy_deg: [0.0, 0.0, 0.0]
++  bno:                           # BNO085, car 2: Jetson I2C bus 7 (0x4A) via tools/bno_i2c_bridge.py
++    position: [0.14, 0.00, 0.06]      # NOT measured on car 2 yet (nominal)
++    rpy_deg: [90.80, 0.24, 0.24]      # car 2, 2026-10-29: roll/pitch from gravity, parked (level_rotation).
++                                      # Yaw 0.24 is NOT measured: redo calibrate_imu.py --imu bno --step mount
++                                      # (push forward) before trusting x/y. z (yaw rate) is right either way.
+     weight: 1.0
+-    port: /dev/ttyACM1
++    port: /tmp/bno085            # the bridge's pty (car 2); was /dev/ttyACM1 for a microcontroller
+     baud: 921600
+     calib: calib/bno_calib.json
+ 

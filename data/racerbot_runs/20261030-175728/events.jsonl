@@ -1,0 +1,29 @@
+{"t": 1793408251.6910276, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1793408252.6920488, "category": "status", "message": "scan=NEVER | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=NEVER +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408252.933401, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1793408253.4457915, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1793408253.5091581, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1793408253.517006, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1793408273.6918194, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408276.9903803, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408282.6030283, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408282.767046, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408290.7985766, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408290.9422472, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408294.6917622, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +2.13m/s | drive=ok cmd=2.87m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 2.13, "cmd_speed": 2.87, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408298.638808, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408300.0192554, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408314.6919038, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.80m/s | drive=ok cmd=1.57m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 1.8, "cmd_speed": 1.57, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408320.4755025, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408320.61083, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408335.6919138, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.77m/s | drive=ok cmd=2.45m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 1.77, "cmd_speed": 2.45, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408344.1682968, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408344.3485174, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408356.691557, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +4.76m/s | drive=ok cmd=4.25m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 4.76, "cmd_speed": 4.25, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408376.692057, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +2.33m/s | drive=ok cmd=2.27m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 2.33, "cmd_speed": 2.27, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408376.7690225, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408397.6917946, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408547.8379843, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793408547.8888252, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793408572.6917915, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=STALE 3s cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793408572.9665556, "category": "closing", "message": "worst pose lag this run: 0.00s"}

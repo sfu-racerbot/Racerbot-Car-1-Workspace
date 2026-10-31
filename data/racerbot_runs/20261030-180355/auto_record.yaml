@@ -1,0 +1,24 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-10-30T18:03:55-07:00'
+algorithms:
+  /drive:
+  - /disparity_extender_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /disparity_extender_node
+- /foxglove_bridge
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+stopped: '2026-10-30T18:09:23-07:00'
+stop_reason: no algorithm publishing for 3.5 s
+duration_sec: 328.0
+recorder_exit_code: 0
+recorder_killed: false
+bag_bytes: 88334907

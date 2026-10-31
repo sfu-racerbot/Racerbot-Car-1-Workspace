@@ -1,0 +1,42 @@
+repository: /home/racerbotcar-2/racerbot-ws
+HEAD: 8509382661d72cfbe7f772f03130ed3fa30aceca
+branch: main
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+ M src/racerbot_a
+ M src/racerbot_b
+?? data/racerbot_runs/20261019-200703/analysis/imu_axes.npz
+?? data/racerbot_runs/20261019-200703/analysis/motion_1792465625.00_1792465799.54_2.npz
+?? data/racerbot_runs/20261030-174312/
+?? data/racerbot_runs/20261030-175124/
+?? data/racerbot_runs/20261030-175728/
+?? data/racerbot_runs/20261030-180355/
+?? data/racerbot_runs/20261030-181003/
+?? data/racerbot_runs/20261030-181222/
+?? data/racerbot_runs/20261030-181616/
+?? data/racerbot_runs/20261030-181819/
+?? data/racerbot_runs/20261030-182504/
+?? data/racerbot_runs/20261030-182716/
+?? data/racerbot_runs/20261030-182852/
+?? data/racerbot_runs/20261030-183053/
+?? data/racerbot_runs/20261030-183134/
+?? data/racerbot_runs/20261030-183607/
+?? data/racerbot_runs/20261030-184010/
+?? data/racerbot_runs/20261030-184149/
+?? data/racerbot_runs/20261030-184316/
+?? data/racerbot_runs/20261030-184432/
+?? data/racerbot_runs/20261030-184556/
+?? data/racerbot_runs/20261030-184826/
+?? data/racerbot_runs/map_course-20261030-184431.log
+?? data/racerbot_runs/map_course-20261030-184555.log
+?? data/racerbot_runs/map_course-20261030-184825.log
+?? data/racerbot_runs/map_course-20261030-185035.log
+
+# git submodule status
+ ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d src/particle_filter (heads/foxy-devel)
++8ef1d8c3b0152259adce70cd8a6164625acc3916 src/racerbot_a (heads/main)
+ 31ae4ef071401045bb0beb6d0bb63befa87293df src/racerbot_b (heads/main)
+ f55480a7044367c219745480b436b8b7117f8282 src/range_libc (heads/humble-devel)
+ 775b167c0dbcfe00a012e248c66a7c8379ef9fbb src/realsense-ros (4.58.2-41-g775b167c)
+ d3f510ce1b4be12967064d8251ebcac530921a04 src/transport_drivers (1.2.0)
+ f5b711d7cee309aeb7946ad5af0e4470259a178f src/web_dashboards (remotes/origin/HEAD)

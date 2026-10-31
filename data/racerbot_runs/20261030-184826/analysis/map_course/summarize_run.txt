@@ -1,0 +1,37 @@
+# Run summary: /home/racerbotcar-2/racerbot-ws/data/racerbot_runs/20261030-184826
+
+## How far it got
+  [ NOT   ] SLAM configured and activated
+  [ NOT   ] at least one mapping lap closed
+  [ NOT   ] racing profile generated
+  [ NOT   ] profile accepted by pure_pursuit
+  [ NOT   ] pure pursuit took drive control
+
+## Localization health
+  worst pose lag: 0.15s  [OK]
+  pose-lag alerts: 0
+  frozen-pose samples: 0
+  map->base_link losses: 0
+  topics ever seen: drive, joy, map, odom, pose, scan
+
+## Watchdog stops (count by reason)
+  deadman_released       60
+  waiting_for_scan       2
+  waiting_for_joy        1
+
+## Unclassified stops
+  0 STOP line(s) matched no known watchdog state in run_events.py's CRITICAL_PATTERNS. 0 is expected; nonzero means that pattern is missing a state and needs updating.
+
+## Lap closure
+  last sample was held open by 'start_distance': 12.43 vs limit 4.0
+
+## Errors and node deaths (de-duplicated)
+  [WARN] [1793411311.576837429] [rosbag2_recorder.rclcpp]: failed to send response to /rosbag2_recorder/list_parameters (timeout): client will not receive response, at ./src/rmw_response.cpp:153, at ./src/rcl/service.c:400
+
+## Missing artifacts
+  MISSING launch.log -- launch terminal output (reconstructed from ~/.ros/log/ if missing; `| tee` gives the authoritative copy)
+  MISSING probe.log -- human-readable probe output
+  MISSING map.pgm -- saved occupancy map
+  MISSING raceline_profiled.csv -- generated racing line
+  no launch.log (no `| tee`) -- reconstructed 247 line(s) from 6 per-node log file(s) under ~/.ros/log/ instead: auto_map_race_node, gap_follow_node, rosbag2_recorder, snapshot_params, unknown
+
