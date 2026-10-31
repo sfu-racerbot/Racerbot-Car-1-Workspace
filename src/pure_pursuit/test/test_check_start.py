@@ -100,6 +100,17 @@ def test_no_go_turned_on_the_spot(run_dir):
     assert check.offset_m < 0.15  # m: the right place, facing the wrong way
 
 
+def test_no_go_on_the_spot_when_the_scan_does_not_match(run_dir):
+    # oracle: invariant. The car is exactly on the start, but half its beams stop at something 0.6 m away that
+    # the map does not have, such as people round the car. The filter would be matching against that too, so
+    # a good place is not enough: the scan has to fit the map from it.
+    ranges = _scan(START)
+    ranges[::2] = 0.6
+    check = cs.verdict(ranges, ANGLE_MIN, ANGLE_INC, run_dir)
+    assert not check.go
+    assert 'fits nowhere' in cs.describe(check)
+
+
 def test_no_go_says_how_to_fix_it_in_the_cars_own_terms(run_dir):
     # oracle: closed form. The car is 1 m ahead of the start, facing the same way: move it 1 m back.
     text = cs.describe(_check((6.0, 2.0, 0.0), run_dir))

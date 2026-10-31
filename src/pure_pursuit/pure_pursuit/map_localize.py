@@ -94,6 +94,12 @@ class WallField:
                     (xs - self.origin_x) / self.resolution - 0.5],
             order=1, mode='nearest')
 
+    def is_free(self, x, y):
+        """Whether (x, y) is a cell the map has seen to be open."""
+        col = int(math.floor((x - self.origin_x) / self.resolution))
+        row = int(math.floor((y - self.origin_y) / self.resolution))
+        return 0 <= row < self.free.shape[0] and 0 <= col < self.free.shape[1] and bool(self.free[row, col])
+
     def distance(self, xs, ys):
         """Distance to the nearest wall in metres; points off the map read as far from everything."""
         cols = np.floor((xs - self.origin_x) / self.resolution).astype(int)
@@ -179,6 +185,8 @@ def find_start(field, bx, by, near=None, near_radius=1.0, cell_stride=4, yaw_ste
     best_pose, best_fit = (0.0, 0.0, 0.0), -1.0
     for _, x, y, yaw in candidates[:60]:
         pose = match_scan(field, bx, by, (x, y, yaw), iterations=25, start_trim=0.5)
+        if not field.is_free(pose[0], pose[1]):
+            continue  # inside a wall every beam ends on a wall, so its fit means nothing
         fit = scan_fit(field, bx, by, pose)
         if fit > best_fit:
             best_pose, best_fit = pose, fit

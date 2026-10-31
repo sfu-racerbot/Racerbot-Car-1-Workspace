@@ -215,6 +215,29 @@ def test_find_start_can_be_limited_to_a_region():
     assert math.hypot(pose[0] - truth[0], pose[1] - truth[1]) < 0.1  # m
 
 
+def test_find_start_never_puts_the_car_inside_a_wall():
+    # oracle: invariant. Inside a solid block every beam ends on a wall, a perfect score at an impossible
+    # place. A scan of something close all round, people round the car, used to land there.
+    ranges = np.full(BEAMS, 0.6)
+    bx, by = _beams(ranges)
+    field = _field()
+    pose, fit = ml.find_start(field, bx, by)
+    assert fit == 0.0 or field.is_free(pose[0], pose[1])
+    assert fit < 0.9
+
+
+def test_is_free_at_its_boundaries():
+    # oracle: closed form. One free cell at row 1, col 2 of a 0.1 m grid at origin (1, 1).
+    free = np.zeros((3, 4), dtype=bool)
+    free[1, 2] = True
+    field = ml.WallField(~free, free, 0.1, 1.0, 1.0)
+    assert field.is_free(1.25, 1.15)
+    assert not field.is_free(1.15, 1.15)   # next cell left
+    assert not field.is_free(1.25, 1.05)   # next cell down
+    assert not field.is_free(0.5, 1.15)    # off the map to the left
+    assert not field.is_free(5.0, 1.15)    # off the map to the right
+
+
 def test_find_start_with_no_beams_reports_no_fit():
     assert ml.find_start(_field(), np.array([]), np.array([]))[1] == 0.0
 
