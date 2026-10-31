@@ -70,7 +70,7 @@ from imu_bridge.vehicle_state import steering_from_yaw_rate  # noqa: E402
 from recognition import false_movers, moving_track_ids  # noqa: E402
 from racerbot_sim import tracks as sim_tracks  # noqa: E402
 from run_analysis import weave  # noqa: E402
-from sim_fidelity import CALIBRATION, PROFILES  # noqa: E402
+from sim_fidelity import CALIBRATION, PROFILES, with_friction  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
 CONTROL_DT = 0.025
@@ -149,9 +149,9 @@ def track_map_yaml(track_spec: str):
     return Path(path).parent / f"{Path(path).name}_map.yaml"
 
 
-def make_plant(track_spec: str, seed: int) -> FidelityPlant:
+def make_plant(track_spec: str, seed: int, calibration=CALIBRATION) -> FidelityPlant:
     """Build a fidelity plant for a gym circuit name or an indoor layout."""
-    components = env_components(PROFILES[DEFAULT_PROFILE], CALIBRATION)
+    components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     map_name = track_path(track_spec)
     config = EnvConfig(
         seed=seed,
@@ -172,7 +172,7 @@ def make_plant(track_spec: str, seed: int) -> FidelityPlant:
         render_enabled=False,
     )
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
-    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], 1, seed, CONTROL_DT, CALIBRATION)
+    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], 1, seed, CONTROL_DT, calibration)
 
 
 def _reverse_laps(plant) -> float:
@@ -184,10 +184,10 @@ def _reverse_laps(plant) -> float:
 
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
-              reverse: bool = False) -> dict:
+              reverse: bool = False, calibration=CALIBRATION) -> dict:
     """One lap of ``track``. ``reverse`` starts facing backwards, so the
     indoor layouts (all counter-clockwise) get exercised with right turns."""
-    plant = make_plant(track, seed)
+    plant = make_plant(track, seed, calibration)
     line = plant.env.unwrapped.track.raceline
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
@@ -439,8 +439,8 @@ def parse_set(values):
 
 
 def _job(job):
-    track, seed, params, timeout, reverse = job
-    return run_track(track, params, seed, timeout, reverse)
+    track, seed, params, timeout, reverse, calibration = job
+    return run_track(track, params, seed, timeout, reverse, calibration)
 
 
 def main(argv=None) -> int:
@@ -461,13 +461,16 @@ def main(argv=None) -> int:
     parser.add_argument("--output", help="write JSON results here")
     parser.add_argument("--reverse", action="store_true",
                         help="drive each track the other way round")
+    parser.add_argument("--friction", type=float,
+                        help="floor friction for this run (default: the calibration's)")
     args = parser.parse_args(argv)
 
     selected = select_tracks(args.track)
     params = parse_set(args.set)
     for track in selected:
         track_path(track)  # build the layouts before any worker process forks
-    jobs = [(track, args.seed + k, params, args.timeout, args.reverse)
+    calibration = with_friction(args.friction)
+    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, calibration)
             for track in selected for k in range(args.seeds)]
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:

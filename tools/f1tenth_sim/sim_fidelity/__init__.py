@@ -9,12 +9,13 @@ See ``tools/f1tenth_sim/README.md`` for what each fix does and why, and
 ``docs/sim-fidelity-audit.md`` for the measurements that motivated them.
 """
 
-from .calibration import CALIBRATION, CarCalibration, Provenance
+from .calibration import CALIBRATION, CarCalibration, Provenance, with_friction
 from .grip import GripEnvelope
 from .plant import FidelityPlant, FidelityProfile, PROFILES
 
 __all__ = [
     "CALIBRATION",
+    "with_friction",
     "CarCalibration",
     "Provenance",
     "GripEnvelope",

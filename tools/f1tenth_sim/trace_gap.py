@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sim_fidelity import CALIBRATION, with_friction  # noqa: E402
 from eval_gap import (  # noqa: E402
     CONTROL_DT, GapController, components_half_fov, components_increment,
     components_range_min, make_plant, parse_set)
@@ -50,8 +51,8 @@ def _fmt(value):
     return value
 
 
-def trace(track, params, seed, timeout_s):
-    plant = make_plant(track, seed)
+def trace(track, params, seed, timeout_s, calibration=CALIBRATION):
+    plant = make_plant(track, seed, calibration)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(np.array([[line.xs[0], line.ys[0], line.yaws[0]]]))
 
@@ -153,8 +154,11 @@ def main(argv=None):
                     help="override a parameter, name=value (repeatable)")
     ap.add_argument("--out", help="write the per-tick CSV here")
     ap.add_argument("--plot", help="write a PNG of the driven path here")
+    ap.add_argument("--friction", type=float,
+                    help="floor friction for this run (default: the calibration's)")
     args = ap.parse_args(argv)
-    rows, laps = trace(args.track, parse_set(args.set), args.seed, args.timeout)
+    rows, laps = trace(args.track, parse_set(args.set), args.seed, args.timeout,
+                       with_friction(args.friction))
     if args.out:
         with open(args.out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(COLUMNS))

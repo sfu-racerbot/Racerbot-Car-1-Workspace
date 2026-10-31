@@ -17,7 +17,7 @@ Filling in a measurement means editing one line here. See
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 import math
 
@@ -369,6 +369,15 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
 
 
 CALIBRATION = CarCalibration()
+
+
+def with_friction(friction: float | None, base: CarCalibration = CALIBRATION) -> CarCalibration:
+    """``base`` on a floor of this friction; None leaves it unchanged."""
+    if friction is None:
+        return base
+    if not (math.isfinite(friction) and friction > 0.0):
+        raise ValueError(f"friction must be positive and finite, got {friction!r}")
+    return replace(base, surface_friction=float(friction))
 
 
 def describe(calibration: CarCalibration = CALIBRATION) -> list[tuple]:
