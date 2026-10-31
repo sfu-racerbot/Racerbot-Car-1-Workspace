@@ -125,8 +125,6 @@ def match_scan(field, bx, by, pose, iterations=12, start_trim=0.30, min_trim=0.1
     The result is held weakly to `pose`. Hundreds of beams outvote that wherever a scan can see the car move,
     and where it cannot, along a bare corridor, nothing else says where the car is, so odometry should stand.
     """
-    if len(bx) < MIN_BEAMS:
-        return pose
     x, y, yaw = pose
     anchor = np.array(pose, dtype=float)
     weight = np.diag([PRIOR_WEIGHT, PRIOR_WEIGHT, PRIOR_WEIGHT])

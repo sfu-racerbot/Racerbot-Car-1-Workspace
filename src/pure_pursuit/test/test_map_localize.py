@@ -255,6 +255,22 @@ def test_a_bare_corridor_stays_on_odometry():
     assert np.abs(result.poses[:, 1] - truth[:, 1]).max() < 0.10  # m, two cells
 
 
+def test_a_lone_feature_does_not_drag_the_pose_along_a_corridor():
+    # oracle: the true path. One bump on an otherwise bare wall: a few beams graze it from far off, and with
+    # nothing else observing that direction they slid the pose metres along the corridor until a match was
+    # held to its odometry prediction. Odometry here is perfect, so the truth is available to stay on.
+    grid = np.zeros((int(6 / RES), int(40 / RES)), dtype=bool)
+    grid[:2, :] = grid[-2:, :] = True
+    grid[2:int(1.0 / RES), int(20 / RES):int(21 / RES)] = True
+    field = ml.WallField(grid, ~grid, RES, 0.0, 0.0)
+    distances = np.arange(0.0, 16.0, 0.5)
+    truth = np.c_[10.0 + distances, np.full(len(distances), 3.0), np.zeros(len(distances))]
+    scans = np.array([_ray_cast(pose, grid) for pose in truth])
+    odom = np.c_[distances / 2.5, truth]
+    result = ml.track_scans(field, distances / 2.5, scans, odom, ANGLE_MIN, ANGLE_INC, truth[0], laser_x=LASER_X)
+    assert np.abs(result.poses[:, 0] - truth[:, 0]).max() < 0.15  # m, three cells
+
+
 def test_tracking_survives_blank_scans_on_odometry(driven):
     # A scan consumer's edge: all-inf frames in the middle. Pose carries on from odometry, and those
     # frames report zero fit so a verdict can see them.
@@ -375,6 +391,14 @@ def test_a_bad_map_is_refused_and_says_why(fit, through, needle):
     verdict = ml.judge(np.full(100, fit), np.full(100, through))
     assert not verdict.ok
     assert needle in verdict.reason
+
+
+def test_a_steadily_poor_fit_is_refused_on_its_mean():
+    # 0.85 everywhere: never a lost stretch, but under the mean limit all the same.
+    verdict = ml.judge(np.full(100, 0.85), np.full(100, 0.05))
+    assert not verdict.ok
+    assert 'mean fit' in verdict.reason
+    assert 'worst' not in verdict.reason
 
 
 def test_one_lost_stretch_refuses_even_with_a_good_average():
