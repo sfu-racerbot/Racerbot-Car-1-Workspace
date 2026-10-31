@@ -175,8 +175,8 @@ def _commands(out_dir: Path, run_name: str, verdict, message: str, raceable: boo
     if not raceable:
         return '\n'.join([
             rule, f'NO RACING FOLDER FROM RUN {run_name}.', rule, '', f'  Why: {message}', '',
-            f'  The map is kept in {out_dir} to look at. Map again, with the gyro on:',
-            '    ros2 run racerbot_launch map_course imu:=true gyro_odom:=true', rule, '']) + '\n'
+            f'  The map is kept in {out_dir} to look at. Map again:',
+            '    ros2 run racerbot_launch map_course', rule, '']) + '\n'
     lines = [f'Rebuilt from run {run_name}: {message}', '',
              f'FIRST TRY: raceline_profiled.csv is capped at {max_speed:g} m/s. Wheels off the ground first, then the',
              'floor. To go faster later, stop racing and copy a faster line over it:']
@@ -227,7 +227,7 @@ def rebuild(run_dir, out_root, max_speed: float = DEFAULT_MAX_SPEED, load=load_i
     verdict = map_localize.judge(track.fit, through)
     report['tracked_path_m'] = float(np.hypot(*np.diff(track.poses[:, :2], axis=0).T).sum())
     weaker = ('' if inputs.odom_source != '/odom' else
-              ' Mapped on /odom with no gyro, the weaker source: use imu:=true gyro_odom:=true.')
+              ' Mapped on /odom with no gyro, the weaker source: leave out imu:=false and gyro_odom:=false.')
     if not verdict.ok:
         return finish(verdict, 0, False, verdict.reason + weaker)
     laps = map_localize.find_laps(track.poses)

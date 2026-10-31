@@ -233,6 +233,38 @@ def _shipped_recorder():
                      min_duration_fraction=0.5)
 
 
+def _replay_both_frames(columns):
+    """Laps from run 20261030-180355's replay through map_course, with its held-LB poses, on one odometry.
+
+    columns are where that odometry's x, y, yaw sit: 4 for steering (`odom`), 7 for gyro (`odom_imu`).
+    """
+    recorder = _shipped_recorder()
+    data = np.load(Path(__file__).parent / 'data' / 'lap_poses_20261030-180355-replay.npz')
+    laps = []
+    for row in data['rows']:
+        if recorder.update(row[1], row[2], row[3], row[0], odom_yaw=angle_difference(row[columns + 2], 0.0),
+                           odom_xy=(row[columns], row[columns + 1])):
+            laps.append(recorder.distance)
+            recorder.reset()
+    return laps
+
+
+def test_laps_close_when_counted_in_the_odometry_slam_maps_on():
+    # oracle: recorded measurement. In that replay SLAM's own pose passes the start 4 times, 0.06-0.41 m
+    # away and 47 m of path apart, and a disparity_extender run steers harder than gap_follow does.
+    laps = _replay_both_frames(7)
+    assert len(laps) == 4
+    for distance in laps:
+        assert distance == pytest.approx(47.0, abs=1.0)  # m, 2% of a lap
+
+
+def test_steering_odometry_is_why_that_run_never_closed():
+    # The reason map_course counts in odom_imu. In hard turns the steering model's yaw differs from the
+    # gyro's by more than the 0.1 rad a correction is, and each false correction swings the start point.
+    # If this one starts passing, the frame stopped mattering and imu_lap_turns' default can be revisited.
+    assert _replay_both_frames(4) == []
+
+
 def test_the_real_run_that_never_closed_closes_its_laps():
     # oracle: recorded measurement, run 20261030-185036. Its log says 5.0 revolutions, 196 m and no
     # lap closed. The course is 50.4 m round, measured by scan-matching every lap against the map

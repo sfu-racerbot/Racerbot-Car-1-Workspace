@@ -61,13 +61,10 @@ def generate_launch_description(imu_probe=None):
         description='IMU source: auto uses simulated topics when gym_bridge_node is running, '
                     'otherwise real hardware. true/false explicitly select real/simulated inputs.')
     steering_damping_arg = DeclareLaunchArgument(
-        # Car 2: a literal false, not car 1's imu default, until its BNO085 is
-        # calibrated (docs/car1-vs-car2.md#imu). imu:=true only allows it.
-        'steering_damping', default_value='false',
-        description='true: steer against the car\'s own rotation, using the gyro yaw '
-                    'rate in /imu/data. Starts imu_bridge\'s vehicle_state_launch.py '
-                    '(the IMU stack). Car 2: false until its BNO085 is mounted and '
-                    'calibrated (docs/car1-vs-car2.md#imu); car 1 ships true. '
+        'steering_damping', default_value=LaunchConfiguration('imu', default='true'),
+        description='true (the default): steer against the car\'s own rotation, using the '
+                    'gyro yaw rate in /imu/data. Starts imu_bridge\'s vehicle_state_launch.py '
+                    '(the IMU stack). false turns it off. '
                     'Simulator-validated only, not yet run on the floor '
                     '(docs/gap-follow.md#steering-damping-gyro).')
     adaptive_grip_arg = DeclareLaunchArgument(

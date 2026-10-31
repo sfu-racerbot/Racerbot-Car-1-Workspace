@@ -106,15 +106,14 @@ def test_imu_false_omits_vehicle_state_include():
     assert includes == []
 
 
-def test_car2_default_starts_no_imu_stack():
-    # oracle: spec -- docs/car1-vs-car2.md#imu: car 2's map_course imu
-    # default is false, so with nothing passed no IMU source is chosen and
-    # vehicle_state_launch.py is not included, simulator or not.
-    for simulated in (True, False):
-        ctx, includes = _launch_imu_includes(lambda: simulated)
-        assert ctx.launch_configurations['imu'] == 'false'
-        assert 'imu_selected_hardware' not in ctx.launch_configurations
-        assert includes == []
+@pytest.mark.parametrize('simulated,hardware', [(True, 'false'), (False, 'true')])
+def test_default_starts_the_imu_stack_on_the_right_source(simulated, hardware):
+    # oracle: spec -- docs/car1-vs-car2.md#imu: map_course's imu default is true, so with nothing
+    # passed vehicle_state_launch.py is included, on simulated topics only beside the simulator.
+    ctx, includes = _launch_imu_includes(lambda: simulated)
+    assert ctx.launch_configurations['imu'] == 'true'
+    assert ctx.launch_configurations['imu_selected_hardware'] == hardware
+    assert len(includes) == 1
 
 
 def test_gyro_odometry_accepts_simulated_imu():

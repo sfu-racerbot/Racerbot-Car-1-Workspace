@@ -25,10 +25,7 @@ def test_imu_all_feature_overrides_and_adaptive_grip(all_value, explicit_off):
                      else wheel['gap_follow_node']['ros__parameters']['odom_topic'])
     assert params['odom_topic'] == expected_odom
     assert params['enable_adaptive_grip'] is False
-    # Car 2: steering damping defaults off (docs/car1-vs-car2.md#imu), so the
-    # stack starts once exactly when imu_all leaves at least one feature on;
-    # car 1's damping default made it start in every case.
-    assert len(includes) == (1 if all_value == 'true' else 0)
+    assert len(includes) == 1
 
 
 def test_imu_false_disables_default_damping_and_excludes_stack():

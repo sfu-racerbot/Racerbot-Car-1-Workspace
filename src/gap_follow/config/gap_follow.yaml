@@ -197,9 +197,8 @@ gap_follow_node:
     narrow_corridor_clearance: 0.05
     open_corridor_clearance: 0.15
     # --- Steering damping from the IMU yaw rate (docs/gap-follow.md#steering-damping-gyro) ---
-    # Car 2: OFF until its BNO085 is mounted and calibrated (docs/car1-vs-car2.md#imu,
-    # flip it with the other IMU defaults there). Car 1 ships it ON since 2026-10-27
-    # (race defaults, docs/gap-follow.md#race-defaults-2026-10-27). When on, the steering request gets -steering_damping_gain x the gyro's yaw
+    # ON, as on car 1 since 2026-10-27 (race defaults, docs/gap-follow.md#race-defaults-2026-10-27;
+    # car 2 since 2026-10-31, docs/car1-vs-car2.md#imu). When on, the steering request gets -steering_damping_gain x the gyro's yaw
     # rate added to it, before the clip, the arc guard and the slew limit, so the
     # car steers against its own rotation. The term is used only while
     # /imu/status says 'ok' and /imu/data is fresh (imu_timeout_sec); otherwise
@@ -214,7 +213,7 @@ gap_follow_node:
     # / L)), a Kd of 0.03 s brings zeta to about 0.7 at 2 m/s; the simulator race
     # table (docs/gap-follow.md#race-defaults-2026-10-27) chose 0.10. Not measured
     # on the car: simulator-validated only (docs/gap-follow.md#steering-damping-gyro).
-    enable_steering_damping: false
+    enable_steering_damping: true
     steering_damping_gain: 0.10
     imu_topic: /imu/data
     imu_status_topic: /imu/status

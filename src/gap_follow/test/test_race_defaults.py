@@ -36,11 +36,8 @@ def test_speeds_tied_to_the_top_speed_scale_with_it(key):
 
 
 def test_the_race_switches_are_set_as_the_table_says():
-    # oracle: spec -- the table in docs/gap-follow.md#race-defaults-2026-10-27,
-    # except damping: car 2 ships it OFF until its BNO085 is mounted and
-    # calibrated (docs/car1-vs-car2.md#imu; car 1 ships it on). The gain is
-    # the table's, ready for that flip.
-    assert P['enable_steering_damping'] is False
+    # oracle: spec -- the table in docs/gap-follow.md#race-defaults-2026-10-27.
+    assert P['enable_steering_damping'] is True
     assert P['steering_damping_gain'] == pytest.approx(0.10, abs=1e-9)  # s
     assert P['enable_corner_setup'] is False
     assert P['max_acceleration'] == pytest.approx(5.0, abs=1e-9)  # m/s^2

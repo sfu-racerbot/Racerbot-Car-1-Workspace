@@ -21,35 +21,50 @@ This page is the list of things that must survive every port. It is also the ins
 | Camera | Intel **RealSense D435i**, `realsense-ros` submodule, started with `realsense_camera_launch.py`; the dashboard streams its ROS image topic | a plain UVC USB webcam at `/dev/video0`, `webcam_launch.py`, no RealSense | `racerbot_launch/launch/realsense_camera_launch.py`; `image_topic` under `usb_cam_stream_node` in `racerbot_launch/config/web_dashboard_rb2.yaml` |
 | Steering and speed calibration | servo `= -0.78 × steering angle + 0.5904`, clamped to `0.15 … 0.95`; `speed_to_erpm_gain` `4614.0` (and `-4447.983786` for `vesc_to_odom_node`) | `-0.83 × angle + 0.366`, `0.05 … 0.75`; `3650.0` / `-4040.0` | `f1tenth_stack/config/vesc.yaml`, quoted in [hardware-reference.md](hardware-reference.md) |
 | Steering limits | full stick **0.436 rad**; autonomy `max_steering_angle` **0.349**; race planner `profile_max_steering_angle` **0.30**. From car 2's 2026-10-16 circles | 0.38 / 0.33 / 0.30, from car 1's 2026-10-21 circles | `joy_teleop.yaml` scale; `gap_follow.yaml`, `pure_pursuit.yaml`, `auto_map_race.yaml` |
-| IMU | **No BNO085 yet** (to be mounted in the last week of October 2026). Only the VESC's own IMU, `/sensors/imu/raw`. No `~/imu-calibration` checkout | a BNO085 on the Jetson's I2C bus, read through imu-calibration's `bno_i2c_bridge.py` | see [IMU](#imu) below |
+| IMU | a BNO085 on the Jetson's I2C bus (bus 7, `0x4A`), read through car 2's own `bno_i2c_bridge.py` in `~/imu-calibration`, plus the VESC's IMU. **Not fully calibrated** | the same wiring, with car 1's `bno_i2c_bridge.py` | see [IMU](#imu) below |
 | Geometry | wheelbase `0.36`, LiDAR `0.26 0.0 0.11`, **measured on car 2** 2026-08-24 | the same numbers, assumed, not measured on car 1 | [hardware-reference.md](hardware-reference.md#physical-dimensions-used-in-config) |
 | VESC udev rule | `GROUP="dialout"`, `MODE="0660"`: the user must be in `dialout` | `MODE=0666`, no group | `/etc/udev/rules.d/99-vesc.rules` on the Jetson (not in git) |
 | Gyro SLAM profile | `slam_gyro.yaml` also holds SLAM to the gyro and sets a chain of 10 (2026-10-30, replayed on car 2's runs, [spec](superpowers/specs/2026-10-30-slam-reliability.md)) | the 3 m search only, as of car 1's 2026-10-27 replays; its chain of 20 has the same fault at its pace | `racerbot_launch/config/slam_gyro.yaml` |
 
 ### IMU
 
-An **IMU** (inertial measurement unit) is the chip that measures rotation (gyro) and acceleration. `imu_bridge` was written on car 2 (PR #2, 2026-10-24) for the VESC's IMU and an optional BNO085. Car 1 extended it around its own BNO085 (fused speed, measured steering, gyro odometry), and that version was ported back here the same day. Car 2 can't run it the way car 1 does yet:
+An **IMU** (inertial measurement unit) is the chip that measures rotation (gyro) and acceleration. `imu_bridge` was written on car 2 (PR #2, 2026-10-24) for the VESC's IMU and an optional BNO085. Car 1 extended it around its own BNO085 (fused speed, measured steering, gyro odometry), and that version was ported back here the same day.
 
-- `imu_bridge_node` reads the IMU mount rotations from `~/imu-calibration/config/car.yaml`. Without that checkout it **refuses to start**.
-- Car 1's `vehicle_state_launch.py` starts a bridge for a BNO085 on the Jetson's I2C bus. Car 2 has no BNO085.
-
-So on car 2 the IMU side is **off by default**:
+**Since 2026-10-31 car 2 runs the IMU side the way car 1 does, by default:**
 
 | Setting | Car 2 default | Car 1 default | Where |
 |---|---|---|---|
-| `map_course` `imu:=` | `false` | `true` | `racerbot_launch/launch/map_course_launch.py` |
-| `vehicle_state_launch.py` `bno:=` | `false` | `true` | `imu_bridge/launch/vehicle_state_launch.py` |
-| `gap_follow_launch.py` `steering_damping:=` (starts the IMU stack) | `false` | `true` | `gap_follow/launch/gap_follow_launch.py` |
-| `enable_steering_damping` (the gyro term) | `false` | `true` | `gap_follow/config/gap_follow.yaml` |
+| `map_course` `imu:=` | `true` | `true` | `racerbot_launch/launch/map_course_launch.py` |
+| `vehicle_state_launch.py` `bno:=` | `true` | `true` | `imu_bridge/launch/vehicle_state_launch.py` |
+| `gap_follow_launch.py` `steering_damping:=` (starts the IMU stack) | follows `imu` (`true`) | follows `imu` (`true`) | `gap_follow/launch/gap_follow_launch.py` |
+| `enable_steering_damping` (the gyro term) | `true` | `true` | `gap_follow/config/gap_follow.yaml` |
+| `map_course` `gyro_odom:=` | **follows `imu` (`true`)** | follows `imu_all` (`false`) | `racerbot_launch/launch/map_course_launch.py` |
+| `map_course` `imu_lap_turns:=` | **follows `gyro_odom` (`true`)** | follows `imu_all` (`false`) | `racerbot_launch/launch/map_course_launch.py` |
 
-The IMU feature flags ported from car 1's Part B-2/3 (2026-10-29) default **off on both cars**.
+The last two rows are the one difference, on purpose. SLAM's fix is `slam_gyro.yaml`, which only `gyro_odom` loads, and steering odometry maps badly on this car ([spec](superpowers/specs/2026-10-30-slam-reliability.md)). The lap counter compares SLAM's pose with odometry, so it has to use the same odometry. So a plain `map_course` maps and counts laps on the gyro. `imu:=false` alone turns all of it off.
+
+**What runs on both cars by default:**
+
+- **Gyro averaging.** `vehicle_state` averages the two gyros for `/steering/measured` (`bno_gyro_weight`, `vesc_gyro_weight`, both `1.0`).
+- **Gyro heading.** `/odom/imu` takes its heading from the BNO first, then the VESC. If the two steadily disagree, it uses the steering model until they agree again (`heading_sources`, `gyro_disagree_threshold`).
+- **Fused speed is published and recorded.** `/odom/fused` always runs, from the wheels and the BNO's accelerometer. **`gap_follow` does not drive on it unless asked** (`fused_speed:=true`), on either car.
+
+The other IMU feature flags default **off on both cars**:
 
 - In `gap_follow_launch.py`: `imu_all`, `fused_speed`, `imu_understeer`, `imu_traction` and `imu_impact_stop`.
-- In `map_course`: `imu_all`, `gyro_odom`, `fused_speed` and `imu_lap_turns`.
+- In `map_course`: `imu_all` and `fused_speed`.
 
-One difference follows from the table above. On car 2, `map_course` needs `imu:=true` written out before any of its IMU flags, because its `imu` default is `false`.
+`imu_bridge_node` reads the IMU mount rotations from `~/imu-calibration/config/car.yaml`. Without that checkout it **refuses to start**.
 
-`gap_follow_launch.py` has an `imu:=` too, but it is only a permission: it starts nothing by itself. It defaults to `true` on both cars. So `src/racerbot_launch/test/test_imu_flags_both_launches.py` expects `map_course` `false` and `gap_follow_launch.py` `true` here, and both `true` on car 1.
+**What is calibrated on car 2's BNO, as of 2026-10-31:**
+
+| Step | State | Matters for |
+|---|---|---|
+| Gyro bias, roll and pitch of the mount | done 2026-10-29, parked | heading, yaw rate, steering damping: all it needs |
+| Mount yaw (`calibrate_imu.py --imu bno --step mount`, a forward push) | **not done**: `rpy_deg`'s yaw in `car.yaml` is a placeholder, so the BNO's forward and sideways may be swapped | `/odom/fused`. **Do this before `fused_speed:=true`** |
+| Accelerometer fit (`--step accel`, 12 poses) | **not done**: gravity reads 1.7% low | `/odom/fused`, a little |
+| Position (tape measure, then `bno_x_offset` in `vehicle_state.yaml` and `position` in `car.yaml`) | **not done**: `0.36` is car 1's front-axle mount | `/odom/fused`'s lever arm |
+| `sync_calibrate` | **not done** | nothing `imu_bridge` reads today |
 
 Everything else in `imu_bridge` is the same code as car 1's, apart from car 2's own speed filter: `vehicle_state.py`'s four-state filter, `x = [v, a, b_vesc, b_bno]` (car 2 PR #4).
 
@@ -72,13 +87,7 @@ Don't turn one on for car 2 until car 2 has recorded its own value. Then change 
 
 The lap-time floor in `auto_map_race.yaml` (`minimum_lap_duration_sec: 4.0`) holds on both cars; its comment works the bound out from car 2's 0.99 m minimum turning radius (car 1's is 1.05 m).
 
-**When the BNO085 is mounted on car 2**, do these in order, and update this section as you go:
-
-1. Decide how it is wired. On the Jetson's I2C bus, like car 1, `vehicle_state_launch.py bno:=true` starts the bridge as it does there. Behind a microcontroller on USB instead, pass `bno_port:=/dev/ttyACM…` and don't start the I2C bridge.
-2. Clone [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) to `~/imu-calibration`. Set car 2's numbers in its `config/car.yaml` (wheelbase, odometry gain, the BNO's position and mount), then run its calibration steps.
-3. Set `bno_x_offset` in `imu_bridge/config/vehicle_state.yaml` to the BNO's distance ahead of the rear axle. The current `0.36` is car 1's front-axle mount.
-4. Do the forward-push check and the A/B mapping test in [launchstart.md](launchstart.md#testing-the-imu-in-mapping-ab), with `imu:=true`.
-5. Only then flip the four defaults above to `true`, and change `test_car2_hardware_config.py`'s three IMU tests (`map_course`, `vehicle_state_launch`, steering damping) in the same commit. Steering damping's own tests also pin car 2's off value: `test_race_defaults.py` and two tests in `test_gap_follow_launch_steering_damping.py`; flip them with it.
+**To finish calibrating car 2's BNO:** the commands are in [launchstart.md](launchstart.md#finishing-the-bno085-calibration).
 
 `robot_localization` (only needed for `imu_ekf_shadow_launch.py`) is also not installed on car 2 yet.
 
@@ -111,7 +120,7 @@ python3 -m pytest src/racerbot_launch/test/test_car2_hardware_config.py -v
 
 **Working when:** all 16 tests pass. They fail if any of car 1's values come back: USB LiDAR settings, webcam launch, `rb1` dashboard config, calibration, steering limits, odometry gain. They also fail if the doctor loses its Ethernet LiDAR or RealSense checks.
 
-And they fail if the IMU side is switched on by default before car 2 has a calibrated BNO085: gap_follow's steering damping, and its understeer, traction and impact features. Finally, they fail if car 1's IMU numbers lose their "car 1's" label.
+And they fail if the IMU side stops running by default, or if the features that still use car 1's numbers come on by default: gap_follow's understeer, traction and impact features. Finally, they fail if car 1's IMU numbers lose their "car 1's" label.
 
 **If it doesn't:** the failing test's name says which row of the tables above was clobbered.
 

@@ -5,10 +5,9 @@ _flag() that file copies from racerbot_launch's map_course_launch.py: 'true'
 or '1' for on, 'false' or '0' for off, and anything else refused before
 anything starts. true also starts imu_bridge's vehicle_state_launch.py (the
 IMU stack that publishes /imu/data and /imu/status) and sets
-enable_steering_damping on the node. false does neither. Car 1 defaults to
-true since 2026-10-27 (the race defaults); car 2 defaults to false until its
-BNO085 is mounted and calibrated (docs/car1-vs-car2.md#imu), so a bare launch
-here starts no IMU stack.
+enable_steering_damping on the node. false does neither. Both cars default to
+true, following imu:= (the race defaults, 2026-10-27; car 2 since 2026-10-31,
+docs/car1-vs-car2.md#imu), so a bare launch starts the IMU stack.
 The opponent_awareness:= argument's checks sit at the end of this file, because
 they reuse this file's launch helpers.
 
@@ -81,13 +80,13 @@ def _gap_node(nodes):
     return gap[0]
 
 
-def test_the_argument_defaults_to_false_on_car_2():
-    # oracle: spec -- docs/car1-vs-car2.md#imu: off on car 2 until the BNO085 is
-    # mounted (car 1: on, docs/gap-follow.md#race-defaults-2026-10-27).
+def test_the_argument_defaults_to_true():
+    # oracle: spec -- docs/car1-vs-car2.md#imu: on, as on car 1
+    # (docs/gap-follow.md#race-defaults-2026-10-27).
     ld = gl.generate_launch_description()
     defaults = {e.name: ''.join(s.perform(LaunchContext()) for s in e.default_value)
                 for e in ld.entities if isinstance(e, DeclareLaunchArgument)}
-    assert defaults['steering_damping'] == 'false'
+    assert defaults['steering_damping'] == 'true'
 
 
 def test_true_turns_damping_on_and_starts_the_imu_stack():
@@ -97,10 +96,17 @@ def test_true_turns_damping_on_and_starts_the_imu_stack():
     assert includes[0].launch_description_source.location.endswith('/vehicle_state_launch.py')
 
 
-def test_the_shipped_default_keeps_damping_off_and_starts_no_imu_stack():
-    # Bare launch, no argument: what car 2 runs by default. Without the BNO085
-    # and ~/imu-calibration, the IMU stack refuses to start (docs/car1-vs-car2.md#imu).
+def test_the_shipped_default_turns_damping_on_and_starts_the_imu_stack():
+    # Bare launch, no argument: what car 2 runs by default.
     nodes, includes, ctx = _launch()
+    assert _node_params(_gap_node(nodes), ctx)['enable_steering_damping'] is True
+    assert len(includes) == 1
+    assert includes[0].launch_description_source.location.endswith('/vehicle_state_launch.py')
+
+
+def test_imu_false_keeps_damping_off_and_starts_no_imu_stack():
+    # The way to run without an IMU at all: imu:=false alone, with damping following it.
+    nodes, includes, ctx = _launch(imu='false', steering_damping='false')
     assert _node_params(_gap_node(nodes), ctx)['enable_steering_damping'] is False
     assert includes == []
 
