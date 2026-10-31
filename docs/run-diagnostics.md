@@ -474,6 +474,27 @@ not map the run, the report says so and still shows the other available data.
 
 ---
 
+## Rebuilding a racing folder from a run
+
+`map_course` does this for you after every run. Run it by hand for an older run, or one whose check was interrupted:
+
+**Terminal: any, with ROS sourced. It starts no node and publishes nothing.**
+
+```bash
+python3 tools/run_analysis/rebuild_run.py data/racerbot_runs/<time>
+```
+
+**Working when:** the first line starts `GO:` or `NO-GO:`, followed by `Saved in:` and a folder under `data/racerbot_auto/`. **If it says `NOTHING TO REBUILD`:** the run has no bag, or SLAM never ran in it. Existing folders are never overwritten, so delete or rename one to redo it.
+
+It takes the last `/map` in the bag and matches every scan against it, using odometry only to carry the pose between scans. That gives two scores:
+
+- **Fit:** the share of beams ending on a wall. Low means the map does not match the world. Limits: 0.90 on average, and 0.70 over its worst stretch.
+- **See-through:** the share of beams that pass through a mapped wall before they end, which a laser cannot do. High means walls are drawn twice. Limit: 15%.
+
+Fit alone cannot catch a doubled map, because a beam ending on either copy of a wall still counts: run `20261030-184556`'s doubled map fits at 0.97. Why these scores, and how they did against an independent reference: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+
+A map that passes gets `raceline_profiled.csv`, capped at 1.5 m/s (`--max-speed` changes it), with `raceline_2p5.csv` and `raceline_4p0.csv` beside it. A refused map gets no line, so `race_launch.py` refuses that folder too. The numbers are in `rebuild.json`.
+
 ## Replaying SLAM with the car parked
 
 `tools/run_analysis/slam_replay.py` runs SLAM again on a recorded bag and

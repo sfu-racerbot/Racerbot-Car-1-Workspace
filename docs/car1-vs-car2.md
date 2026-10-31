@@ -24,6 +24,7 @@ This page is the list of things that must survive every port. It is also the ins
 | IMU | **No BNO085 yet** (to be mounted in the last week of October 2026). Only the VESC's own IMU, `/sensors/imu/raw`. No `~/imu-calibration` checkout | a BNO085 on the Jetson's I2C bus, read through imu-calibration's `bno_i2c_bridge.py` | see [IMU](#imu) below |
 | Geometry | wheelbase `0.36`, LiDAR `0.26 0.0 0.11`, **measured on car 2** 2026-08-24 | the same numbers, assumed, not measured on car 1 | [hardware-reference.md](hardware-reference.md#physical-dimensions-used-in-config) |
 | VESC udev rule | `GROUP="dialout"`, `MODE="0660"`: the user must be in `dialout` | `MODE=0666`, no group | `/etc/udev/rules.d/99-vesc.rules` on the Jetson (not in git) |
+| Gyro SLAM profile | `slam_gyro.yaml` also holds SLAM to the gyro and sets a chain of 10 (2026-10-30, replayed on car 2's runs, [spec](superpowers/specs/2026-10-30-slam-reliability.md)) | the 3 m search only, as of car 1's 2026-10-27 replays; its chain of 20 has the same fault at its pace | `racerbot_launch/config/slam_gyro.yaml` |
 
 ### IMU
 

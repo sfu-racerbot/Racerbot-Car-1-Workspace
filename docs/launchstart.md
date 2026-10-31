@@ -142,16 +142,23 @@ ros2 launch f1tenth_stack bringup_launch.py
 **Terminal 2:**
 
 ```bash
-ros2 run racerbot_launch map_course
+ros2 run racerbot_launch map_course imu:=true gyro_odom:=true
 ```
+
+**Use the gyro on car 2.** Without those two options SLAM takes its heading from the steering command, which was 15° out over 5 m of track on 2026-10-30, and `184826`'s corrections reached 3.4 m. The VESC's own gyro is enough; car 2 needs no BNO085 for this. They are not the default yet because that is a decision for after [the floor test](superpowers/plans/2026-10-30-slam-reliability.md#task-7-floor-validation).
 
 **Hold LB for the whole run.** (With `imu:=true`, keep the car still for the first 3 seconds first, while the IMU's gyro bias is measured.) The car stays still for a moment at the start, until SLAM has recorded the start pose (`Start pose recorded: ...`). Releasing LB pauses mapping; holding it again carries on.
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
-After the launch stops, `map_course` runs the run summary, IMU report and SLAM report. It prints the first 15 lines of each and saves the full reports under the recorded run's `analysis/map_course/` directory. The `Recording run to:` line near the start gives that run's path.
+After the launch stops, `map_course` **checks the map against the run's own scans**, and this happens whether the laps finished or you pressed `Ctrl+C`. It writes a folder named `<run>-rebuilt` in `data/racerbot_auto/`, and prints `GO:` or `NO-GO:` with the reason.
 
-With `analysis:=false`, the reports are skipped. If recording is disabled, analysis is skipped because there is no recorded run.
+- **`GO`:** the map is good, and the race commands at the end point at that folder. Its racing line comes from where the car really was on the finished map, capped at **1.5 m/s** for the first drive. The commands show how to go faster.
+- **`NO-GO`:** do not race on it. The most common reason is walls drawn twice. Map again, with the gyro on.
+
+Then it runs the run summary, IMU report and SLAM report. It prints the first 15 lines of each and saves the full reports under the recorded run's `analysis/map_course/` directory. The `Recording run to:` line near the start gives that run's path.
+
+With `analysis:=false`, the reports are skipped; `rebuild:=false` skips the map check. If recording is disabled, both are skipped because there is no recorded run.
 
 Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
 
@@ -168,6 +175,7 @@ Options, added to the end of the command:
 | `imu_lap_turns:=true` | Count lap turning from gyro heading in `odom_imu`; positions relative to the map still determine the recorded path. Requires `gyro_odom:=true`. |
 | `imu_all:=true` | Enable `gyro_odom`, `fused_speed` and `imu_lap_turns`. An explicit `false` overrides the corresponding setting; if disabling `gyro_odom`, also disable `imu_lap_turns`. All require `imu:=true`, which car 2 must pass explicitly. |
 | `analysis:=false` | Skip the reports after the launch exits. |
+| `rebuild:=false` | Skip the map check after the launch exits. A run stopped early then keeps nothing. |
 | `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=true` | run the IMU side too (the BNO085 bridge, `imu_bridge`, `vehicle_state`). **Off by default on car 2**: its BNO085 is not calibrated yet (see [car1-vs-car2.md](car1-vs-car2.md#imu)). `fused_speed:=true`, `gyro_odom:=true`, `imu_lap_turns:=true` and `imu_all:=true` need it. Car 1 runs it by default |
 | `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
@@ -182,7 +190,7 @@ Car 1's corrected `imu_all:=true` simulator run `20261029-170502` (recorded on c
 
 **If it says `the hardware is not running`:** start Terminal 1 first.
 
-**If it doesn't finish:** `Ctrl+C` stops it, and it tells you no map was saved. If the last lap fails the quality check, it drives up to two more by itself. Lap details: [operations.md](operations.md#reading-the-terminal-while-it-maps).
+**If it doesn't finish:** `Ctrl+C` stops it, and you keep what it mapped: the map check above still runs. Less than one whole lap gives a map but no racing line, and it says so. A second `Ctrl+C` skips the check and prints the command to run it later. If the last lap fails the quality check, it drives up to two more by itself. Lap details: [operations.md](operations.md#reading-the-terminal-while-it-maps).
 
 ## Testing the IMU in mapping (A/B)
 
@@ -241,6 +249,14 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 **The car must be where mapping left it:** still there, or put back on the marked spot facing the same way. The localizer is told the car starts there, because there is no RViz on the car to click a start pose, and it only searches about 0.5 m and 20° around that spot. Simulator-validated only.
 
 **Terminal 1:** the `bringup_launch.py` from mapping, still running. Start it again if you closed it.
+
+**Terminal 2, first:** check the car really is on the spot. This reads one LiDAR scan and publishes nothing, so it cannot move the car:
+
+```bash
+ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run>
+```
+
+**Working when:** it prints `GO: car is 0.05 m and 2 deg from the start pose`. **If it prints `NO-GO`:** it says how far to move the car. Do this before racing, because the race launch cannot tell: it reports `racing can begin` wherever the car really is.
 
 **Terminal 2**, pick one (the end-of-mapping printout has these with your run's folder already filled in):
 

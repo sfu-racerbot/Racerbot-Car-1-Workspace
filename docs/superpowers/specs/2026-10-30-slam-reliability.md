@@ -136,10 +136,23 @@ Each row is one replay. **Wall** is the share of the map's walls within 10 cm of
 | Prior only | 185036 | 0.88, 0.88 | 0.51, 0.34 m | 3.2°, 2.6° | 0.12, 0.12 m | 4, 5 |
 | Prior + chain 7 | 184556 | 0.91, 0.91 | 0.18, 0.16 m | 2.2°, 2.1° | 0.10, 0.10 m | 36, 39 |
 | Prior + chain 7 | 185036 | 0.67, 0.74 | 0.39, 0.27 m | 2.0°, 2.3° | 0.26, 0.23 m | 52, 52 |
-| **Prior + chain 10** | **184556** | **0.91, 0.91** | **0.27, 0.17 m** | **2.3°, 2.3°** | **0.10, 0.10 m** | **32, 34** |
-| **Prior + chain 10** | **185036** | **0.92, 0.92** | **0.21, 0.16 m** | **2.1°, 2.1°** | **0.09, 0.08 m** | **51, 50** |
+| **Prior + chain 10** | **184556** | **0.91, 0.91, 0.91** | **0.27, 0.17, 0.30 m** | **2.3°, 2.3°, 2.2°** | **0.10, 0.10, 0.09 m** | **32, 34, 30** |
+| **Prior + chain 10** | **185036** | **0.92, 0.92, 0.91** | **0.21, 0.16, 0.19 m** | **2.1°, 2.1°, 2.3°** | **0.09, 0.08, 0.09 m** | **51, 50, 52** |
+| Same, dense nodes (like slower driving) | 184556 | 0.91, 0.91 | 0.14, 0.15 m | 2.1°, 2.1° | 0.08, 0.08 m | 34, 35 |
+| Same, dense nodes | 185036 | 0.83, 0.82 | 0.27, 0.31 m | 2.1°, 2.4° | 0.12, 0.14 m | 52, 40 |
+| Same, window ±1 m | 184556 | 0.91, 0.91 | 0.24, 0.15 m | 2.4°, 1.9° | 0.10, 0.09 m | 33, 34 |
+| Same, window ±1 m | 185036 | 0.93, 0.92 | 0.16, 0.14 m | 2.1°, 2.1° | 0.09, 0.09 m | 49, 48 |
+| Same, plus a distance prior | 184556 | 0.76, 0.75 | 0.34, 0.33 m | 2.8°, 2.7° | 0.25, 0.25 m | 30, 29 |
+| Same, plus a distance prior | 185036 | 0.73, 0.74 | 0.38, 0.37 m | 2.6°, 2.4° | 0.26, 0.27 m | 46, 44 |
+| **Chain 10 with no prior** | 184556 | **0.22** | 4.95 m | 10.8° | 4.00 m | 26 |
 
-On these two runs, shipped settings gave at best 0.64. Prior + chain 10 gave 0.91-0.92 on all four replays with both runs behaving alike, and live-pose error fell by about 20×.
+On these two runs, shipped settings gave at best 0.64. Prior + chain 10 gave 0.91-0.92 on all six replays with both runs behaving alike, and live-pose error fell by about 20×.
+
+Three things this table decided:
+
+- **The two changes must ship together.** Chain 10 alone is the worst result here: closures fire easily, but with a drifting pose they land in the wrong place.
+- **The ±1 m window is not adopted.** It is no better beyond noise on two runs, so it is not worth moving a value car 1 validated.
+- **The distance prior is rejected.** It made every map worse, most likely because wheel distance reads 3-4% long, so it pulls on a wrong number. It may be worth another look after the odom wizard fixes that scale.
 
 ## The fix
 
@@ -159,7 +172,8 @@ The rest is in [the plan](../plans/2026-10-30-slam-reliability.md): the lap coun
 
 ## What this does not prove
 
-- **Only 2 runs at about 2.5 m/s mean.** Slower driving makes nodes denser, which changes chain length in metres. The dense-node replays approximate that; a real slow run is still needed.
+- **Only 2 runs at about 2.5 m/s mean.** Slower driving makes nodes denser, which changes chain length in metres. The dense-node replays approximate that and held up (0.82-0.91); a real slow run is still needed.
+- **The verdict's limits come from one course on one evening.** 15% see-through separated these maps, but another course may sit differently.
 - **A chain of 10 is less evidence than 20.** Replays showed no false closure on this course. A course with more repetition could be different, and this course's nearest parallel stretch is what the ±1.5 m window protects against.
 - **Replays are not the car.** CPU load and timing differ, which is why the [floor test in the plan](../plans/2026-10-30-slam-reliability.md#task-7-floor-validation) is the real acceptance test.
 - **The Karto penalty formula is from memory.** The measured improvement stands either way, since it does not depend on the recalled formula.

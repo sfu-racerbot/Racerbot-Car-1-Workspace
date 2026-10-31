@@ -1,6 +1,6 @@
 # SLAM reliability Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 > **Who this is for:** whoever builds or continues this work, human or agent.
 > **Read first:** [the spec](../specs/2026-10-30-slam-reliability.md), `CLAUDE.md`, `TEST_QUALITY_STANDARDS.md`.
@@ -45,6 +45,8 @@
 | `src/racerbot_launch/scripts/map_course` | Runs the rebuild after every run, shielded from a second Ctrl+C |
 | `src/pure_pursuit/pure_pursuit/check_start.py` | New. Read-only: is the car on the start pose? |
 
+> **Status, 2026-10-30:** tasks 1-6 and 8 are built. Task 7 needs the car and a person: **it is the real acceptance test, and it has not been done.**
+
 ### Task 1: Lap counter counts only real corrections
 
 **Done:** commit `949cb6e`. 22 new tests, including run `20261030-185036` as a recorded fixture (4+ laps of 50.4 ± 2 m, at most 20 corrections a lap, where the old code closed none). 13 mutations caught.
@@ -55,15 +57,15 @@
 - Modify: `src/racerbot_launch/config/slam_gyro.yaml`
 - Test: `src/racerbot_launch/test/test_slam_gyro_profile.py`
 
-- [ ] **Step 1: Write the failing tests**, all reading the real YAML files:
+- [x] **Step 1: Write the failing tests**, all reading the real YAML files:
   - `test_a_closure_chain_fits_in_the_search_radius`: invariant. `loop_match_minimum_chain_size × 0.57 m` (measured node spacing, 2026-10-30) must be under `2 × loop_search_maximum_distance`. Must fail on chain 20.
   - `test_a_gyro_disagreement_costs_a_match_something`: closed form. `1 - 0.2 × (5°)² / angle_variance_penalty` is at or below 0.9, and `minimum_angle_penalty` is below that value, so the floor does not cancel it.
   - `test_the_coarse_search_still_steps_at_least_ten_times`: `coarse_search_angle_offset / coarse_angle_resolution >= 10`.
   - `test_steering_odometry_does_not_get_the_tight_prior`: none of the prior keys appear in `slam_tracking.yaml`.
-- [ ] **Step 2: Run, see them fail**
-- [ ] **Step 3: Set the five values from the spec's table in `slam_gyro.yaml`, with the evidence in comments**
-- [ ] **Step 4: Run them, and `test_map_course_imu.py`, green**
-- [ ] **Step 5: Commit**
+- [x] **Step 2: Run, see them fail**
+- [x] **Step 3: Set the five values from the spec's table in `slam_gyro.yaml`, with the evidence in comments**
+- [x] **Step 4: Run them, and `test_map_course_imu.py`, green**
+- [x] **Step 5: Commit**
 
 ### Task 3: `map_localize` library
 
@@ -81,10 +83,10 @@
 - `find_laps(poses) -> [Lap(start, end, length, gap)]`
 - `judge(fit, see_through, window=20) -> Verdict(ok, reason, mean_fit, worst_window_fit, see_through)`, with `MIN_MEAN_FIT` 0.90, `MIN_WINDOW_FIT` 0.70, `MAX_SEE_THROUGH` 0.15
 
-- [ ] **Step 1: Tests against an independent ray-cast world.** Edges: blank and NaN scans, empty inputs, a bare corridor stays on odometry, a doubled wall caught by see-through, a spin and a spiral are not laps, the see-through limit's exact boundary.
-- [ ] **Step 2: Implement, run unsourced, green**
-- [ ] **Step 3: Mutation check, including sign, clamp and limit breaks**
-- [ ] **Step 4: Commit**
+- [x] **Step 1: Tests against an independent ray-cast world.** Edges: blank and NaN scans, empty inputs, a bare corridor stays on odometry, a doubled wall caught by see-through, a spin and a spiral are not laps, the see-through limit's exact boundary.
+- [x] **Step 2: Implement, run unsourced, green**
+- [x] **Step 3: Mutation check, including sign, clamp and limit breaks**
+- [x] **Step 4: Commit**
 
 ### Task 4: `rebuild_run.py`
 
@@ -106,10 +108,10 @@ Decisions:
 - **Start pose:** the last tracked pose, because that is where the car is parked, as in `map_course` today. `check_start` verifies it.
 - **Refused map:** `commands.txt` says why and gives no race command, and no `raceline_profiled.csv` is written, so `race_launch.py` refuses that folder.
 
-- [ ] **Step 1: Tests from a synthetic run folder (arrays through a fake loader, closed-form course):** accepted run writes every file; `raceline_profiled.csv` tops out at `max_speed`; doubled map writes no line and names see-through; under one lap writes map but no line and says so; no `/map` exits 2; `/odom` fallback says so; an existing output folder is refused, not overwritten.
-- [ ] **Step 2: Implement; see them green**
-- [ ] **Step 3: Run it on the real runs.** Expected: `185036` accepted and `184556` refused on see-through.
-- [ ] **Step 4: Mutation check, commit**
+- [x] **Step 1: Tests from a synthetic run folder (arrays through a fake loader, closed-form course):** accepted run writes every file; `raceline_profiled.csv` tops out at `max_speed`; doubled map writes no line and names see-through; under one lap writes map but no line and says so; no `/map` exits 2; `/odom` fallback says so; an existing output folder is refused, not overwritten.
+- [x] **Step 2: Implement; see them green**
+- [x] **Step 3: Run it on the real runs.** Expected: `185036` accepted and `184556` refused on see-through.
+- [x] **Step 4: Mutation check, commit**
 
 ### Task 5: `map_course` runs the rebuild
 
@@ -121,8 +123,8 @@ Decisions:
 
 Decisions: the reports and the rebuild run with `start_new_session=True` so the terminal's second Ctrl+C reaches only the wrapper. A Ctrl+C there skips what is left, but `report()` still runs, and since the rebuild writes `commands.txt` last, `new_run()` only ever finds a finished folder.
 
-- [ ] **Step 1: Tests with a fake subprocess at the process boundary:** the rebuild is invoked after a run with a recording; not invoked without one; `rebuild:=false` skips; an interrupted rebuild still reports; `report()` picks the rebuilt folder when it is newest, and says "no map" when the verdict refused it.
-- [ ] **Step 2: Implement; green; mutation check; commit**
+- [x] **Step 1: Tests with a fake subprocess at the process boundary:** the rebuild is invoked after a run with a recording; not invoked without one; `rebuild:=false` skips; an interrupted rebuild still reports; `report()` picks the rebuilt folder when it is newest, and says "no map" when the verdict refused it.
+- [x] **Step 2: Implement; green; mutation check; commit**
 
 ### Task 6: `check_start`
 
@@ -135,8 +137,8 @@ Decisions: the reports and the rebuild run with `start_new_session=True` so the 
 
 Why: `seed_start_pose` reports success as soon as the filter echoes the seed, which it does wherever the car really is.
 
-- [ ] **Step 1: Tests:** GO at the start; NO-GO 2 m along the track, and at 30° turned on the spot, and with a blank scan; a static test that the module creates no publisher.
-- [ ] **Step 2: Implement; add to `commands_text`; green; mutation check; commit**
+- [x] **Step 1: Tests:** GO at the start; NO-GO 2 m along the track, and at 30° turned on the spot, and with a blank scan; a static test that the module creates no publisher.
+- [x] **Step 2: Implement; add to `commands_text`; green; mutation check; commit**
 
 ### Task 7: Floor validation
 

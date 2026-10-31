@@ -133,6 +133,8 @@ Why 3 m: with the gyro, the position estimate is only about 1 m off after a lap.
 
 On two replayed runs, `20261026-194714` and `20261026-194913`, the largest correction with the 8 m search was 2.45 m and 2.75 m. With the 3 m search it was 0.47 m on both. The replays used `tools/run_analysis/slam_replay.py`, so check a change that way first.
 
+**`slam_gyro.yaml` also makes SLAM listen to the gyro (2026-10-30).** With its old settings, SLAM's heading was 5.3° off over 25 m of track while the gyro alone was 1.0° off, because a scan match paid almost nothing for disagreeing with the gyro. That drift, in one direction every lap, is what pushed the car outside the closure window and doubled walls. The file now holds SLAM to the gyro, and only this file may: steering odometry is 15° out over 5 m, so holding SLAM to it would hold it to a wrong answer. Measurements and every replay: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+
 ### Why the chain size moved with it
 
 This one is a coupling that is easy to miss.
@@ -142,6 +144,12 @@ A "chain" is a run of consecutive scans. Its length **in metres** is `chain_size
 Halving the spacing to 0.25 m would have quietly halved that evidence to 2.5 m — in a building full of corridors that look alike, which is exactly where a false loop closure folds the map onto itself. Raising the chain size to 20 keeps the evidence at 5 m of travel.
 
 **If you change `minimum_travel_distance`, change `loop_match_minimum_chain_size` to match.**
+
+> **Correction, 2026-10-30: at driving speed the chain is longer than that.** The sum above is only true below about 1.25 m/s. Faster than that, `minimum_time_interval` (0.2 s) sets the spacing instead: **0.57 m** median at this car's pace, so a chain of 20 is about 11 m, not 5 m.
+>
+> A chain also has to fit inside `loop_search_maximum_distance`: it is consecutive older nodes *within that radius*. A 3 m radius holds about 6 m of path, so about 11 nodes. So `slam_gyro.yaml`'s 3 m with a chain of 20 could never close a loop while the pose was right (0.0% of nodes could), which is why it now sets the chain to 10.
+>
+> **So check three numbers together: the chain, the radius, and the speed.** `test_slam_gyro_profile.py` checks that the chain fits. Chain 10 is only safe with the gyro prior: on its own it replayed worse than the old settings (0.22 of walls on the reference map).
 
 ## Checking whether it helped
 
