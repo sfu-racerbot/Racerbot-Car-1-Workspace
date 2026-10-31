@@ -149,6 +149,17 @@ def test_the_line_is_the_course(tmp_path, good_inputs):
     assert nearest.max() < 0.25  # m
 
 
+def test_the_line_is_the_cleaned_one_not_the_raw_lap(tmp_path, good_inputs):
+    # oracle: cited file. recorded_path.prepare resamples to waypoint_spacing (auto_map_race.yaml, 0.15 m),
+    # while this fixture's raw lap has a pose every 0.4 m, so which of the two was saved shows in the spacing.
+    result = _rebuild(tmp_path, good_inputs)
+    xy, _ = racing_math.load_profiled_csv(str(result.out_dir / 'raceline_profiled.csv'))[:2]
+    spacing = racing_math.compute_segment_lengths(xy, closed=True)
+    assert np.median(spacing) == pytest.approx(rb.load_config()['waypoint_spacing'], abs=0.02)  # m
+    raw = racing_math.load_xy_csv(str(result.out_dir / 'raceline_raw.csv'))
+    assert np.median(np.hypot(*np.diff(raw, axis=0).T)) > 0.3  # m: the raw lap really is the coarser one
+
+
 def test_the_first_line_is_capped_and_the_faster_ones_are_not(tmp_path, good_inputs):
     # oracle: invariant. The profile a car first races tops out at max_speed, whatever the corners allow.
     result = _rebuild(tmp_path, good_inputs, max_speed=1.5)
@@ -216,6 +227,7 @@ def test_a_map_of_somewhere_else_is_refused(tmp_path):
     result = _rebuild(tmp_path, _inputs(laps=0.4, map_walls=other))
     assert not result.verdict.ok
     assert not result.raceline_ok
+    assert 'no place' in result.message  # stopped at placing the car, before tracking it anywhere
 
 
 def test_a_map_with_no_walls_is_refused_not_a_crash(tmp_path):
@@ -231,7 +243,7 @@ def test_less_than_a_lap_keeps_the_map_and_says_there_is_no_line(tmp_path):
     assert result.lap_count == 0
     assert (result.out_dir / 'map.yaml').is_file()
     assert not (result.out_dir / 'raceline_profiled.csv').exists()
-    assert 'lap' in result.message
+    assert 'less than one whole lap' in result.message
     assert 'race_launch.py' not in (result.out_dir / 'commands.txt').read_text()
 
 
