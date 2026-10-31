@@ -55,8 +55,10 @@ slam_toolbox:
     coarse_search_angle_offset: 0.175
     coarse_angle_resolution: 0.0175
     #
-    # Replays, each cell two repeats, walls on the reference map within 10 cm / live pose error p95:
+    # Replays, walls on the reference map within 10 cm / live pose error p95, one value per repeat:
     #
-    #   run               shipped                     this profile
-    #   20261030-184556   0.33, 0.30 / 6.49, 5.84 m   0.91, 0.91 / 0.27, 0.17 m
-    #   20261030-185036   0.64, 0.31 / 4.01, 4.79 m   0.92, 0.92 / 0.21, 0.16 m
+    #   run               shipped                     chain 10 alone                    this profile
+    #   20261030-184556   0.35, 0.30 / 3.65, 5.85 m   0.86, 0.94, 0.83, 0.89 / 4.69, 0.75, 4.64, 4.89 m   0.91, 0.91, 0.91 / 0.28, 0.18, 0.30 m
+    #   20261030-185036   0.64, 0.32 / 4.01, 4.80 m   0.95, 0.95, 0.95, 0.95 / 0.59, 0.76, 0.77, 0.87 m   0.92, 0.92, 0.91 / 0.21, 0.16, 0.19 m
+    #
+    # So the chain does most of the work on walls, and the prior makes that repeatable and the live pose usable.

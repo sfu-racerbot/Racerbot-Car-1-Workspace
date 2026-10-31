@@ -25,10 +25,10 @@ On 2026-10-30, 21 runs produced no saved map. It looked like one problem, "SLAM 
 |---|---|---|---|
 | 1 | The lap counter mistook driving for SLAM corrections above 3 m/s, dragged its own start point away, and never closed a lap | Replaying the real recorder reproduces the log; the start walked 13 m | Count only motion odometry did not see |
 | 2 | SLAM ignored the gyro, and its heading drifted 6-10° per lap | Over 25 m: gyro 1.0° off, SLAM 5.3° off | Weight the gyro prior |
-| 3 | Loop closure was geometrically impossible at speed | 0.0% of nodes can ever satisfy `chain 20` inside a `3 m` radius | Chain 10 |
+| 3 | Loop closure was geometrically impossible at speed, the larger of these two for the map | 0.0% of nodes can ever satisfy `chain 20` inside a `3 m` radius | Chain 10 |
 | 4 | Stopping a run saved nothing, and nothing could tell a good map from a doubled one | 5 laps of data, no file. A doubled map scores 0.97 on scan fit | Rebuild from the bag after every run; a see-through test |
 
-Problems 2 and 3 together are why results looked random: whether a map came out depended on whether heading drift happened to leave the car inside the closure window at the end of lap 1.
+Problems 2 and 3 together are why results looked random: closures could only fire once drift had bent the path enough to fit, so whether a map came out depended on what that drift happened to do by the end of lap 1.
 
 ## How it was measured
 
@@ -99,11 +99,11 @@ So with correct poses a closure cannot fire. It fires only when drift has bent t
 |---|---|---|
 | `185036` live (clean) | 0.978 | 4.9% |
 | `185036` with the gyro prior | 0.979 | 8-10% |
-| `184556` live (doubled) | see note | 25.7% |
+| `184556` live (doubled) | 0.97 | 19% |
 | `184556` shipped settings, replayed | 0.966 | 40.6% |
 | `184556` prior only, no closures | **0.975** | **47.5%** |
 
-Note: where the map is badly doubled the global start search can also fail, which is its own refusal.
+These are from the first prototype of the test, except the `184556` live row, which is from the shipped tool. Where a map is badly doubled, the search for the car's start can also fail, which is its own refusal.
 
 Also, the live pose cannot be used for a racing line at all on shipped settings: lines recorded from it touch the final map's walls (0.00 m clearance) and sit up to 1.38 m from where the car really drove.
 
@@ -124,35 +124,63 @@ Also, the live pose cannot be used for a racing line at all on shipped settings:
 
 ## The replay results
 
-Each row is one replay. **Wall** is the share of the map's walls within 10 cm of the reference. **Live** and **graph** are position errors against truth.
+Each cell lists one value per replay. **Wall** is the share of the map's walls within 10 cm of the reference, after registering the map to it from 25 starting points. **Wall p95** is how far off the worst walls are. **Live** and **graph** are position errors against truth.
 
-| Settings | Run | Wall | Live p95 | Heading p95 | Graph p95 | Solves |
-|---|---|---|---|---|---|---|
-| Shipped | 184556 | 0.33, 0.30 | 6.49, 5.84 m | 29.8°, 26.3° | 5.40, 4.04 m | 3, 4 |
-| Shipped | 185036 | 0.64, 0.31 | 4.01, 4.79 m | 17.3°, 6.5° | 1.31, 4.37 m | 9, 5 |
-| No closures | 184556 | 0.34, 0.34 | 4.60, 3.82 m | 25.6°, 22.5° | 3.41, 2.98 m | 0 |
-| No closures | 185036 | 0.26, 0.27 | 9.19, 8.08 m | 47.3°, 42.7° | 6.95, 6.06 m | 0 |
-| Prior only | 184556 | 0.59, 0.74 | 0.76, 0.34 m | 5.2°, 3.2° | 0.58, 0.25 m | 0 |
-| Prior only | 185036 | 0.88, 0.88 | 0.51, 0.34 m | 3.2°, 2.6° | 0.12, 0.12 m | 4, 5 |
-| Prior + chain 7 | 184556 | 0.91, 0.91 | 0.18, 0.16 m | 2.2°, 2.1° | 0.10, 0.10 m | 36, 39 |
-| Prior + chain 7 | 185036 | 0.67, 0.74 | 0.39, 0.27 m | 2.0°, 2.3° | 0.26, 0.23 m | 52, 52 |
-| **Prior + chain 10** | **184556** | **0.91, 0.91, 0.91** | **0.27, 0.17, 0.30 m** | **2.3°, 2.3°, 2.2°** | **0.10, 0.10, 0.09 m** | **32, 34, 30** |
-| **Prior + chain 10** | **185036** | **0.92, 0.92, 0.91** | **0.21, 0.16, 0.19 m** | **2.1°, 2.1°, 2.3°** | **0.09, 0.08, 0.09 m** | **51, 50, 52** |
-| Same, dense nodes (like slower driving) | 184556 | 0.91, 0.91 | 0.14, 0.15 m | 2.1°, 2.1° | 0.08, 0.08 m | 34, 35 |
-| Same, dense nodes | 185036 | 0.83, 0.82 | 0.27, 0.31 m | 2.1°, 2.4° | 0.12, 0.14 m | 52, 40 |
-| Same, window ±1 m | 184556 | 0.91, 0.91 | 0.24, 0.15 m | 2.4°, 1.9° | 0.10, 0.09 m | 33, 34 |
-| Same, window ±1 m | 185036 | 0.93, 0.92 | 0.16, 0.14 m | 2.1°, 2.1° | 0.09, 0.09 m | 49, 48 |
-| Same, plus a distance prior | 184556 | 0.76, 0.75 | 0.34, 0.33 m | 2.8°, 2.7° | 0.25, 0.25 m | 30, 29 |
-| Same, plus a distance prior | 185036 | 0.73, 0.74 | 0.38, 0.37 m | 2.6°, 2.4° | 0.26, 0.27 m | 46, 44 |
-| **Chain 10 with no prior** | 184556 | **0.22** | 4.95 m | 10.8° | 4.00 m | 26 |
+> **A correction made on the way.** The first version of this scorer registered each map from a single start, and that can settle in a wrong minimum. It scored one chain-10-only map 0.22 when it is really 0.86, which led to the claim "chain 10 alone is worse than shipped", briefly written here and in a commit. It is false. Every number below uses the fixed scorer.
 
-On these two runs, shipped settings gave at best 0.64. Prior + chain 10 gave 0.91-0.92 on all six replays with both runs behaving alike, and live-pose error fell by about 20×.
+| Settings | Run | Wall | Wall p95 | Live p95 | Heading p95 | Graph p95 | Solves |
+|---|---|---|---|---|---|---|---|
+| Shipped | 184556 | 0.35, 0.30 | 9+, 9+ m | 3.65, 5.85 m | 18.1°, 26.4° | 2.94, 4.04 m | 3, 4 |
+| Shipped | 185036 | 0.64, 0.32 | 1.51, 9+ m | 4.01, 4.80 m | 17.3°, 6.5° | 1.31, 4.38 m | 9, 5 |
+| No closures | 184556 | 0.38, 0.40 | 2.97, 2.02 m | 3.18, 2.74 m | 17.4°, 17.6° | 1.87, 1.61 m | 0 |
+| No closures | 185036 | 0.28, 0.28 | 9+, 9+ m | 4.94, 6.22 m | 30.4°, 36.1° | 4.01, 4.44 m | 0 |
+| Prior only | 184556 | 0.59, 0.75 | 0.57, 0.25 m | 0.76, 0.43 m | 5.2°, 3.6° | 0.57, 0.30 m | 0 |
+| Prior only | 185036 | 0.88, 0.88 | 0.11, 0.11 m | 0.51, 0.35 m | 3.2°, 2.6° | 0.12, 0.12 m | 4, 5 |
+| Chain 10 only | 184556 | 0.86, 0.94, 0.83, 0.89 | 0.47, 0.11, 0.70, 0.30 m | 4.69, 0.75, 4.64, 4.89 m | 18.5°, 6.8°, 19.0°, 23.8° | 0.61, 0.06, 0.56, 0.78 m | 26-31 |
+| Chain 10 only | 185036 | 0.95, 0.95, 0.95, 0.95 | 0.10, 0.10, 0.07, 0.07 m | 0.59, 0.76, 0.77, 0.87 m | 6.3°, 6.9°, 5.2°, 8.1° | 0.06, 0.06, 0.05, 0.06 m | 47-53 |
+| Prior + chain 7 | 184556 | 0.90, 0.91 | 0.14, 0.11 m | 0.18, 0.16 m | 2.2°, 2.1° | 0.10, 0.10 m | 36, 39 |
+| Prior + chain 7 | 185036 | 0.67, 0.74 | 0.21, 0.20 m | 0.39, 0.27 m | 2.0°, 2.3° | 0.26, 0.23 m | 52, 52 |
+| **Prior + chain 10** | **184556** | **0.91, 0.91, 0.91** | **0.11, 0.11, 0.11 m** | **0.28, 0.18, 0.30 m** | **2.3°, 2.3°, 2.2°** | **0.10, 0.10, 0.09 m** | **30-34** |
+| **Prior + chain 10** | **185036** | **0.92, 0.92, 0.91** | **0.11, 0.11, 0.11 m** | **0.21, 0.16, 0.19 m** | **2.1°, 2.1°, 2.3°** | **0.09, 0.08, 0.09 m** | **50-52** |
+| Same, dense nodes (like slower driving) | 184556 | 0.91, 0.91 | 0.15, 0.14 m | 0.14, 0.15 m | 2.1°, 2.1° | 0.08, 0.08 m | 34, 35 |
+| Same, dense nodes | 185036 | 0.83, 0.82 | 0.16, 0.16 m | 0.27, 0.31 m | 2.1°, 2.4° | 0.12, 0.14 m | 52, 40 |
+| Same, window ±1 m | 184556 | 0.91, 0.91 | 0.11, 0.11 m | 0.24, 0.15 m | 2.4°, 1.9° | 0.10, 0.09 m | 33, 34 |
+| Same, window ±1 m | 185036 | 0.93, 0.92 | 0.10, 0.11 m | 0.16, 0.14 m | 2.1°, 2.1° | 0.09, 0.09 m | 49, 48 |
+| Same, plus a distance prior | 184556 | 0.76, 0.75 | 0.25, 0.25 m | 0.34, 0.33 m | 2.8°, 2.7° | 0.25, 0.25 m | 30, 29 |
+| Same, plus a distance prior | 185036 | 0.73, 0.74 | 0.30, 0.30 m | 0.38, 0.38 m | 2.6°, 2.4° | 0.27, 0.27 m | 46, 44 |
 
-Three things this table decided:
+What this table decided:
 
-- **The two changes must ship together.** Chain 10 alone is the worst result here: closures fire easily, but with a drifting pose they land in the wrong place.
+- **The chain does most of the work on the walls.** Reachable closures alone take the walls from 0.30-0.64 to 0.83-0.95.
+- **The prior makes it repeatable and makes the live pose usable.** On the hard run, chain 10 alone gave 4.6-4.9 m of live error on 3 of 4 replays, and swung between 0.83 and 0.94 on walls. With the prior every replay gave 0.91 and under 0.3 m. Live pose matters even with `rebuild_run.py`, because the lap counter reads it. So both stay.
+- **Do not read 0.95 against 0.92 on run `185036` as chain-only winning.** The reference map is that same run's, drawn by the same matcher without a prior, so it favours its own kind.
 - **The ±1 m window is not adopted.** It is no better beyond noise on two runs, so it is not worth moving a value car 1 validated.
 - **The distance prior is rejected.** It made every map worse, most likely because wheel distance reads 3-4% long, so it pulls on a wrong number. It may be worth another look after the odom wizard fixes that scale.
+
+### Does the verdict agree with the independent score?
+
+`rebuild_run.py` judges a map using only that run's own data, with no reference. Against the reference score above, on every replay map:
+
+| Reference score | Maps | Approved |
+|---|---|---|
+| Good, 0.8 or more | 34 | **34** |
+| Middling, 0.5 to 0.8 | 13 | 6 |
+| Bad, under 0.5 | 8 | **0** |
+
+See-through split them cleanly: every approved map scored 9.1% or less, and every map refused on see-through scored 15.8% or more, so the 15% limit sits in a real gap. Fit alone would have approved several bad ones.
+
+The 6 middling maps it approves have single walls, up to 0.30 m off the reference (p95). **It cannot see a smooth bend:** it also approved a chain-only map with 0.70 m of warp, because its walls are single and every scan fits them. A map like that still localizes and races, as long as the car stays on it, but it is not to scale.
+
+### The whole flow, on the simulator
+
+The real launch, nodes, wrapper and tools, on `indoor_oval` with `imu:=true gyro_odom:=true`:
+
+| Step | Result |
+|---|---|
+| `map_course` | 3 laps closed by itself, 0.04-0.16 m from the start, **0 false corrections** |
+| Map check | `GO`: fit 1.00, see-through 1%, laps 28.0-28.1 m |
+| `check_start` | `GO`: 0.01 m, 0° from the start pose |
+| `race_launch.py` on the rebuilt folder | Pure pursuit raced 66.9 m at 1.5 m/s with no contact |
 
 ## The fix
 
@@ -173,7 +201,8 @@ The rest is in [the plan](../plans/2026-10-30-slam-reliability.md): the lap coun
 ## What this does not prove
 
 - **Only 2 runs at about 2.5 m/s mean.** Slower driving makes nodes denser, which changes chain length in metres. The dense-node replays approximate that and held up (0.82-0.91); a real slow run is still needed.
-- **The verdict's limits come from one course on one evening.** 15% see-through separated these maps, but another course may sit differently.
+- **The verdict's limits come from one course on one evening.** 15% see-through separated these maps, but another course may sit differently. It also cannot see a smooth bend in single walls.
+- **The reference is itself a SLAM map,** the live map of run `185036`. Other runs' scans fit it at 97%, so it is consistent, but its absolute scale was never checked with a tape measure.
 - **A chain of 10 is less evidence than 20.** Replays showed no false closure on this course. A course with more repetition could be different, and this course's nearest parallel stretch is what the ±1.5 m window protects against.
 - **Replays are not the car.** CPU load and timing differ, which is why the [floor test in the plan](../plans/2026-10-30-slam-reliability.md#task-7-floor-validation) is the real acceptance test.
 - **The Karto penalty formula is from memory.** The measured improvement stands either way, since it does not depend on the recalled formula.
