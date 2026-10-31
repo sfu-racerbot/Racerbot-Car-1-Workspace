@@ -63,6 +63,13 @@ def angle_difference(a: float, b: float) -> float:
     return (a - b + math.pi) % (2.0 * math.pi) - math.pi
 
 
+#: Turning in one control tick that odometry cannot explain, past which the
+#: map frame is taken to have rotated. 0.1 rad (5.7 deg) in 25 ms is 4 rad/s
+#: of unexplained yaw rate; the car's whole yaw rate tops out near 1.8 rad/s
+#: (runs 20261030-184556, -185036). Steering odometry over-reads turns by 34%
+#: (gain 0.74 on the same runs), about 0.015 rad a tick, well inside this.
+UNEXPLAINED_YAW_LIMIT_RAD = 0.1
+
 #: The nearest a lap has come to its start while every closure gate except
 #: heading held. `index` is the last recorded point at that moment.
 _Nearest = namedtuple('_Nearest', 'distance heading_error index')
@@ -82,6 +89,15 @@ class LapRecorder:
     the *already recorded* points, so the stored shape stays rigid relative
     to the car and stays valid in the new frame. That is what a correction
     actually means: the whole map moved, including the part already driven.
+
+    **A correction is motion odometry did not see, not a big step.** A fixed
+    limit on the raw step reads as "0.12 m at 40 Hz is 4.8 m/s", but the
+    transform only updates at 50 Hz, so a tick that spans two updates moves
+    0.12 m at 3 m/s. Above that, ordinary driving was absorbed as corrections
+    and dragged the stored start along with the car: run 20261030-185036 moved
+    it from (-3.17, +3.11) to (-6.10, -9.70) and never closed a lap, passing the
+    real start at 1.2-1.5 m five times. With odometry available the limit
+    applies to the part of the step odometry cannot explain.
 
     **A lap is one revolution, not a fixed number of metres.**
     `minimum_lap_distance` cannot know how big the course is, and when it is
@@ -167,6 +183,9 @@ class LapRecorder:
         self.last_sample = None
         self.last_pose = None
         self.last_odom_yaw = None
+        # None unless the previous tick had a usable position, so a sample from
+        # before a gap in odometry is never compared with one after it.
+        self.last_odom_xy = None
         self.distance = 0.0
         self.turn = 0.0
         self.departed = False
@@ -241,15 +260,39 @@ class LapRecorder:
         trimmed = list(self.points[start_index:])
         return trimmed if len(trimmed) >= 3 else list(self.points)
 
-    def _reanchor(self, x: float, y: float, yaw: float):
+    def _expected_pose(self, odom_yaw, odom_xy):
+        """Where odometry says the car is now, in the map frame, or None.
+
+        The step is taken in the car's own body frame, because odometry's frame
+        is arbitrary and is not the map's: it is the previous map-frame pose
+        plus what odometry says the car did since. None unless this tick and
+        the last both have a finite odometry pose.
+        """
+        if self.last_odom_xy is None or self.last_odom_yaw is None:
+            return None
+        if odom_yaw is None or odom_xy is None:
+            return None
+        dx = odom_xy[0] - self.last_odom_xy[0]
+        dy = odom_xy[1] - self.last_odom_xy[1]
+        cos_odom, sin_odom = math.cos(self.last_odom_yaw), math.sin(self.last_odom_yaw)
+        forward = cos_odom * dx + sin_odom * dy
+        left = -sin_odom * dx + cos_odom * dy
+        previous_x, previous_y, previous_yaw = self.last_pose
+        cos_map, sin_map = math.cos(previous_yaw), math.sin(previous_yaw)
+        return (previous_x + cos_map * forward - sin_map * left,
+                previous_y + sin_map * forward + cos_map * left,
+                previous_yaw + angle_difference(odom_yaw, self.last_odom_yaw))
+
+    def _reanchor(self, x: float, y: float, yaw: float, expected=None):
         """Move everything already recorded into the corrected map frame.
 
-        The correction is the rigid transform from the previous pose to the
-        new one; applying it to the stored points keeps the recorded shape
-        exactly as driven and keeps the start pose -- which the closure test
-        measures against -- attached to the same piece of track.
+        The correction is the rigid transform from where the car should be
+        (`expected`, or the previous pose with no odometry) to where the map
+        now says it is; applying it to the stored points keeps the recorded
+        shape exactly as driven and keeps the start pose -- which the closure
+        test measures against -- attached to the same piece of track.
         """
-        previous_x, previous_y, previous_yaw = self.last_pose
+        previous_x, previous_y, previous_yaw = expected or self.last_pose
         delta_yaw = angle_difference(yaw, previous_yaw)
         cos_delta, sin_delta = math.cos(delta_yaw), math.sin(delta_yaw)
 
@@ -268,7 +311,7 @@ class LapRecorder:
         self.reanchor_count += 1
 
     def update(self, x: float, y: float, yaw: float, now_sec: float,
-               odom_yaw: float = None) -> bool:
+               odom_yaw: float = None, odom_xy=None) -> bool:
         """Feed one localisation pose in. True means the lap just closed.
 
         `odom_yaw` is the same instant's heading in the odom frame. It is
@@ -276,7 +319,13 @@ class LapRecorder:
         behaves exactly as it did before -- but supplying it is what makes
         the turn gate independent of how often SLAM re-optimises, since
         odometry is never re-optimised. See the class docstring.
+
+        `odom_xy` is the same instant's position in that frame. With it, a
+        step counts as a SLAM correction only for what odometry cannot
+        explain. Without it (missing, or not finite) the raw step decides.
         """
+        if odom_xy is not None and not all(math.isfinite(value) for value in odom_xy):
+            odom_xy = None
         point = np.array([x, y], dtype=np.float64)
         if self.start is None:
             self.start = point
@@ -285,6 +334,7 @@ class LapRecorder:
             self.last_sample = point
             self.last_pose = (x, y, yaw)
             self.last_odom_yaw = odom_yaw
+            self.last_odom_xy = odom_xy
             self._odom_anchor_time = now_sec
             self._odom_gap_turn = 0.0
             self._odom_gap = False
@@ -293,12 +343,14 @@ class LapRecorder:
             self.point_turn.append(self.turn)
             return False
 
-        jumped = (
-            self.max_pose_jump > 0.0
-            and math.hypot(x - self.last_pose[0], y - self.last_pose[1]) > self.max_pose_jump
-        )
+        expected = self._expected_pose(odom_yaw, odom_xy)
+        anchor = expected or self.last_pose
+        jumped = self.max_pose_jump > 0.0 and (
+            math.hypot(x - anchor[0], y - anchor[1]) > self.max_pose_jump
+            or (expected is not None
+                and abs(angle_difference(yaw, expected[2])) > UNEXPLAINED_YAW_LIMIT_RAD))
         if jumped:
-            self._reanchor(x, y, yaw)
+            self._reanchor(x, y, yaw, expected)
         # Accumulated yaw, not path heading: yaw comes straight from
         # localisation and does not have the sampled path's sensitivity
         # to noise at 0.15m spacing.
@@ -336,6 +388,7 @@ class LapRecorder:
         self.last_pose = (x, y, yaw)
         if odom_yaw is not None:
             self.last_odom_yaw = odom_yaw
+        self.last_odom_xy = odom_xy if odom_yaw is not None else None
 
         distance_from_last = float(np.linalg.norm(point - self.last_sample))
         if distance_from_last >= self.spacing:
@@ -1248,6 +1301,7 @@ class AutoMapRaceNode(Node):
         pose = PoseStamped()
         pose.header = transform.header
         pose.header.frame_id = self.map_frame
+        self._pose_stamp = transform.header.stamp
         pose.pose.position.x = transform.transform.translation.x
         pose.pose.position.y = transform.transform.translation.y
         pose.pose.position.z = transform.transform.translation.z
@@ -1257,22 +1311,27 @@ class AutoMapRaceNode(Node):
         yaw = racing_math.quaternion_to_yaw(q.x, q.y, q.z, q.w)
         return pose.pose.position.x, pose.pose.position.y, yaw
 
-    def _lookup_odom_yaw(self):
-        """Heading in the odom frame, or None if odometry is not up yet.
+    def _lookup_odom_pose(self):
+        """(yaw, (x, y)) in the odom frame, or (None, None) if odometry is not up yet.
 
-        Only the lap recorder's turn counter uses this, and only to stay
-        independent of pose-graph re-optimisation -- every piece of
-        geometry still comes from the map frame. A missing odom transform
-        is therefore not worth a warning: the recorder falls back to
-        counting map yaw exactly as it did before.
+        Only the lap recorder uses this: the turn counter, which must stay
+        independent of pose-graph re-optimisation, and telling a SLAM
+        correction from driving. Read at the stamp of the map-frame pose this
+        tick, because the two must describe the same instant or the difference
+        between them is motion, not a correction. Every piece of geometry
+        still comes from the map frame. A missing odom transform is not worth
+        a warning: the recorder falls back to the map frame alone, as it did
+        before.
         """
+        stamp = getattr(self, '_pose_stamp', None)
+        at = rclpy.time.Time() if stamp is None else rclpy.time.Time.from_msg(stamp)
         try:
-            transform = self.tf_buffer.lookup_transform(
-                self.odom_frame, self.base_frame, rclpy.time.Time())
+            transform = self.tf_buffer.lookup_transform(self.odom_frame, self.base_frame, at)
         except TransformException:
-            return None
+            return None, None
         q = transform.transform.rotation
-        return racing_math.quaternion_to_yaw(q.x, q.y, q.z, q.w)
+        t = transform.transform.translation
+        return racing_math.quaternion_to_yaw(q.x, q.y, q.z, q.w), (t.x, t.y)
 
     def _publish_stop(self):
         self._publish_command(None)
@@ -1467,7 +1526,8 @@ class AutoMapRaceNode(Node):
                 'this map starts from here.')
 
         if self.state == 'mapping' and pose is not None and deadman_ok:
-            if self.recorder.update(*pose, now_sec, self._lookup_odom_yaw()):
+            odom_yaw, odom_xy = self._lookup_odom_pose()
+            if self.recorder.update(*pose, now_sec, odom_yaw, odom_xy):
                 self._mapping_lap_completed()
 
         if self.state == 'loading_profile':
