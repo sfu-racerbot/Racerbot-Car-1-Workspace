@@ -19,7 +19,7 @@
 
 ## The short version
 
-On 2026-10-30, 21 runs produced no saved map. It looked like one problem, "SLAM is bad". It was four, stacked:
+On 2026-10-30, 4 `map_course` runs saved no map: `184432`, `184556` and `185036` with the gyro on, and `184826` without it. (The evening's other recordings ran no SLAM. They were `gap_follow` and team A's stack, recorded by `auto_record`.) It looked like one problem, "SLAM is bad". It was four, stacked:
 
 | # | Problem | Evidence | Fix |
 |---|---|---|---|
