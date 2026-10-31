@@ -330,6 +330,115 @@ def test_analysis_print_interrupt_preserves_commands_and_launch_status(tmp_path,
     _interrupt_analysis_at('print', tmp_path, monkeypatch, capsys)
 
 
+def _rebuild_fixture(tmp_path, monkeypatch, body=None, **kwargs):
+    """_analysis_fixture plus a stand-in rebuild script, recording how it was called."""
+    run, maps, events, args, root = _analysis_fixture(tmp_path, monkeypatch, **kwargs)
+    body = body or (
+        'from pathlib import Path\n'
+        'folder = Path(sys.argv[3]) / "rebuilt"\n'
+        'folder.mkdir(parents=True, exist_ok=True)\n'
+        '(folder / "commands.txt").write_text("REBUILT-COMMANDS")\n'
+        'print("GO: rebuilt")\n')
+    (root / 'tools' / 'run_analysis' / 'rebuild_run.py').write_text(
+        'import sys, time\n'
+        f'open({str(events)!r}, "a").write("rebuild_run " + repr(sys.argv[1:]) + "\\n")\n'
+        'time.sleep(0.02)\n' + body)
+    return run, maps, events, args, root
+
+
+def test_every_recorded_run_is_rebuilt_before_the_reports(tmp_path, monkeypatch, capsys):
+    # oracle: invariant. A run stopped by Ctrl+C has the same recording, so it gets the same step, and the
+    # verdict comes first because the operator may not wait for a report.
+    run, maps, events, _, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    assert mc.main([f'output_directory:={maps}']) == 3
+    assert events.read_text().splitlines()[0] == f'rebuild_run {[str(run), "--out-root", str(maps)]!r}'
+    assert 'GO: rebuilt' in capsys.readouterr().out
+
+
+def test_the_rebuilt_folder_is_what_the_operator_is_told_to_race(tmp_path, monkeypatch, capsys):
+    # oracle: invariant. The node's own folder is older than the rebuild's, and its line came from the live
+    # pose, so the last thing printed is the rebuild's commands.
+    _, maps, _, _, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    mc.main([f'output_directory:={maps}'])
+    output = capsys.readouterr().out
+    assert 'REBUILT-COMMANDS' in output
+    assert 'RACE-COMMANDS' not in output
+
+
+def test_a_run_with_no_recording_is_not_rebuilt_and_keeps_its_exit(tmp_path, monkeypatch, capsys):
+    _, maps, events, _, _ = _rebuild_fixture(tmp_path, monkeypatch, recorder=False)
+    assert mc.main([f'output_directory:={maps}']) == 3
+    assert 'Map check skipped' in capsys.readouterr().out
+    assert not events.exists()
+
+
+def test_rebuild_off_is_stripped_and_never_runs(tmp_path, monkeypatch, capsys):
+    run, maps, events, args, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    assert mc.main([f'output_directory:={maps}', 'rebuild:=false']) == 3
+    assert 'rebuild:=false' not in args.read_text()
+    assert 'rebuild_run' not in events.read_text()
+    assert 'summarize_run' in events.read_text()  # the reports are a separate switch
+
+
+def test_rebuild_invalid_value_never_launches(tmp_path, monkeypatch, capsys):
+    _, _, _, args, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    assert mc.main(['rebuild:=maybe']) == 2
+    assert 'rebuild' in capsys.readouterr().err
+    assert not args.exists()
+
+
+def test_a_failed_rebuild_names_the_command_and_changes_nothing_else(tmp_path, monkeypatch, capsys):
+    # oracle: invariant. Advisory like the reports: the launch's exit stands and the reports still run.
+    run, maps, events, _, _ = _rebuild_fixture(tmp_path, monkeypatch, body='sys.exit(7)\n')
+    assert mc.main([f'output_directory:={maps}']) == 3
+    output = capsys.readouterr().out
+    assert 'exit 7' in output
+    assert 'rebuild_run.py' in output
+    assert 'summarize_run' in events.read_text()
+
+
+def test_a_refusal_is_not_a_failure(tmp_path, monkeypatch, capsys):
+    # Exit 1 is the tool's own answer, "this map is no good", and it says so itself.
+    _, maps, _, _, _ = _rebuild_fixture(tmp_path, monkeypatch, body='print("NO-GO: doubled")\nsys.exit(1)\n')
+    mc.main([f'output_directory:={maps}'])
+    output = capsys.readouterr().out
+    assert 'NO-GO: doubled' in output
+    assert 'Map check failed' not in output
+
+
+def test_ctrl_c_during_the_rebuild_still_reports_and_keeps_the_exit(tmp_path, monkeypatch, capsys):
+    # oracle: review focus 5. A second Ctrl+C means stop now, so the reports are skipped too, but the launch's
+    # status and the last-thing-on-screen report survive, with the command to finish the job later.
+    run, maps, events, _, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    real_run = mc.subprocess.run
+
+    def interrupted(command, *args, **kwargs):
+        if any('rebuild_run' in str(part) for part in command):
+            raise KeyboardInterrupt
+        return real_run(command, *args, **kwargs)
+    monkeypatch.setattr(mc.subprocess, 'run', interrupted)
+    assert mc.main([f'output_directory:={maps}']) == 3
+    output = capsys.readouterr().out
+    assert 're-run:' in output and 'rebuild_run.py' in output
+    assert not events.exists()
+    assert 'RACE-COMMANDS' in output
+
+
+def test_the_rebuild_runs_in_its_own_session(tmp_path, monkeypatch, capsys):
+    # A second Ctrl+C at the terminal goes to the whole foreground group: it must reach only the wrapper, which
+    # decides what stops. Asserted on the call, since that is the process boundary.
+    _, maps, _, _, _ = _rebuild_fixture(tmp_path, monkeypatch)
+    real_run, seen = mc.subprocess.run, {}
+
+    def spy(command, *args, **kwargs):
+        if any('rebuild_run' in str(part) for part in command):
+            seen.update(kwargs)
+        return real_run(command, *args, **kwargs)
+    monkeypatch.setattr(mc.subprocess, 'run', spy)
+    mc.main([f'output_directory:={maps}'])
+    assert seen['start_new_session'] is True
+
+
 def test_simulator_probe_matches_executable_not_shell_text(monkeypatch):
     import re
     from types import SimpleNamespace

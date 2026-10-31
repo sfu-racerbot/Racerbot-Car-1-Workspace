@@ -17,6 +17,11 @@ after every node's shutdown messages.
 Everything the launch prints is also saved to
 ~/racerbot-ws/data/racerbot_runs/map_course-<timestamp>.log, lap progress included.
 
+After every run, finished or stopped, tools/run_analysis/rebuild_run.py matches the
+run's scans against its last map and judges it (``rebuild:=false`` skips that), so a
+run stopped with Ctrl+C keeps what it mapped, and the last thing on screen says
+whether the map is good enough to race on.
+
 Hold LB the whole time the car should move. See docs/launchstart.md.
 """
 
@@ -112,6 +117,41 @@ def repo_root():
     return next((p for p in candidates if (p / 'tools/run_analysis/slam_report.py').is_file()), None)
 
 
+def rebuild_step(run, parent, handle):
+    """Turn the recording into a racing folder. Returns False if the operator stopped it.
+
+    Runs before the reports: it is what the operator came for, and its verdict and
+    commands.txt are worth more than any report if they only wait for one thing.
+    """
+    def emit(text):
+        print(text, flush=True)
+        handle.write(text + '\n')
+        handle.flush()
+
+    root = repo_root()
+    script = None if root is None else root / 'tools/run_analysis/rebuild_run.py'
+    if run is None or script is None or not script.is_file():
+        emit('Map check skipped: ' + ('no Recording run to: line in launch output.' if run is None
+                                      else 'workspace rebuild script not found.'))
+        return True
+    command = [sys.executable, str(script), str(run), '--out-root', str(parent)]
+    emit('Checking the map against this run\'s scans (about 20 s; Ctrl+C skips it)...')
+    try:
+        # Its own session, so only the wrapper hears a second Ctrl+C at the terminal.
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors='replace', start_new_session=True)
+    except KeyboardInterrupt:
+        emit(f'Map check interrupted; re-run: {shlex.join(command)}')
+        return False
+    except OSError as exc:
+        emit(f'Map check could not start: {exc}; re-run: {shlex.join(command)}')
+        return True
+    emit(result.stdout.rstrip())
+    if result.returncode not in (0, 1, 2):
+        emit(f'Map check failed (exit {result.returncode}); re-run: {shlex.join(command)}')
+    return True
+
+
 def analyse(run, log, handle):
     def emit(text):
         print(text, flush=True)
@@ -160,17 +200,18 @@ def main(argv=None):
     if bad:
         print(f'map_course: arguments must look like name:=value, got {bad}', file=sys.stderr)
         return 2
-    analysis = True
+    switches = {'analysis': True, 'rebuild': True}
     launch_argv = []
     for arg in argv:
-        if arg.startswith('analysis:='):
-            value = arg.split(':=', 1)[1].lower()
-            if value not in ('true', 'false'):
-                print('map_course: analysis must be true or false', file=sys.stderr)
+        name, _, value = arg.partition(':=')
+        if name in switches:
+            if value.lower() not in ('true', 'false'):
+                print(f'map_course: {name} must be true or false', file=sys.stderr)
                 return 2
-            analysis = value == 'true'
+            switches[name] = value.lower() == 'true'
         else:
             launch_argv.append(arg)
+    analysis = switches['analysis']
     missing = missing_drivers()
     if missing:
         print('map_course: the hardware is not running (no ' + ', '.join(missing) +
@@ -202,6 +243,12 @@ def main(argv=None):
                 # copying its shutdown output, then report.
                 continue
         handle.flush()
+        if switches['rebuild']:
+            try:
+                analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle) and analysis
+            except KeyboardInterrupt:
+                print('Map check interrupted.', flush=True)
+                analysis = False
         if analysis:
             try:
                 analyse(recorded_run, log, handle)
