@@ -196,6 +196,8 @@ def test_the_report_records_what_was_measured(tmp_path, good_inputs):
 def test_commands_say_how_to_race_and_at_what_speed(tmp_path, good_inputs):
     result = _rebuild(tmp_path, good_inputs)
     text = (result.out_dir / 'commands.txt').read_text()
+    assert 'posegraph' not in text  # a rebuilt folder has none, so it must not claim one
+    assert not list(result.out_dir.glob('posegraph*'))
     assert f'race_launch.py run_dir:={result.out_dir}' in text
     assert '1.5 m/s' in text
     assert 'raceline_2p5.csv' in text

@@ -156,9 +156,22 @@ After the launch stops, `map_course` **checks the map against the run's own scan
 - **`GO`:** the map is good, and the race commands at the end point at that folder. Its racing line comes from where the car really was on the finished map, capped at **1.5 m/s** for the first drive. The commands show how to go faster.
 - **`NO-GO`:** do not race on it. The most common reason is walls drawn twice. Map again, with the gyro on.
 
-Then it runs the run summary, IMU report and SLAM report. It prints the first 15 lines of each and saves the full reports under the recorded run's `analysis/map_course/` directory. The `Recording run to:` line near the start gives that run's path.
+**What you see next depends on how the run ended:**
 
-With `analysis:=false`, the reports are skipped; `rebuild:=false` skips the map check. If recording is disabled, both are skipped because there is no recorded run.
+- **It finished by itself:** the check above, then the commands. Nothing else.
+- **You pressed `Ctrl+C`, or it failed:** a line saying it is stopping and that nothing is driving the car, up to 15 s while the nodes shut down, the check, a short `RUN STOPPED` summary (laps closed, the verdict, where the recording is), then the commands. Press `Ctrl+C` once: it is still working until the prompt comes back.
+
+**The in-depth reports do not run by themselves**, because they take minutes. Add `analysis:=true` to run them straight after a run, or run them any time on the recording, whose path is on the `Recording run to:` line:
+
+```bash
+python3 tools/run_analysis/slam_report.py ~/racerbot-ws/data/racerbot_runs/<time>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<time>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<time>
+```
+
+**Working when:** each prints its report and saves it under that run's `analysis/` folder.
+
+`rebuild:=false` skips the map check. If recording is disabled, there is nothing to check.
 
 Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
 
@@ -174,7 +187,8 @@ Options, added to the end of the command:
 | `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. It also loads `slam_gyro.yaml`: a tighter loop-closure search for good odometry. A loop closure is SLAM noticing it has come back to a place it already mapped. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
 | `imu_lap_turns:=true` | Count lap turning from gyro heading in `odom_imu`; positions relative to the map still determine the recorded path. Requires `gyro_odom:=true`. |
 | `imu_all:=true` | Enable `gyro_odom`, `fused_speed` and `imu_lap_turns`. An explicit `false` overrides the corresponding setting; if disabling `gyro_odom`, also disable `imu_lap_turns`. All require `imu:=true`, which car 2 must pass explicitly. |
-| `analysis:=false` | Skip the reports after the launch exits. |
+| `analysis:=true` | Run the in-depth reports after the launch exits. They take minutes. |
+| `bno:=true` | Use the BNO085 as well as the VESC's gyro (needs `imu:=true`). Heading then comes from the BNO first. **Not yet driven on car 2,** and its accelerometer's mount yaw is not calibrated, so leave `fused_speed` off. Both gyros are recorded, which is how to compare them. See [car1-vs-car2.md](car1-vs-car2.md#imu) |
 | `rebuild:=false` | Skip the map check after the launch exits. A run stopped early then keeps nothing. |
 | `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=true` | run the IMU side too (the BNO085 bridge, `imu_bridge`, `vehicle_state`). **Off by default on car 2**: its BNO085 is not calibrated yet (see [car1-vs-car2.md](car1-vs-car2.md#imu)). `fused_speed:=true`, `gyro_odom:=true`, `imu_lap_turns:=true` and `imu_all:=true` need it. Car 1 runs it by default |

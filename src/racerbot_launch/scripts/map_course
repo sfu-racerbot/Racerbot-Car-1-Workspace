@@ -131,7 +131,7 @@ def quick_report(run, parent, laps, wanted) -> str:
 
     laps is (lap number, metres) for each lap the supervisor closed, wanted the laps it was asked for.
     """
-    lines = ['', '=' * 72, 'RUN STOPPED before it finished.' if run is not None else 'RUN STOPPED: nothing was recorded.',
+    lines = ['', '=' * 72, 'RUN STOPPED.' if run is not None else 'RUN STOPPED: nothing was recorded.',
              f'  Laps closed: {len(laps)} of {wanted}'
              + (' (' + ', '.join(f'{metres:.0f} m' for _, metres in laps) + ')' if laps else '')]
     result = None

@@ -182,7 +182,7 @@ def _commands(out_dir: Path, run_name: str, verdict, message: str, raceable: boo
              'floor. To go faster later, stop racing and copy a faster line over it:']
     lines += [f'  cp {out_dir / name} {out_dir / "raceline_profiled.csv"}    # {cap:g} m/s'
               for cap, name in FASTER_LINES]
-    return '\n'.join(lines) + '\n\n' + run_commands.commands_text(out_dir)
+    return '\n'.join(lines) + '\n\n' + run_commands.commands_text(out_dir, posegraph=False)
 
 
 def rebuild(run_dir, out_root, max_speed: float = DEFAULT_MAX_SPEED, load=load_inputs) -> RebuildResult:

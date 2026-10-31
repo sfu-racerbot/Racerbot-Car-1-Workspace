@@ -168,6 +168,12 @@ def test_it_publishes_nothing():
     assert 'create_publisher' not in calls
 
 
+def test_race_commands_list_a_posegraph_only_when_there_is_one():
+    # A live mapping run saves one through slam_toolbox; a rebuild from the bag has none.
+    assert 'posegraph' in run_commands.commands_text('/some/run')
+    assert 'posegraph' not in run_commands.commands_text('/some/run', posegraph=False)
+
+
 def test_race_commands_name_the_check():
     text = run_commands.commands_text('/some/run')
     assert 'check_start' in text
