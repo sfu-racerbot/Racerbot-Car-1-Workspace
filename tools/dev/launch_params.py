@@ -4,6 +4,7 @@ Run with: python3 tools/dev/launch_params.py --help (inside ROS 2 Jazzy).
 """
 import argparse
 import builtins
+import importlib.util
 from collections import Counter
 from contextlib import ExitStack, redirect_stdout
 import io
@@ -17,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 from unittest.mock import patch
 
 import yaml
@@ -26,6 +28,8 @@ from launch.actions import ExecuteLocal, GroupAction, IncludeLaunchDescription, 
 from launch.launch_description_sources import get_launch_description_from_python_launch_file
 from launch.utilities import perform_substitutions
 from launch_ros.actions import LifecycleNode, Node
+
+STUB_MODULES = ('range_libc',)
 
 
 class CaptureError(RuntimeError):
@@ -230,6 +234,17 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
     logger = logging.getLogger('launch')
     handler = ErrorHandler(level=logging.ERROR)
     with ExitStack() as stack:
+        for module_name in STUB_MODULES:
+            if module_name not in sys.modules and importlib.util.find_spec(module_name) is None:
+                stub = types.ModuleType(module_name)
+                # The cars use the CUDA ray caster; no ray-casting code runs here.
+                stub.SHOULD_USE_CUDA = True
+                sys.modules[module_name] = stub
+                def remove_stub(name=module_name, module=stub):
+                    if sys.modules.get(name) is module:
+                        del sys.modules[name]
+                stack.callback(remove_stub)
+                result['probes'].append({'import': module_name, 'simulated': 'stub'})
         stack.enter_context(patch.dict(os.environ, {'HOME': home, 'TMPDIR': tmp, 'ROS_LOG_DIR': os.path.join(sandbox, 'log')}))
         stack.enter_context(patch.object(tempfile, 'tempdir', tmp))
         stack.enter_context(patch.object(sys, 'dont_write_bytecode', True))

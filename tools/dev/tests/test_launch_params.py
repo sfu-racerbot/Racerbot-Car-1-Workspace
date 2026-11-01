@@ -1,5 +1,6 @@
 """Run with: RB_WS=$PWD rb python3 -m pytest tools/dev/tests/test_launch_params.py."""
 import copy
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,12 @@ def demo(tmp_path):
 
 def node(result, name):
     return next(item for item in result['nodes'] if item['name'] == name)
+
+
+def stub_probes():
+    if 'range_libc' not in sys.modules and importlib.util.find_spec('range_libc') is None:
+        return [{'import': 'range_libc', 'simulated': 'stub'}]
+    return []
 
 
 # oracle: fixture YAML and launch descriptions specify the expected behavior.
@@ -90,9 +97,10 @@ def test_broken_launch_raises_capture_error():
 
 
 def test_pgrep_probe_simulated_no_match():
+    expected = stub_probes()
     result = capture(str(FIXTURES / 'probe_launch.py'), [])
     assert node(result, '/bridge_node')['executable'] == 'bridge_exe'
-    assert result['probes'] == [{'cmd': ['pgrep', '-f', 'some_pattern'], 'simulated': 'no match'}]
+    assert result['probes'] == expected + [{'cmd': ['pgrep', '-f', 'some_pattern'], 'simulated': 'no match'}]
 
 
 def test_other_subprocess_refused():
@@ -121,9 +129,10 @@ def test_write_outside_sandbox_refused(tmp_path):
 
 
 def test_git_and_ps_probes_simulated():
+    expected = stub_probes()
     result = capture(str(FIXTURES / 'git_ps_launch.py'), [])
     assert node(result, '/n128')['executable'] == 'exe'
-    assert result['probes'] == [
+    assert result['probes'] == expected + [
         {'cmd': ['git', '-C', '/', 'status'], 'simulated': 'not a repository'},
         {'cmd': ['ps', '-e'], 'simulated': 'empty'},
     ]
@@ -134,6 +143,18 @@ def test_dpkg_query_probe_simulated():
     result = capture(str(FIXTURES / 'dpkg_probe_launch.py'), [])
     assert node(result, '/n0')['executable'] == 'exe'
     assert {'cmd': ['dpkg-query', '-W', 'ros-jazzy-*'], 'simulated': 'empty'} in result['probes']
+
+
+def test_range_libc_stubbed_when_missing(monkeypatch):
+    # oracle: missing CUDA module is simulated only for the duration of capture.
+    monkeypatch.delitem(sys.modules, 'range_libc', raising=False)
+    original = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, 'find_spec',
+                        lambda name, *args: None if name == 'range_libc' else original(name, *args))
+    result = capture(str(FIXTURES / 'range_libc_launch.py'), [])
+    assert node(result, '/range_node')['executable'] == 'exe'
+    assert {'import': 'range_libc', 'simulated': 'stub'} in result['probes']
+    assert 'range_libc' not in sys.modules
 
 
 def test_capture_one_stdout_is_pure_json(tmp_path):
