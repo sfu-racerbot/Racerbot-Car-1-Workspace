@@ -18,7 +18,9 @@ This list was written on car 1 (checked at `881c409`) and ported to car 2 on 202
 
 ### Two nodes still declare the pre-October 0.26 rad steering default
 
-`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The car profiles set 0.33 rad for car 1 and 0.349 rad for car 2; the shared planner config sets 0.30 rad. A launch or test that builds either node without its config gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
+`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The car profiles set 0.33 rad for car 1 and 0.349 rad for car 2; the shared planner config sets 0.30 rad.
+
+A launch or test that builds either node without its config gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
 
 **Fix:** match the declared defaults to the YAMLs, or read them from `docs/hardware-reference.md`'s numbers, and correct the racing-autonomy sentence. Check which node tests rely on the declared default first.
 
@@ -48,7 +50,7 @@ Wheelbase 0.36 m, width 0.30 m and the LiDAR offset 0.26 m were tape-measured on
 
 ### Simulator steering calibration (historical)
 
-The earlier issue was that `racerbot_sim/sim_bridge.py` and `tools/f1tenth_sim/sim_fidelity/calibration.py` used car 2's servo map and full-lock limits (0.436 rad), even for car 1, whose full stick is 0.38 rad. Both now select the car profile. Historical simulator results made before car selection can therefore overstate car 1's steering range.
+The earlier issue was that `racerbot_sim/sim_bridge.py` and `tools/f1tenth_sim/sim_fidelity/calibration.py` used car 2's servo map and full-lock limits (0.436 rad), even for car 1. Car 1's full stick is 0.38 rad. Both simulators now select the car profile, so historical results made before car selection can overstate car 1's steering range.
 
 **Follow-up:** validate car 1's full-lock circles against the selected profile before relying on simulated steering limits.
 

@@ -1,15 +1,12 @@
 # data/ — recorded runs
 
-> **For:** anyone recording or saving runs on either car or a development machine.
+> **Who this is for:** anyone recording or saving runs on either car or a development machine.
 > **Read first:** [run diagnostics](../docs/run-diagnostics.md).
 > **You will be able to:** find and save the running car's recordings and maps.
 
-Recorded runs are kept in git so they survive the Jetson's disk and can be
-looked at from any clone. **Each car writes into `data/<car>/`: `data/rb1/`
-for car 1, `data/rb2/` for car 2.** The workspace defaults to `~/racerbot-ws`;
-set `RACERBOT_WS` to use another workspace. The car is resolved by
-`racerbot_car` from its serial or `RACERBOT_CAR` (see
-[car identity](../src/racerbot_car/README.md)). An unresolved car is an error.
+Recorded runs are kept in git so they survive the Jetson's disk and can be looked at from any clone. **Each car writes into `data/<car>/`: `data/rb1/` for car 1, `data/rb2/` for car 2.**
+
+The [workspace](../docs/glossary.md) defaults to `~/racerbot-ws`; set `RACERBOT_WS` to use another workspace. The car is resolved by `racerbot_car` from its serial or `RACERBOT_CAR` (see [car identity](../src/racerbot_car/README.md)). An unresolved car is an error.
 
 Car 1's existing data moved into `rb1/` and car 2's into `rb2/` when the repos were merged on 2026-11-01. Car 2 began saving into its repo on 2026-10-25 and car 1 on 2026-10-31.
 

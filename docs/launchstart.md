@@ -27,7 +27,9 @@ Every section follows the same pattern: what it does (one line), the terminals, 
 
 On a development machine or in the simulator, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2` before launching. Without a Jetson serial or this setting, the error is `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator`.
 
-On either car, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching the serial. A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial prints the exact line to add to `machines.yaml`.
+On either car, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching the serial.
+
+A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial prints the exact line to add to `machines.yaml`.
 
 In each terminal on the selected machine:
 
@@ -97,7 +99,11 @@ It follows a slower car instead of squeezing past it, and passes only on a strai
 
 **One car, against the clock:** add `time_trial:=true`. It aims at the deepest point of each gap and raises `max_lateral_accel` to 3.0. It turns opponent awareness off, so **never use it with another car on the track**. Simulator-validated only: [gap-follow.md](gap-follow.md).
 
-**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 5.0 since car 1's race defaults of 2026-10-27, ported to car 2 on 2026-10-29, and was 3.5). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. **Car 2 has never driven at the 5.0 default:** first runs go wheels off the ground, then `max_speed:=1.0` in open space.
+**Slower or faster for one run:** add `max_speed:=1.0` (any positive speed up to 5.0 m/s). The shared `gap_follow.yaml` sets 5.0 m/s: car 1's 2026-10-27 race defaults were ported to car 2 on 2026-10-29, replacing 3.5 m/s.
+
+Below the YAML speed, the option also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Above it, only the top speed on straights rises: corners remain capped by `corner_speed`, `corner_speed_wide` and `max_lateral_accel`.
+
+Values above 5.0 or non-positive values are refused and nothing starts. When going faster on either car, test with the wheels off the ground first, then in open space. **Car 2 has never driven at the 5.0 default:** first use `max_speed:=1.0` in open space.
 
 ### Car 1 and car 2 together: first run
 
@@ -147,19 +153,27 @@ To map with the layer on, add `opponent_awareness:=true` to the `map_course` com
 ros2 launch f1tenth_stack bringup_launch.py
 ```
 
+**Working when:** the VESC and LiDAR start without errors and the car remains still.
+
 **Terminal 2:**
 
 ```bash
 ros2 run racerbot_launch map_course
 ```
 
-**This maps on the gyro by default on both cars.** It starts the BNO085 and the IMU side; SLAM takes its heading from the BNO, then the VESC if the BNO stops. On car 2, steering-derived heading was 15° out over 5 m of track on 2026-10-30, and run `184826`'s corrections reached 3.4 m. If the bridge prints `sensor hub is not running`, power-cycle the BNO: the run still maps, on the VESC's gyro alone.
+**Working when:** the terminal starts mapping and reports lap progress as described below.
+
+**This maps on the gyro by default on both cars.** It starts the BNO085 and the IMU side; SLAM takes its heading from the BNO, then the VESC if the BNO stops. If the bridge prints `sensor hub is not running`, power-cycle the BNO: the run still maps on the VESC's gyro alone.
+
+On car 2, steering-derived heading was 15° out over 5 m of track on 2026-10-30, and run `184826`'s corrections reached 3.4 m.
 
 **Keep the car still for the first 3 seconds** while the IMU's gyro bias is measured, **then hold LB for the whole run.** The car stays still for a moment at the start, until SLAM has recorded the start pose (`Start pose recorded: ...`). Releasing LB pauses mapping; holding it again carries on.
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
-After the launch stops, `map_course` **checks the map against the run's own scans**, and this happens whether the laps finished or you pressed `Ctrl+C`. It writes a folder named `<run>-rebuilt` in `data/<id>/racerbot_auto/`, and prints `GO:` or `NO-GO:` with the reason. Here and below, replace `<id>` with `rb1` for car 1 or `rb2` for car 2, and replace the other angle-bracketed placeholders with the actual names.
+After the launch stops, `map_course` **checks the map against the run's own scans**, whether the laps finished or you pressed `Ctrl+C`. It writes a folder named `<run>-rebuilt` in `data/<id>/racerbot_auto/`, and prints `GO:` or `NO-GO:` with the reason.
+
+Here and below, replace `<id>` with `rb1` for car 1 or `rb2` for car 2. Replace the other angle-bracketed placeholders with the actual names too.
 
 - **`GO`:** the map is good, and the race commands at the end point at that folder. Its racing line comes from where the car really was on the finished map, capped at **1.5 m/s** for the first drive. The commands show how to go faster.
 - **`NO-GO`:** do not race on it. The most common reason is walls drawn twice. Map again, with the gyro on.
@@ -167,9 +181,9 @@ After the launch stops, `map_course` **checks the map against the run's own scan
 **What you see next depends on how the run ended:**
 
 - **It finished by itself:** the check above, then the commands. Nothing else.
-- **You pressed `Ctrl+C`, or it failed:** a line saying it is stopping and that nothing is driving the car, up to 15 s while the nodes shut down, the check, a short `RUN STOPPED` summary (laps closed, the verdict, where the recording is), then the commands. Press `Ctrl+C` once: it is still working until the prompt comes back.
+- **You pressed `Ctrl+C`, or it failed:** a line says it is stopping and nothing is driving the car. Allow up to 15 s for the nodes to shut down, followed by the check, a `RUN STOPPED` summary and the commands. The summary gives laps closed, verdict and recording location. Press `Ctrl+C` once: it is still working until the prompt comes back.
 
-**The in-depth reports do not run by themselves**, because they take minutes. Add `analysis:=true` to run them straight after a run, or run them in a terminal at the workspace root on the recording, whose path is on the `Recording run to:` line:
+**The in-depth reports do not run by themselves**, because they take minutes. Add `analysis:=true` to run them straight after a run, or run them in a terminal at the [workspace](glossary.md) root on the recording, whose path is on the `Recording run to:` line:
 
 ```bash
 python3 tools/run_analysis/slam_report.py ~/racerbot-ws/data/<id>/racerbot_runs/<time>
@@ -205,7 +219,9 @@ With `imu_lap_turns` enabled, short odometry gaps use map heading provisionally.
 
 Reconciliation requires a gap of at most 0.25 s with provisional turning kept within 90°. Other gaps retain the map estimate because a wrapped heading difference can hide a full turn.
 
-A lap must take at least 4 s, alongside the 300° turning gate. From the second lap on, it must also take at least half as long as the lap before. That way the minimum follows the course: on car 1's 29 m course at mapping speed it is about 8 s, and on a longer course it grows with it. The former fixed 15 s blocked the first return on the simulator's roughly 29 m oval, forcing two circuits into each recorded lap.
+A lap must take at least 4 s, alongside the 300° turning gate. From the second lap on, it must also take at least half as long as the lap before. That way the minimum follows the course: on car 1's 29 m course at mapping speed it is about 8 s, and on a longer course it grows with it.
+
+The former fixed 15 s blocked the first return on the simulator's roughly 29 m oval, forcing two circuits into each recorded lap.
 
 Car 1's corrected `imu_all:=true` simulator run `20261029-170502` (recorded on car 1, not in this repo) recorded 363°, 360° and 359° (1.01, 1.00 and 1.00 revolutions). Its final lap passed and saved a racing profile. See [the simulator results](ros-simulator.md#simulated-imu) for the first-run diagnosis and repeat-run paths.
 
@@ -245,7 +261,9 @@ python3 tools/calibrate_imu.py --imu bno --step accel
 
 **Working when:** it reports 12 poses and writes `src/racerbot_car/cars/rb2/imu/calib/bno_calib.json`. Gravity should then read about 9.81 m/s², not 9.65.
 
-**Last, with a tape measure:** measure how far car 2's BNO chip is ahead of the rear axle and its position from the car's centre. TODO(verify): determine the correct per-car destination for `bno_x_offset` and update `position` in `src/racerbot_car/cars/rb2/imu/car.yaml` after confirming how the calibration tools consume it; do not write car 2's measurement into the shared `vehicle_state.yaml`.
+**Last, with a tape measure:** measure how far car 2's BNO chip is ahead of the rear axle and its position from the car's centre.
+
+TODO(verify): determine the correct per-car destination for `bno_x_offset` and how calibration tools consume `position` in `src/racerbot_car/cars/rb2/imu/car.yaml`. Do not write car 2's measurement into the shared `vehicle_state.yaml`.
 
 ## Testing the IMU in mapping (A/B)
 
@@ -264,6 +282,8 @@ The question: does SLAM make a better map when its odometry gets its heading fro
 ```bash
 ros2 launch imu_bridge vehicle_state_launch.py
 ```
+
+**Working when:** the IMU nodes start without repeated errors; leave this terminal running for the next check.
 
 **Terminal 3**, then push the car forward by hand, firmly, a few times:
 
@@ -305,7 +325,7 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 **Terminal 1:** the `bringup_launch.py` from mapping, still running. Start it again if you closed it.
 
-**Terminal 2, first:** check the car really is on the spot. This reads one LiDAR scan and publishes nothing, so it cannot move the car:
+**Terminal 2, first:** check the car really is on the spot. This reads one LiDAR scan (a sweep of distance readings, see [glossary](glossary.md)) and publishes nothing, so it cannot move the car:
 
 ```bash
 ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
@@ -365,7 +385,9 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 ## Record a run and analyse it
 
-**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/<id>/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
+**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/<id>/racerbot_runs/<ts>`; when it stops, `saved run ...`.
+
+Manual driving is not recorded. Turn automatic recording off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
 To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
 

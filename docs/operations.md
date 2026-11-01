@@ -26,7 +26,9 @@ This is the "how do I do X" doc. For *why* things are wired this way, see [archi
 
 On a development machine or for the simulator, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2`. Without a serial or a selection, launch reports `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator`.
 
-On either Jetson, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching that serial. A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`; an unknown serial prints the exact line to add to `machines.yaml`.
+On either Jetson, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching that serial.
+
+A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial prints the exact line to add to `machines.yaml`.
 
 The car's physical values are in `src/racerbot_car/cars/<id>/` (`car.yaml`, `calibration/*.yaml` and `imu/`). Shared configs contain the algorithm tuning used by both cars. In paths below, replace `<id>` with `rb1` or `rb2` for the running car.
 
@@ -189,7 +191,9 @@ Same result as above, except `gap_follow` drives the lap instead of a human — 
 
 ### Mapping in one command: 3 laps, then stop
 
-With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 runs SLAM and `gap_follow` for three closed laps. It saves the map, pose graph and racing line to `~/racerbot-ws/data/<id>/racerbot_auto/<timestamp>/`, then shuts down and prints the race commands. These seed the localizer where mapping stopped, so no RViz is needed. The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
+With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 runs SLAM and `gap_follow` for three closed laps. It saves the map, pose graph and racing line to `~/racerbot-ws/data/<id>/racerbot_auto/<timestamp>/`, then shuts down and prints the race commands.
+
+These seed the localizer where mapping stopped, so no RViz is needed. The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
 
 ## Localizing against a saved map
 
@@ -554,4 +558,6 @@ This is the safety model working as designed. If you follow [Running autonomy](#
 
 **The dashboard's camera panel says "camera offline" even though the camera and stream nodes are definitely running**
 
-The page reaches the camera through the car's tunnel route. On car 1, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1` checks `rb1-cam-origin`. On car 2, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb2` checks `rb2-cam-origin`. Each lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).
+The page reaches the camera through the car's tunnel route. On car 1, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1` checks `rb1-cam-origin`.
+
+On car 2, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb2` checks `rb2-cam-origin`. Each lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).

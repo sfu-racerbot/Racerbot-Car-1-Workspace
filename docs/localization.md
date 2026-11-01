@@ -151,7 +151,9 @@ Halving the spacing to 0.25 m would have quietly halved that evidence to 2.5 m â
 >
 > A chain also has to fit inside `loop_search_maximum_distance`: it is consecutive older nodes *within that radius*. A 3 m radius holds about 6 m of path, so about 11 nodes. So `slam_gyro.yaml`'s 3 m with a chain of 20 could never close a loop while the pose was right (0.0% of nodes could), which is why it now sets the chain to 10.
 >
-> **So check three numbers together: the chain, the radius, and the speed.** `test_slam_gyro_profile.py` checks that the chain fits. The chain does most of the work on the walls. The gyro prior is what makes the result repeatable and the live pose usable: on the hard run, chain 10 alone gave 0.83-0.94 of walls with 4.6-4.9 m of live error on 3 of 4 replays, and with the prior 0.91 and under 0.3 m every time.
+> **So check three numbers together: the chain, the radius, and the speed.** `test_slam_gyro_profile.py` checks that the chain fits. The chain does most of the work on the walls. The gyro prior makes the result repeatable and the live pose usable.
+>
+> On car 2's hard run, chain 10 alone gave 0.83-0.94 of walls with 4.6-4.9 m of live error on 3 of 4 replays. With the prior it gave 0.91 and under 0.3 m every time.
 
 ## Checking whether it helped
 
