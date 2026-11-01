@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from racerbot_car import profile
+from racerbot_car import identity, profile
 
 REAL_CARS = Path(__file__).resolve().parents[1] / 'cars'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'cars_ok'
@@ -21,6 +21,13 @@ def write_profile(tmp_path, data, car='rb1'):
 @pytest.fixture
 def rb1_data():
     return yaml.safe_load((REAL_CARS / 'rb1/car.yaml').read_text())
+
+
+def test_shipped_machines_maps_car1_serial():
+    # Oracle: car 1's Jetson serial, read from the car 2026-10-31.
+    ids = identity.known_car_ids(REAL_CARS)
+    machines = identity.load_machines(REAL_CARS / 'machines.yaml', ids)
+    assert machines['1421723021900'] == 'rb1'
 
 
 def test_profile_rb1_matches_car1_facts():
