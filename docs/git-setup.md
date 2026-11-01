@@ -40,11 +40,17 @@ This workspace vendors exactly one package, for exactly that reason.
 
 ## Remote
 
-- GitHub, private: `https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace.git`
+- GitHub: `sfu-racerbot/Racerbot-Car-1-Workspace` today. At cutover (plan Task 20), it is renamed to `sfu-racerbot/Racerbot-Car-Workspace`; GitHub redirects the old URL.
 - Default and only branch: `main`
-- Car 2 ([Racerbot-Car-2-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace)) is a related but independent sister repository, not a submodule or configured upstream. Compare against it and manually port selected changes only when explicitly requested; never wholesale-overwrite car 1's hardware configuration (the five fixes below, the camera, `web_dashboard_rb1.yaml`). The last full port was taken in October 2026 as a three-way merge against car 2's `e16bda6` (the last commit the two repos shared in content) — see [CHANGELOG.md](../CHANGELOG.md).
+- Both cars use this workspace. Car 2's former repository, [Racerbot-Car-2-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace), is archived read-only only after both cars have driven on the merged repo.
 
-**Before any port, read [car1-vs-car2.md](car1-vs-car2.md)**: the full list of what must stay car 1's, and the test that proves it did.
+**Before changing car-specific behavior, read [car-profiles.md](car-profiles.md)**: it explains how the shared launch files select each car's calibration.
+
+## How car 2's history came in
+
+Car 2's history entered as a merge on branch `unify/merge-car2`. Commit `a205f29`, “Merge car 2's workspace (Racerbot-Car-2-Workspace 9c2c2ed), keeping the best of both”, has parents `560da2c` (car 1's line) and `9c2c2ed` (car 2's main). As a result, `git log` shows the full history from both cars. Car 2's main is also kept at `refs/car2/main`.
+
+Every change from that merge to what either car runs is listed in [unify-behaviour-changes.md](superpowers/plans/unify-behaviour-changes.md).
 
 **Gitignored, never expected in a commit:** `build/`, `install/`, `log/` (colcon artifacts), `__pycache__/` and `*.pyc`, `.sim`, `.venv-f1tenth/`, `.pytest_cache/`.
 
@@ -73,13 +79,13 @@ The workspace-specific integration code and documentation outside those two repo
 
 ---
 
-## The one vendored package, and the five fixes it carries
+## The one vendored package, its fixes and additions
 
 `f1tenth_system` used to be a submodule. It was **deliberately disconnected from upstream** and converted to a normal tracked directory.
 
 Concretely: its `.git` gitlink and its `.gitmodules` / `.git/config` entries were removed, then the files were kept and `git add`-ed like any other package.
 
-It carries five local fixes that have to live in this repo's history.
+It carries local launch and shared-configuration changes that have to live in this repo's history. Car-specific settings are loaded from each car's calibration overlay.
 
 > **All five are guaranteed to be silently clobbered by a naive upstream overwrite.** Check every one of them after any sync.
 
@@ -87,7 +93,7 @@ It carries five local fixes that have to live in this repo's history.
 
 `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml`
 
-The `human_control` profile's `drive-steering_angle` axis was changed from upstream's `axis: 2` to **`axis: 3`**.
+The `human_control` profile's `drive-steering_angle` axis is **`axis: 3`**. Its per-car joystick axes and scales are in `src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml`; the vendored file keeps shared settings and the `# per car:` pointer.
 
 Upstream's axis 2 is this F710's *left trigger*. Axis 3 is the right stick, in XInput mode — see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
 
@@ -113,15 +119,15 @@ The two alternate bringups, `no_lidar_bringup_launch.py` and `sick_bringup_launc
 
 `src/f1tenth_system/f1tenth_stack/config/vesc.yaml`
 
-`vesc_to_odom_node` overrides `speed_to_erpm_gain` to a **negative** value (**`-4040.0`** on car 1, tape-calibrated 2026-10-21; see [hardware-reference.md](hardware-reference.md)), against the `+3650.0` in the shared `/**` block. The sign is the fix; the magnitude is calibration. (Car 2 carries the same fix with its own magnitude. Until October 2026 car 1 carried it as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML when car 2's workspace was ported. **`vesc_to_odom.cpp` must stay upstream** — both fixes at once cancel each other.) (The [VESC](glossary.md#vesc) is the motor controller.)
+The sign correction remains per car, with its gain in `src/racerbot_car/cars/<id>/calibration/vesc.yaml`. The vendored file retains shared VESC settings and a `# per car:` pointer. The [VESC](glossary.md#vesc) is the motor controller.
 
 > **This is the dangerous one.** Nothing errors if it's lost. Odometry just reports the wrong sign, and every speed-aware safety layer degrades along with it.
 
 **Verify both nodes after any upstream sync:**
 
 ```bash
-ros2 param get /vesc_to_odom_node speed_to_erpm_gain      # must be NEGATIVE (currently -4040.0)
-ros2 param get /ackermann_to_vesc_node speed_to_erpm_gain # must be +3650.0
+ros2 param get /vesc_to_odom_node speed_to_erpm_gain      # must be negative for this car
+ros2 param get /ackermann_to_vesc_node speed_to_erpm_gain # must be positive for this car
 ```
 
 **Working when:** the two values are opposite in sign, exactly as shown. If they match, Fix 3 has been lost.
@@ -131,10 +137,10 @@ ros2 param get /ackermann_to_vesc_node speed_to_erpm_gain # must be +3650.0
 `src/f1tenth_system/f1tenth_stack/config/vesc.yaml` and
 `src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py`
 
-Two numbers in this package describe *this* car, not a stock one. Both were tape-measured **on car 2** on 2026-08-24 and both replace values that were wrong; car 1 took them in the October 2026 port on the assumption that the chassis match — **not yet measured on car 1** (TODO in [hardware-reference.md](hardware-reference.md#physical-dimensions-used-in-config)).
+The per-car wheelbase is in `cars/<id>/calibration/vesc.yaml`. The shared geometry remains in the vendored launch and config files where it is common to both cars.
 
-- `vesc.yaml` → `wheelbase: 0.36`, not upstream's (and Traxxas's) `0.324`. `vesc_to_odom_node` integrates heading as `speed × tan(steering) / wheelbase`, so a wheelbase 10% short puts ~10% too much yaw into `/odom`.
-- `bringup_launch.py` → the `base_link`→`laser` static transform is `0.26 0.0 0.11`, not `0.33 0.0 0.11`. The LiDAR sits 0.10 m behind the front axle, which is 0.26 m ahead of the rear-axle `base_link`.
+- Each car's calibration overlay provides its own wheelbase value; `vesc_to_odom_node` uses it when integrating heading.
+- The `base_link`→`laser` transform is shared by the current profiles and remains in the vendored launch files.
 
 See [hardware-reference.md](hardware-reference.md#physical-dimensions-used-in-config) for the measurements and the full list of files each one has to stay in step with.
 
@@ -159,13 +165,21 @@ ros2 run tf2_ros tf2_echo base_link laser          # translation x must be 0.260
 
 **Working when:** the parameter reads `0.36` and the transform's x translation reads `0.260`. Ctrl+C the `tf2_echo` once you've seen one message.
 
-### Fix 5 — the LiDAR is USB, not Ethernet (car 1 only)
+### Fix 5 — each car's LiDAR connection
 
 `src/f1tenth_system/f1tenth_stack/config/sensors.yaml`
 
-`urg_node` uses `serial_port: "/dev/sensors/hokuyo"`, with upstream's (and car 2's) `ip_address`/`ip_port` commented out, because **car 1's Hokuyo UST-30LX is USB, not Ethernet** — see [hardware-reference.md](hardware-reference.md#lidar--hokuyo-ust-30lx).
+Each car's LiDAR connection is in `src/racerbot_car/cars/<id>/calibration/sensors.yaml`. Car 1 uses `/dev/sensors/hokuyo`; the vendored `sensors.yaml` keeps shared settings and its `# per car:` pointer.
 
-**How it fails if reverted:** obviously. `urg_node` can't reach `192.168.0.10`, and `/scan` never publishes.
+**How it fails if reverted:** the driver tries the wrong connection and `/scan` does not publish.
+
+### Addition 7 — bringups load each car's calibration overlay
+
+All three `*_bringup_launch.py` files and `teleop_launch.py` load shared configuration first, then the selected car's overlay using `racerbot_car.layers.car_params(...)` and `launch_car_id()`. `f1tenth_stack/package.xml` adds `<exec_depend>racerbot_car</exec_depend>`.
+
+The change stays small: calibration values live in `src/racerbot_car/cars/rb1/calibration/` and `cars/rb2/calibration/`, while vendored configuration retains shared values and `# per car:` pointers. This keeps one launch implementation for both cars.
+
+If reverted, the shared defaults are used without the selected car's calibration, so steering, speed conversion, or sensor setup can be wrong. `src/racerbot_launch/test/test_car_profiles.py` checks the car hardware profiles; `src/racerbot_car/test/test_launch_layering.py` checks overlay layering.
 
 ### Addition 6 — bringup starts the automatic run recorder
 
@@ -177,7 +191,7 @@ It is kept as small as it can be. About 20 lines at the end of each bringup; the
 
 The layered-override pattern below doesn't fit here, because there is no config file to layer: the change is which processes bringup starts. And the whole point is that the usual `ros2 launch f1tenth_stack bringup_launch.py` command records, without anyone having to remember a second one.
 
-**How it fails if reverted:** quietly but harmlessly. Nothing drives differently; runs just stop being recorded. `python3 -m pytest src/race_diagnostics/test/test_bringup_auto_record.py src/racerbot_launch/test/test_car1_hardware_config.py` fails if any bringup loses it.
+**How it fails if reverted:** quietly but harmlessly. Nothing drives differently; runs just stop being recorded. `python3 -m pytest src/race_diagnostics/test/test_bringup_auto_record.py src/racerbot_launch/test/test_car_profiles.py` fails if any bringup loses it.
 
 ### Not a fix: the SLAM tuning lives outside this package
 
@@ -316,16 +330,14 @@ colcon build --symlink-install --packages-select <package>
 
    | Check | Should still be |
    |---|---|
-   | `f1tenth_stack/config/joy_teleop.yaml` → `drive-steering_angle` under `human_control` | `axis: 3`, **not** upstream's `axis: 2` |
+   | `f1tenth_stack/config/joy_teleop.yaml` | shared configuration plus the `# per car:` pointer; axes and scales come from `cars/<id>/calibration/joy_teleop.yaml` |
    | `f1tenth_stack/launch/bringup_launch.py`, `no_lidar_bringup_launch.py`, `sick_bringup_launch.py` | still do **not** start a `joy_teleop` node, with `teleop_launch.py` still present separately (upstream will have bundled them back together) |
-   | `f1tenth_stack/config/vesc.yaml` → `vesc_to_odom_node` | still carries a **negative** `speed_to_erpm_gain` (currently `-4040.0`), and `vesc_ackermann/src/vesc_to_odom.cpp` is still upstream's |
-   | `f1tenth_stack/config/sensors.yaml` → `urg_node` | `serial_port: "/dev/sensors/hokuyo"`, **not** upstream's `ip_address`/`ip_port` |
-   | `f1tenth_stack/config/vesc.yaml` → `wheelbase`, and the `base_link`→`laser` transform in all three `*_bringup_launch.py` files | `0.36`, and `0.26 0.0 0.11` — this car's geometry (car 2's measurement, assumed for car 1), **not** the `0.324` / `0.33` upstream ships |
+   | `f1tenth_stack/config/vesc.yaml` and `sensors.yaml` | shared settings and `# per car:` pointers remain; VESC values and LiDAR connection come from each car's calibration overlay |
    | all three `*_bringup_launch.py` files, and `f1tenth_stack/package.xml` | still declare `record` (default `true`) and include `race_diagnostics`' `auto_record_launch.py` (Addition 6); `package.xml` still has `<exec_depend>race_diagnostics</exec_depend>`. `python3 -m pytest src/race_diagnostics/test/test_bringup_auto_record.py` checks the launch files |
 
 4. **Commit normally:** `git add src/f1tenth_system && git commit`. There's no submodule pointer to bump — the files themselves are the commit.
 
-> **Do step 3 even when you're confident.** All five fixes are silently reverted by a naive overwrite, and the last two fail silently *and* unsafely.
+> **Do step 3 even when you're confident.** A naive overwrite can remove the calibration loading and make the car use the wrong hardware values.
 
 One more difference from upstream is **not** a fix and is safe to lose. Upstream's three bringups remap the [mux](glossary.md#mux--multiplexer)'s `ackermann_cmd_out` → `ackermann_drive`. The mux never uses the name `ackermann_cmd_out`, so the remap did nothing, and it was deleted here in October 2026. If a sync brings it back, `python3 -m pytest src/racerbot_launch/test/` fails in `test_drive_path_wiring.py`; delete the line again.
 
