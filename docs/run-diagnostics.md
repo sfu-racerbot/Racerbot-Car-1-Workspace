@@ -18,7 +18,9 @@ real collision that night. The postmortem is at the end.
 
 **Since 2026-10-26, every run of an algorithm is recorded for you.** Start
 bringup the usual way, start any algorithm on top, and a run directory
-appears under `~/racerbot-ws/data/<id>/racerbot_runs/` while it runs (`<id>` is `rb1` or `rb2`). You do not need the
+appears under `~/racerbot-ws/data/<id>/racerbot_runs/` while it runs (`<id>` is `rb1` or `rb2`).
+
+Replace `<id>` in commands with the car ID, without angle brackets. You do not need the
 recorder terminal from the [TL;DR](#tldr) below any more, unless you want
 one for a run that is not an algorithm (manual driving, say).
 
@@ -665,7 +667,7 @@ and `pose_sequence_error`; a timeout prints the failed scan stamp and keeps the
 logs. See the measured limitation below before trying the 19:49 recording.
 
 Output defaults to
-`~/.ros/racerbot_runs/RUN_NAME-replay-odom_imu-exact/`. Existing output folders
+`data/<id>/racerbot_runs/RUN_NAME-replay-odom_imu-exact/` for the selected car ([`slam_replay.py`](../tools/run_analysis/slam_replay.py)). Existing output folders
 are refused, so use a different `--label` for another attempt. Add
 `--out-root /tmp/slam-replays` to put results in a scratch directory instead.
 The source run is read without being modified.

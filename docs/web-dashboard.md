@@ -86,7 +86,10 @@ ps -o args= -C cloudflared          # Terminal 1, on the car
 ```
 
 **Working when:** it prints `/usr/bin/cloudflared --no-autoupdate tunnel run`, followed by nothing or by `--token-file /etc/cloudflared/token`. A long `eyJ…` string after `--token` means the token is exposed again.
-Car 2's tunnel is the `rb2` tunnel in the team's Cloudflare account; its three routes are `rb2-dash-origin.sfuracerbot.ca` → `:8080`, `rb2-bridge-origin.sfuracerbot.ca` → `:8765` and `rb2-cam-origin.sfuracerbot.ca` → `:9090`. Setting one up from scratch: [web-dashboards/car/README.md](../src/web_dashboards/car/README.md).
+
+Car 2's tunnel is `rb2` in the team's Cloudflare account. Its routes are `rb2-dash-origin.sfuracerbot.ca` → `:8080`, `rb2-bridge-origin.sfuracerbot.ca` → `:8765` and `rb2-cam-origin.sfuracerbot.ca` → `:9090`.
+
+Setting one up from scratch: [web-dashboards/car/README.md](../src/web_dashboards/car/README.md).
 
 ## Changing a car's settings
 
@@ -106,7 +109,7 @@ python3 -m pytest src/racerbot_launch/test/ -v
 
 <a id="live-parameter-tuning"></a>
 
-The tuning panel reaches `pure_pursuit_node` and `gap_follow_node` because each advertises a `live_tunable_spec`, and the rb2 YAML names them in `tuning_nodes`.
+The tuning panel reaches `pure_pursuit_node` and `gap_follow_node` because each advertises a `live_tunable_spec`, and each car's YAML names them in `tuning_nodes`.
 
 That agreement — the spec format, who enforces bounds, how "save" rewrites `config/*.yaml` — now spans two repos. It is written down in [web-dashboards/car/docs/web-dashboard.md, "The live_tunable_spec contract"](../src/web_dashboards/car/docs/web-dashboard.md#the-live_tunable_spec-contract).
 
@@ -114,7 +117,9 @@ This workspace's half is tested in `src/gap_follow/test/test_gap_follow_live_tun
 
 ## The dashboard's boot service
 
-`racerbot-dashboard.service` runs `ros2 launch racerbot_launch dashboard_launch.py` at boot, as the `racerbotcar-2` user. It joins the same ROS graph as everything else: domain 0, Fast DDS, exactly like the bridge below. It restarts 5 s after any exit, crash or not. Its template and installer are car 2's own, in [`src/racerbot_launch/systemd/`](../src/racerbot_launch/systemd/). That installer refuses a car other than rb2 and accepts `--dry-run`.
+`racerbot-dashboard.service` runs `ros2 launch racerbot_launch dashboard_launch.py` at boot, as the `racerbotcar-2` user. It joins the same ROS graph as everything else: domain 0, Fast DDS, exactly like the bridge below. It restarts 5 s after any exit, crash or not.
+
+Its template and installer are car 2's own, in [`src/racerbot_launch/systemd/`](../src/racerbot_launch/systemd/). That installer refuses a car other than rb2 and accepts `--dry-run`.
 
 **Why it's safe to leave running:** it publishes to no ROS topic, so it can never move the car. Its four write paths (live tuning, stopping a driving process, SLAM reset, deleting a saved run) are only reachable through the site, which is behind the team's Cloudflare Access login.
 
