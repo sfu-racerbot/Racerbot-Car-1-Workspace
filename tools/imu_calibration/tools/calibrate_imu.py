@@ -8,7 +8,7 @@ Steps (default: gyro then accel):
          (+x up, -x up, +y up, ...) and then tilted in-between orientations. 12+ poses = full
          scale + cross-axis fit, 6-11 = bias + per-axis scale only.
   mount  car assembled, on level ground: hold still ~3 s, then push it straight forward
-         -> prints the rpy_deg to put in config/car.yaml for this IMU
+         -> prints the rpy_deg to put in the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml) for this IMU
 
 Before calibrating the VESC IMU: in VESC Tool set App > IMU accel/gyro offsets to 0 (the values the VESC
 sends already include them) and note the rot_roll/pitch/yaw you use. Then close VESC Tool.
@@ -176,7 +176,7 @@ def step_mount(args, cal, log):
     rpy = rpy_deg(R)
     cal.meta["mount"] = {"rpy_deg": rpy.round(3).tolist(), "time": stamp()}
     print(f"  still for {t[i1 - 1] - t[i0]:.1f} s, then push detected")
-    print(f"\n  -> in config/car.yaml, imus.{args.imu}.rpy_deg: [{rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}]")
+    print(f"\n  -> in the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml), imus.{args.imu}.rpy_deg: [{rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}]")
 
 
 def main():
@@ -198,7 +198,7 @@ def main():
         use_sim_paths(cfg)
     if a.imu not in cfg.imus:
         sys.exit(f"unknown IMU '{a.imu}'; car.yaml has {list(cfg.imus)}")
-    out = Path(a.out) if a.out else cfg.resolve(cfg.imus[a.imu].extra.get("calib", f"calib/{a.imu}_calib.json"))
+    out = Path(a.out) if a.out else cfg.resolve(cfg.imus[a.imu].extra.get("calib", f"calib/{a.imu}_calib.json"), for_write=True)
     cal = ImuCalibration.load_or_identity(out)   # keep results of steps not re-run
     log = RunLogger(f"calib_{a.imu}", meta={"imu": a.imu, "steps": steps, "sim": bool(a.sim)})
     if a.imu.startswith("vesc"):

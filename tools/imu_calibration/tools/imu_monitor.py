@@ -5,7 +5,7 @@ and do the axes make sense? (Tilt nose-down: +x reads ~+g? Roll left: ...)
 Values are averaged over each 0.2 s screen refresh. If calib/<imu>_calib.json exists, the calibrated
 values are shown under the raw ones: at rest, |a| - g should be much closer to 0 and gyro close to 0.
 
-    python tools/imu_monitor.py                       # ports from config/car.yaml
+    python tools/imu_monitor.py                       # ports from the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml)
     python tools/imu_monitor.py --vesc /dev/ttyACM0   # only the VESC
     python tools/imu_monitor.py --sim drift --log     # simulator, and record a run
 """

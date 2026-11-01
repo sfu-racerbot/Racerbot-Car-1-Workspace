@@ -49,7 +49,7 @@ def main():
 
     cfg, sources, sim = setup(a, only=[imu], processes=True)
     if not sources:
-        sys.exit(f"no port for '{imu}' (pass --{imu} PORT or set it in config/car.yaml)")
+        sys.exit(f"no port for '{imu}' (pass --{imu} PORT or set it in the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml))")
     src = sources[0]
     path = Path(a.calib) if a.calib else cfg.resolve(cfg.imus[imu].extra.get("calib"))
     cal = ImuCalibration.load(path) if path and path.exists() else None

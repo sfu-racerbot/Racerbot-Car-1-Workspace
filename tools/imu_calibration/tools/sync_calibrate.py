@@ -96,7 +96,7 @@ def main():
         r = np.degrees(R_to_rpy(R_other_suggest))
         print(f"  -> if '{ref}' rpy_deg is right, '{other}' should be about [{r[0]:.1f}, {r[1]:.1f}, {r[2]:.1f}]")
 
-    path = cfg.resolve(cfg.section("sync").get("file", "calib/sync.json"))
+    path = cfg.resolve(cfg.section("sync").get("file", "calib/sync.json"), for_write=True)
     old = json.loads(path.read_text()) if path.exists() else {}
     offsets = {**old.get("offsets", {}), other: float(dt), ref: 0.0}
     path.parent.mkdir(parents=True, exist_ok=True)

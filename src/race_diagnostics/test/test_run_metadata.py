@@ -103,15 +103,18 @@ def test_copy_files_copies_byte_for_byte_and_reports_missing(tmp_path):
     assert result[str(src / 'gone.json')] == 'missing'
 
 
-def test_imu_calibration_files_are_car_yaml_and_every_calib_json(tmp_path):
-    (tmp_path / 'config').mkdir()
-    (tmp_path / 'calib').mkdir()
+def test_imu_calibration_files_are_car_yaml_and_every_calib_json(tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path))
+    (tmp_path / 'machines.yaml').write_text('{}')
+    (tmp_path / 'rb1/imu/calib').mkdir(parents=True)
+    (tmp_path / 'rb1/car.yaml').write_text('{}')
+    imu = tmp_path / 'rb1/imu'
     for name in ('bno_calib.json', 'vesc_calib.json', 'notes.txt'):
-        (tmp_path / 'calib' / name).write_text('{}')
+        (imu / 'calib' / name).write_text('{}')
     files = rm.imu_calibration_files(tmp_path)
-    assert files == [tmp_path / 'config' / 'car.yaml',
-                     tmp_path / 'calib' / 'bno_calib.json',
-                     tmp_path / 'calib' / 'vesc_calib.json']
+    assert files == [imu / 'car.yaml',
+                     imu / 'calib' / 'bno_calib.json',
+                     imu / 'calib' / 'vesc_calib.json']
 
 
 def test_vendored_imu_calibration_is_covered_by_the_workspace_state(repo, tmp_path):
@@ -135,9 +138,12 @@ def test_a_separate_imu_calibration_clone_is_still_recorded(repo, tmp_path):
     assert rm.metadata_repos(repo, plain) == {'racerbot-ws': repo, 'imu-calibration': plain}
 
 
-def test_write_run_metadata_layout(repo, tmp_path):
-    (tmp_path / 'imu' / 'config').mkdir(parents=True)
-    (tmp_path / 'imu' / 'config' / 'car.yaml').write_text('car: {}\n')
+def test_write_run_metadata_layout(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path))
+    (tmp_path / 'machines.yaml').write_text('{}')
+    (tmp_path / 'rb1/imu').mkdir(parents=True)
+    (tmp_path / 'rb1/car.yaml').write_text('{}')
+    (tmp_path / 'rb1/imu/car.yaml').write_text('car: {}\n')
     meta = rm.write_run_metadata(tmp_path / 'run', {'racerbot-ws': repo,
                                                     'imu-calibration': tmp_path / 'imu'},
                                  rm.imu_calibration_files(tmp_path / 'imu'))

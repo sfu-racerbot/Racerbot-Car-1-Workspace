@@ -1,11 +1,41 @@
 # racer_imu: VESC IMU + BNO085, calibrated, time-synced, in the car frame
 
+> **Who this is for:** developers measuring IMU calibration or testing it without hardware.
+> **Read first:** [Car identity and profiles](../../src/racerbot_car/README.md).
+> **You'll be able to:** select the car's calibration, run the tools and locate saved results.
+> **Time:** about 10 minutes for simulator setup; hardware calibration takes longer.
+
 > **Part of racerbot-ws since 2026-10-31.** This was the separate
 > [sfu-racerbot/imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo; it now lives at
-> `tools/imu_calibration/` with its history, and `imu_bridge` reads it from here by default
-> (`racer_imu_root`). `config/car.yaml` and `calib/` hold **car 1's** values. Raw calibration recordings
-> go in `data/imu_calibration/`. Tests, from the workspace root: `python3 -m pytest tools/imu_calibration/tests/ -q`
-> (two `test_online.py` failures that appear only with car 1's mount in `config/car.yaml`; see the workspace CLAUDE.md).
+> `tools/imu_calibration/` with its history. `imu_bridge` imports the driver from here
+> (`racer_imu_root`); per-car mounts and calibration live in `src/racerbot_car/cars/CAR/imu/`.
+> Car 1 uses `src/racerbot_car/cars/rb1/imu/car.yaml` and its adjacent `calib/` directory.
+> Raw calibration recordings go in `data/CAR/imu_calibration/`.
+
+## Highlights
+
+- Calibrates accelerometers and gyros, then rotates readings into car axes.
+- Synchronizes the two IMUs on a 200 Hz time grid.
+- Runs the same pipeline against simulated sensors without hardware.
+- Keeps each car's measured mounts and calibration files in its own profile.
+
+## Select a car and its calibration
+
+On a development machine, set `RACERBOT_CAR=rb1` in the terminal before running a tool.
+On the car, identity can be resolved from its Jetson serial.
+
+With no `--config`, tools
+use `src/racerbot_car/cars/CAR/imu/car.yaml`, where `CAR` is the selected car ID.
+An unresolved car or missing file causes an error naming `RACERBOT_CAR` and `--config`.
+
+Relative calibration paths are read beside that `car.yaml` first, then under
+`tools/imu_calibration/`. New calibration JSONs are written beside the selected
+configuration, in its `calib/` directory. Explicit output paths take precedence.
+Simulation calibration stays under `tools/imu_calibration/calib/sim/`.
+The former `config/` and `calib/` directories here contain no per-car files.
+
+From a terminal at the workspace root, run `python3 -m pytest tools/imu_calibration/tests/ -q`.
+Expect two known `test_online.py` failures with car 1's mount; see the workspace `CLAUDE.md`.
 
 Two IMUs on the car:
 - **VESC built-in IMU**, read over USB with the VESC binary protocol.
@@ -33,7 +63,7 @@ The full calibration flow also runs in sim mode:
 
 ## At the lab
 1. **Serial access.** `ls /dev/ttyACM*`. If you get "permission denied", run `sudo usermod -aG dialout $USER` and log in again.
-   Put the ports in `config/car.yaml`. Close VESC Tool, since only one program can hold the port.
+   Put the ports in the selected car's `imu/car.yaml`. Close VESC Tool, since only one program can hold the port.
 2. **VESC Tool.** Set the IMU filter the way you want it. Set **accel/gyro offsets to 0**: the VESC applies
    them before sending, and our calibration replaces them. Note the `rot_*` values you use.
 3. **Flash the BNO085 sketch.** Install the "Adafruit BNO08x" library, then upload `firmware/bno085_stream`. On boot the

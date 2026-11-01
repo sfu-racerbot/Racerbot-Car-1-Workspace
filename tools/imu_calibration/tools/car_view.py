@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Car-frame GUI: where the IMUs sit, what they feel, and where the car goes / how much it drifts.
 
-    python tools/car_view.py                          # live, ports from config/car.yaml
+    python tools/car_view.py                          # live, ports from the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml)
     python tools/car_view.py --sim drift              # simulator (shows ground truth dashed)
     python tools/car_view.py --replay data/<car>/imu_calibration/<time>  # play back a recorded run
     python tools/car_view.py --sim drift --log        # also record raw + estimates

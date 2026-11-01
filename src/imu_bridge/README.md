@@ -21,7 +21,7 @@ On top of that, it combines them with the wheel speed into three things the rest
 ## Highlights
 
 - **Converts the VESC's IMU to SI units and car axes.** The [VESC](../../docs/glossary.md#vesc) (the motor controller) reports g and deg/s, in whatever direction its board happens to face. On car 2 that's rotated about 85° from the car. This node outputs m/s² and rad/s, with x forward, y left and z up.
-- **Uses the club's existing calibration, unchanged.** It reads `car.yaml` and the calibration files from `tools/imu_calibration/` (the club's [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo, now kept in this workspace), and applies the same formula as its `racer_imu`. A test checks the two give the same answer to 1e-12 on the car's real calibration file.
+- **Uses the selected car's calibration.** Mounts live in `src/racerbot_car/cars/CAR/imu/car.yaml`, with calibration JSONs in the adjacent `calib/` directory. The conversion formula matches `racer_imu` in `tools/imu_calibration/`; a test compares the two to 1e-12 on the car's real calibration file.
 - **Removes leftover gyro bias at startup.** For the first 3 s it averages the gyro while the car sits still. It only counts samples where the wheels report under 0.03 m/s *and* every gyro axis is under 0.05 rad/s. Any motion throws the window away and starts again.
 - **Gives the wheel [odometry](../../docs/glossary.md#odometry--odom) an honest uncertainty.** `/odom` arrives claiming zero uncertainty, which an EKF would treat as perfect. This node republishes it with a speed uncertainty of 0.08 m/s, and marks everything else as untrusted.
 - **Ships a "shadow" EKF config.** It runs the EKF alongside everything else for comparison, without changing what any driving node uses.
@@ -81,7 +81,14 @@ An **EKF** (extended Kalman filter) combines two imperfect sensors into one bett
 
 - [ ] **The VESC's IMU must be switched on.** It was measured on 2026-08-19 sending all zeros because it was off in VESC Tool; it has been on, and working, since the October 2026 tests (see [docs/localization.md](../../docs/localization.md)). It was calibrated through the imu-calibration repo in September 2026, which means it works over that repo's own serial driver. This node prints a warning every 5 s if it still sees all zeros.
 - [ ] **Car 1: the BNO085 must answer on I2C.** It is wired to the Jetson's 40-pin header (pin 1 3.3 V, pin 3 SDA, pin 5 SCL, pin 6 GND), which is I2C bus 7. Working when `i2cdetect -y -r 7` shows `4a` in its grid. Only the `-r` form works on this Jetson. A `Remote I/O error` on every address means SDA and SCL are swapped. Your user must be in group `i2c` (`id` lists it).
-- [ ] **Nothing to clone: the IMU calibration ships in this workspace** as `tools/imu_calibration/` (brought in from the [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo on 2026-10-31, history kept). Working when `ls ~/racerbot-ws/tools/imu_calibration/config/car.yaml` prints the path. To use a calibration somewhere else, pass `racer_imu_root:=/that/path` when launching. On car 1, `~/imu-calibration` is a symlink to the workspace copy, so older commands still work. The node **refuses to start** without its `config/car.yaml`. Without the mount rotation it would swap the x and y axes.
+- [ ] **Select the car's IMU calibration.** On a development machine, set `RACERBOT_CAR=rb1`; the car itself can use its Jetson serial. For car 1, check that `src/racerbot_car/cars/rb1/imu/car.yaml` exists. Both IMU launches resolve the car and pass this path explicitly. The node **refuses to start** if the selected file is missing, because using another mount would produce incorrect axes.
+
+`racer_imu_root` locates the driver code and I2C bridge in `tools/imu_calibration/`.
+The node's `car_yaml` parameter selects the mount file; when empty, it uses
+`cars_dir()/CAR/imu/car.yaml`. `RACERBOT_CARS_DIR` can override the profile directory.
+Relative calibration paths prefer the mount file's own directory, then the code root.
+Each recorded run copies that car's `car.yaml` and calibration JSONs into
+`metadata/files/`, and records the car ID in `metadata/car_id.txt`.
 - [ ] **For the EKF only**, install robot_localization once:
   ```bash
   sudo apt install ros-jazzy-robot-localization
@@ -130,7 +137,7 @@ ros2 launch imu_bridge imu_bridge_launch.py bno_port:=/dev/ttyACM1
 - every 5 s, from `vehicle_state_node`: `rates: bno 250 Hz, vesc 50 Hz | speed: fused 250 | ...`. `fused` means the accelerometer is being used; `wheel_only` means it isn't (see [Troubleshooting](#troubleshooting)).
 
 **If it doesn't:**
-- `car.yaml not found`: the repo isn't cloned where `racer_imu_root` points.
+- `Expected IMU calibration at ...`: the selected car's `imu/car.yaml` is missing.
 - `no VESC IMU data`: bringup isn't running.
 - `all zeros`: the IMU is off in VESC Tool.
 - The bias line never appears: something is moving the car, or `/odom` is missing (see [Troubleshooting](#troubleshooting)).
@@ -414,7 +421,7 @@ Source ROS first and give the tests their own domain (`export ROS_DOMAIN_ID=79 R
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Node exits with `car.yaml not found` | `racer_imu_root` doesn't point at the calibration | Leave it at its default (`tools/imu_calibration/` in this workspace), or pass `racer_imu_root:=...` |
+| Node exits with `Expected IMU calibration at ...` | The selected car's mount file is missing | Check `RACERBOT_CAR`, `RACERBOT_CARS_DIR` and that car's `imu/car.yaml` |
 | `startup gyro bias removed` never appears | car moving, or no `/odom` | Keep it still; check `ros2 topic hz /odom` |
 | Warning: all zeros | VESC IMU disabled | VESC Tool → App Settings → IMU, sample rate > 0 |
 | Turning left gives negative `z` | wrong `rpy_deg` for this IMU in `car.yaml` | Redo the mount step in imu-calibration (`tools/calibrate_imu.py --step mount`) |

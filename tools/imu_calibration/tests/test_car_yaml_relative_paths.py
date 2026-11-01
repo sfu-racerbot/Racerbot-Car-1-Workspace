@@ -13,13 +13,17 @@ from racer_imu.calibration import ImuCalibration
 CAR = Path(__file__).resolve().parents[3] / 'src/racerbot_car/cars/rb1/imu/car.yaml'
 
 
-def test_calib_resolves_next_to_car_yaml(tmp_path):
+def test_calib_resolves_next_to_car_yaml(tmp_path, monkeypatch):
     config = tmp_path / 'profile/car.yaml'
     config.parent.mkdir()
     config.write_text('imus: {bno: {calib: calib/x.json}}')
     expected = config.parent / 'calib/x.json'
     expected.parent.mkdir()
     expected.write_text('{}')
+    root = tmp_path / 'root'
+    (root / 'calib').mkdir(parents=True)
+    (root / 'calib/x.json').write_text('{"other": true}')
+    monkeypatch.setattr(frames, 'ROOT', root)
     cfg = frames.load_config(config)
     assert cfg.resolve(cfg.imus['bno'].extra['calib']) == expected
 
@@ -54,3 +58,28 @@ def test_default_config_refuses_unknown_car(monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', 'rbX')
     with pytest.raises(FileNotFoundError, match='RACERBOT_CAR'):
         frames.default_config_path()
+
+
+def test_calibration_output_stays_with_config(tmp_path, monkeypatch):
+    root = tmp_path / 'root'
+    (root / 'calib').mkdir(parents=True)
+    (root / 'calib/x.json').write_text('{}')
+    monkeypatch.setattr(frames, 'ROOT', root)
+    config = tmp_path / 'car.yaml'
+    config.write_text('imus: {}')
+    cfg = frames.load_config(config)
+    assert cfg.resolve('calib/x.json', for_write=True) == tmp_path / 'calib/x.json'
+    assert cfg.resolve('calib/new.json', for_write=True) == tmp_path / 'calib/new.json'
+
+
+def test_sim_calibration_stays_at_root(tmp_path, monkeypatch):
+    root = tmp_path / 'root'
+    monkeypatch.setattr(frames, 'ROOT', root)
+    config = tmp_path / 'car.yaml'
+    config.write_text('imus: {bno: {calib: calib/bno_calib.json}}')
+    cfg = frames.load_config(config)
+    from racer_imu.cli import use_sim_paths
+    use_sim_paths(cfg)
+    for writing in (False, True):
+        assert cfg.resolve(cfg.imus['bno'].extra['calib'], for_write=writing) == root / 'calib/sim/bno_calib.json'
+        assert cfg.resolve(cfg.section('sync')['file'], for_write=writing) == root / 'calib/sim/sync.json'

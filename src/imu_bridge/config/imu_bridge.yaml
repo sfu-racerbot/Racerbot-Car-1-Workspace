@@ -1,11 +1,8 @@
 imu_bridge_node:
   ros__parameters:
-    # Where the IMU calibration lives (package racer_imu): tools/imu_calibration/
-    # in this workspace, brought in from github.com/sfu-racerbot/imu-calibration
-    # on 2026-10-31. Mount rotations and calibration files are read from it, and
-    # the optional BNO085 driver is imported from it.
+    # racer_imu code and the optional BNO085 driver (not per-car calibration).
     racer_imu_root: ~/racerbot-ws/tools/imu_calibration
-    # Path to that repo's car.yaml. Empty = <racer_imu_root>/config/car.yaml.
+    # Empty selects <cars_dir>/<running car>/imu/car.yaml; missing files refuse startup.
     car_yaml: ''
     # vesc_driver_node's IMU, in the VESC's own units (g, deg/s), ~50 Hz.
     vesc_topic: /sensors/imu/raw

@@ -17,6 +17,7 @@ import math
 import os
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 from nav_msgs.msg import Odometry
@@ -66,6 +67,18 @@ def _finite3(v):
     return v.shape == (3,) and bool(np.all(np.isfinite(v)))
 
 
+def resolve_car_yaml(car_yaml):
+    """Refuse a missing profile rather than silently changing IMU mounts."""
+    from racerbot_car.identity import current_car_id
+    from racerbot_car.paths import cars_dir
+    path = (Path(car_yaml).expanduser() if car_yaml
+            else cars_dir() / current_car_id() / 'imu/car.yaml')
+    if not path.is_file():
+        raise FileNotFoundError(f'Expected IMU calibration at {path}; set car_yaml '
+                                'or supply this car\'s imu/car.yaml')
+    return path
+
+
 class _Stream:
     """One IMU's calibration, startup bias and message counter."""
 
@@ -101,8 +114,7 @@ class ImuBridgeNode(Node):
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
         self.racer_imu_root = os.path.expanduser(p('racer_imu_root'))
-        car_yaml = os.path.expanduser(p('car_yaml')) or os.path.join(
-            self.racer_imu_root, 'config', 'car.yaml')
+        car_yaml = resolve_car_yaml(p('car_yaml'))
         self.frame_id = p('frame_id')
         bno_port = p('bno_port')
         self.primary = resolve_primary(p('primary'), bno_port)
@@ -110,13 +122,6 @@ class ImuBridgeNode(Node):
         self.accel_cov = covariance_diag(p('accel_sigma'))
         self.twist_cov = wheel_twist_covariance(p('wheel_speed_sigma'))
         bias_s = float(p('startup_bias_s'))
-
-        if not os.path.isfile(car_yaml):
-            raise FileNotFoundError(
-                f'{car_yaml} not found. imu_bridge needs the IMU calibration for the '
-                'IMU mount rotation (the VESC is mounted rotated ~85 deg, so identity would '
-                'swap x and y): it ships in this workspace as tools/imu_calibration/; '
-                f'racer_imu_root is {self.racer_imu_root}. Set racer_imu_root / car_yaml.')
 
         self.vesc = self._make_stream('vesc', car_yaml, bias_s)
         self.vesc_all_zero = 0
@@ -163,7 +168,7 @@ class ImuBridgeNode(Node):
     # ------------------------------------------------------------ setup
 
     def _make_stream(self, name, car_yaml, bias_s):
-        rpy_deg, calib_path = load_mount(car_yaml, name)
+        rpy_deg, calib_path = load_mount(car_yaml, name, self.racer_imu_root)
         cal = load_calibration(calib_path, rpy_deg)
         self.get_logger().info(
             f'{name}: mount rpy_deg={rpy_deg}, calibration: {cal.source}')
