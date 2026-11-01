@@ -93,7 +93,7 @@ It carries local launch and shared-configuration changes that have to live in th
 
 `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml`
 
-The `human_control` profile's `drive-steering_angle` axis is **`axis: 3`**. Its per-car joystick axes and scales are in `src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml`; the vendored file keeps shared settings and the `# per car:` pointer.
+The per-car `human_control` profile's `drive-steering_angle` axis and joystick scales are in `src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml`; the vendored file keeps shared settings and the `# per car:` pointer. Car 1 uses `axis: 3` for the right stick in XInput mode; see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
 
 Upstream's axis 2 is this F710's *left trigger*. Axis 3 is the right stick, in XInput mode — see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
 
@@ -326,7 +326,7 @@ colcon build --symlink-install --packages-select <package>
 
 1. **Diff your vendored copy against upstream.** Take a fresh clone or checkout of `f1tenth/f1tenth_system` at whatever branch or commit you want to pull in, and see what actually changed.
 2. **Apply the parts you want by hand** into `src/f1tenth_system/` — copy files over, or use `git diff` / `git apply` between the two trees.
-3. **Before committing, re-check all five local fixes and the one addition.** Every one of them:
+3. **Before committing, re-check the vendored fixes and additions.** Every one of them:
 
    | Check | Should still be |
    |---|---|
