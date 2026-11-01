@@ -16,7 +16,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'src/racerbot_car'))
 from racerbot_car.paths import data_dir  # noqa: E402
 
-from .types import ImuSample, WheelSample
+from .types import ImuSample, WheelSample  # noqa: E402
 
 IMU_COLS = ["t", "t_dev", "rtt", "ax", "ay", "az", "gx", "gy", "gz", "qw", "qx", "qy", "qz", "label"]
 WHEEL_COLS = ["t", "erpm", "v_in", "tacho"]
