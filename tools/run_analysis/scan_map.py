@@ -139,6 +139,30 @@ def located_scans(run, loc_dir, every: int = 3):
         yield (track[i, COL["x"]], track[i, COL["y"]], track[i, COL["yaw"]]), angles, np.array(m.ranges, float)
 
 
+def fragments_per_scan(scans, angles, params, laser_x: float = LASER_X, laser_y: float = 0.0) -> float:
+    """Mean car-sized clusters per scan, by gap_follow's own segmenter: the tracker's raw input."""
+    from gap_follow import gap_logic, opponent_tracking as ot
+    total = 0
+    for ranges in scans:
+        r = np.where(np.isfinite(ranges), ranges, 30.0)
+        clean, valid = gap_logic.sanitize_ranges(r, 10.0, 0.02)
+        total += len(ot.segment_objects(clean, valid, angles, laser_x, laser_y, params))
+    return total / max(len(scans), 1)
+
+
+def score_shares(hits, passes, shares, grid, poses, angles, real_scans, params, min_hits: int = 3) -> list:
+    """For each beam-layer threshold: fragments per scan cast from real poses, against the real scans'."""
+    from run_analysis.car_measure import cast_scan
+    real = fragments_per_scan(real_scans, angles, params)
+    rows = []
+    for share in shares:
+        layer = open_walls(hits, passes, min_hits, share)
+        cast = [cast_scan(layer, grid.res, grid.ox, grid.oy, x + LASER_X * math.cos(yaw), y + LASER_X * math.sin(yaw),
+                          yaw, angles) for x, y, yaw in poses]
+        rows.append(dict(share=share, fragments=fragments_per_scan(cast, angles, params), real=real))
+    return rows
+
+
 def write_map(path, occupied, resolution: float, ox: float, oy: float) -> None:
     """A map_server image and yaml at ``path``.png and ``path``_map.yaml, as the simulator reads them."""
     import yaml
@@ -163,6 +187,10 @@ def main(argv=None) -> int:
     ap.add_argument("--beam-share", type=float, default=0.255,
                     help="for the beam walls; fitted to the fragments per scan of a held run")
     ap.add_argument("--out", required=True, help="path stem: <out>.png, <out>_map.yaml, <out>_contact.png")
+    ap.add_argument("--score-shares", help="comma list of --beam-share values to score against the --check runs' "
+                                           "fragments per scan, instead of writing maps")
+    ap.add_argument("--config", default=str(Path(__file__).resolve().parents[2] / "src" / "gap_follow" / "config"
+                                            / "gap_follow.yaml"), help="gap_follow YAML, for --score-shares")
     args = ap.parse_args(argv)
     grid = Grid.from_map(args.map)
     hits = np.zeros(grid.occ.shape, int)
@@ -171,6 +199,22 @@ def main(argv=None) -> int:
         for (x, y, yaw), angles, ranges in located_scans(run, args.loc):
             lx, ly = x + LASER_X * math.cos(yaw), y + LASER_X * math.sin(yaw)
             accumulate(hits, passes, grid.res, grid.ox, grid.oy, lx, ly, yaw, angles[::2], ranges[::2])
+    if args.score_shares:
+        import yaml
+        from gap_follow import opponent_tracking as ot
+        if not args.check:
+            ap.error("--score-shares needs --check runs")
+        values = yaml.safe_load(Path(args.config).read_text())["gap_follow_node"]["ros__parameters"]
+        params = ot.OpponentParams.from_mapping(values)
+        poses, scans = [], []
+        for run in args.check:
+            for pose, angles, ranges in located_scans(run, args.loc, every=25):
+                poses.append(pose)
+                scans.append(ranges)
+        for row in score_shares(hits, passes, [float(v) for v in args.score_shares.split(",")], grid, poses,
+                                angles, scans, params, args.min_hits):
+            print(f"beam share {row['share']:.3f}: {row['fragments']:.3f} car-sized fragments per scan, real {row['real']:.3f}")
+        return 0
     walls = rebuild(grid.occ, hits, passes, args.min_hits, args.min_share)
     beams = open_walls(hits, passes, args.min_hits, args.beam_share)
     write_map(args.out, beams, grid.res, grid.ox, grid.oy)

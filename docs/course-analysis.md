@@ -37,6 +37,12 @@ All of them need ROS sourced, because they read the bag (the recording of a run'
 | `tools/f1tenth_sim/sweep2.py`, `summ2.py` | Compare settings over tracks, seeds, directions and floor frictions, then print the table |
 | `tools/run_analysis/car_measure.py` | Steering, speed loop, stops, odometry and LiDAR numbers for calibrating the simulator; see [sim-calibration.md](sim-calibration.md) |
 | `tools/run_analysis/scan_map.py` | Rebuilds a map's walls from where real scans landed |
+| `tools/run_analysis/run_summary.py` | What drove in each run of a day, for how long, how fast, how hard; did `/drive` reach the VESC (the motor controller)? No `loc.py` needed |
+| `tools/run_analysis/intent_report.py` | Why the car went the speed it did: which cap bound, every stall and how it ended, LB toggles, decisions in a time window or by course section |
+| `tools/run_analysis/spot.py` | One spot of the course close up: the map, each run's path, a real scan, a simulated trace, and what the driving [node](glossary.md#node) decided there |
+| `tools/f1tenth_sim/trace_deficit.py` | Where a simulated lap loses time against a perfect speed profile on its own path, and which cap bound |
+| `tools/f1tenth_sim/trace_multi.py` | Two or more cars in the simulator, with a per-tick log of why one of them slowed |
+| `tools/f1tenth_sim/pure_course.py` | `pure_pursuit` on a real course in the simulator, on a racing line (the path to follow) you give it |
 
 ## Worked example: run 20261030-185036
 
@@ -86,6 +92,23 @@ python3 tools/run_analysis/oa_replay.py $R
 
 `stops.py` prints nothing here, because this run contains no hard stop from above 2 m/s. Run `20261030-175124` has one.
 
+**Asking why, on the same run:**
+
+```bash
+python3 tools/run_analysis/run_summary.py --date 20261030
+python3 tools/run_analysis/intent_report.py data/racerbot_runs/20261030-175728
+python3 tools/run_analysis/spot.py --map $M --at 7.0,-9.8 $R --scan --intent --out /tmp/bend.png
+python3 tools/run_analysis/oa_replay.py $R --truth --map $M
+```
+
+**Working when:** `run_summary.py` prints a line per run of that day saying what drove it.
+
+On run `175728`, `intent_report.py` lists stalls bound by `follow cap`, several ended by `LB released`: the false-car stalls of 2026-10-30.
+
+`oa_replay.py --truth` reports how far each false "car" really moved and how far it sat from a mapped wall; on `185036` they sit on the walls.
+
+`oa_replay.py --ego true` tells the tracker the car's true speed and the gyro's turn instead of the wheels and the steering command. If false cars vanish, ego motion made them. On 2026-10-30 they did not.
+
 ## Reading the results
 
 **Grip is a curve, not a number.** The real car follows the request to about 2.5 m/s², then rolls off. Across all the runs of 2026-10-30, asking 3.25 got 2.6, asking 5.5 got 3.4, and asking 10 got about 4.2.
@@ -108,6 +131,15 @@ python3 tools/f1tenth_sim/summ2.py /tmp/sweep.jsonl
 Use at least six seeds. On 2026-10-30 a three-seed sweep made one setting look like a clear winner, and six seeds overturned it.
 
 `--friction` also works on `eval_gap.py`, `eval_gap_multi.py`, `sweep_gap.py` and `trace_gap.py`.
+
+To see where a simulated lap loses time:
+
+```bash
+python3 tools/f1tenth_sim/trace_gap.py --track course_2026_10_30_scans --floor sfu_course_2026_10_30 --timeout 60 --out /tmp/trace.csv
+python3 tools/f1tenth_sim/trace_deficit.py /tmp/trace.csv --lateral 3.0
+```
+
+**Working when:** it prints the lap time against a perfect profile on the same path (20.7 s against 16.4 s at 3 m/s² for the 3.5 m/s settings), then each 2.5 m with the time lost and the cap that bound.
 
 For this course, use the measured floor instead of a friction number: `--track course_2026_10_30_scans --floor sfu_course_2026_10_30`. It reproduces the real grip curve, steering and braking ([sim-calibration.md](sim-calibration.md)).
 

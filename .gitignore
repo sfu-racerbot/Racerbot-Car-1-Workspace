@@ -21,3 +21,4 @@ frames_*.pdf
 *.bak.*
 .oc-worktrees/
 .oc-runs/
+.mutation_backup/

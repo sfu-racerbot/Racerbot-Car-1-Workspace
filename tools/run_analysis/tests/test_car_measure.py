@@ -2,7 +2,7 @@
 
 Pure numpy, no bag and no ROS graph. Each oracle is named: a closed form recomputed
 here, an invariant, or a synthetic signal whose truth is known because the test built it.
-Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q
+Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ tools/dev/tests/ -q
 """
 import math
 import os

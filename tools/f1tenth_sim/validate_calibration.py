@@ -385,6 +385,24 @@ def table(cards: dict) -> str:
     return "\n".join(lines)
 
 
+def detail(cards: dict) -> str:
+    """Section by section speed, commanded speed and |steering|, and each card's grip bins."""
+    names = list(cards)
+    lines = ["section m  " + "  ".join(f"{n:>22s}" for n in names) + "   (true speed / command / |steer|)"]
+    count = max(len(c.get("sectors", [])) for c in cards.values())
+    for i in range(count):
+        cells = []
+        for n in names:
+            c = cards[n]
+            values = [c.get(k, [])[i] if i < len(c.get(k, [])) else math.nan for k in ("sectors", "sector_cmd", "sector_steer")]
+            cells.append("{:5.2f} {:5.2f} {:5.3f}".format(*values).rjust(22))
+        lines.append(f"{i * SECTOR:9.1f}  " + "  ".join(cells))
+    for n in names:
+        grip = cards[n].get("grip") or []
+        lines.append(f"grip {n}: " + " ".join(f"{g[0]}:{g[3]:.2f}" for g in grip))
+    return "\n".join(lines)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -420,6 +438,7 @@ def main(argv=None) -> int:
     g.add_argument("--out", required=True)
     t = sub.add_parser("table", help="print cards side by side, the first being the reference")
     t.add_argument("cards", nargs="+", help="name=path")
+    t.add_argument("--detail", action="store_true", help="also every section's speed and the grip bins")
     args = ap.parse_args(argv)
 
     if args.mode == "real":
@@ -451,7 +470,10 @@ def main(argv=None) -> int:
         return 0
 
     if args.mode == "table":
-        print(table({n: json.loads(Path(p).read_text()) for n, p in (c.split("=", 1) for c in args.cards)}))
+        cards = {n: json.loads(Path(p).read_text()) for n, p in (c.split("=", 1) for c in args.cards)}
+        print(table(cards))
+        if args.detail:
+            print(detail(cards))
         return 0
 
     import eval_gap

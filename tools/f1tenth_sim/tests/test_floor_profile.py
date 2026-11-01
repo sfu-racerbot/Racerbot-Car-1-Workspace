@@ -3,7 +3,7 @@
 The plain calibration must stay exactly as it was: every model here is off unless a floor
 profile turns it on. Oracles are named on each test: a closed form, an invariant, a
 cited measurement, or the plant's own geometry.
-Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q
+Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ tools/dev/tests/ -q
 """
 import math
 import os

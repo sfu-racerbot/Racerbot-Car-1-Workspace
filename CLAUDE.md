@@ -29,9 +29,11 @@ source /opt/ros/jazzy/setup.bash && source install/setup.bash
 export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # never the car's graph
 python3 -m pytest src/<pkg>/test/ -v                              # one package
 colcon test --packages-select <pkg> && colcon test-result --verbose
-python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q   # the tool suites
+python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ tools/dev/tests/ -q   # the tool suites
 ```
-The three tool suites are not colcon packages, so `colcon test` never runs them; the last line does (580 tests from 480 `def test` on car 2, 2026-10-29, the rest parametrized; car 1 had 472 from 382).
+**Helpers that do this for you** (`docs/dev-tools.md`): `tools/dev/rostest.sh <paths> -q` runs pytest sourced, on domain 79, with this checkout's `src/` first (works from a worktree); `tools/dev/mutation_check.py <breaks.yaml>` automates Hard rule 1 (specs in `tools/dev/breaks/`); `tools/dev/node_start_check.sh 6 ros2 run ...` checks a floor command starts, on the isolated domain. Before writing a one-off analysis script, check `docs/course-analysis.md` and `docs/sim-calibration.md`: run summaries, `/drive_intent` stall reports, scan-to-map localisation, true laps and sectors, grip curves, stops, tracker replay, spot plots, car measurement and simulator calibration already exist as tested tools.
+
+The four tool suites are not colcon packages, so `colcon test` never runs them; the last line does (580 tests from 480 `def test` on car 2, 2026-10-29, the rest parametrized; 743 on branch `worktree-gap-follow-speed`, 2026-10-31; car 1 had 472 from 382).
 Verified 2026-08-22: unsourced, `src/pure_pursuit/test/` collects 185 of 274 and aborts on 5 collection errors, `gap_follow` hides 70, and `usb_cam_stream` collects nothing at all. **Never reach for `--continue-on-collection-errors`** — it turns that loud abort into a green run over a fifth of the suite. Compare the collected count against `grep -c '^def test' src/<pkg>/test/*.py`.
 
 `drive_intent`, `odom_calibration`, `race_diagnostics`, `racerbot_sim`, and (apart from one rclpy file) `web_dashboard` are pure Python and do run unsourced — that is the pattern to follow for any new package with non-trivial math or parsing: keep the logic importable without `rclpy` (`pure_pursuit/racing_math.py`, `web_dashboard/protocol.py`, all of `drive_intent`).

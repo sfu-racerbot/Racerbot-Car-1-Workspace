@@ -2,7 +2,7 @@
 
 Pure functions on synthetic data whose answer the test built. The simulated and real
 sides are scored by these same functions, so a fault here would flatter both alike.
-Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q
+Run by: python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ tools/dev/tests/ -q
 """
 import math
 import os

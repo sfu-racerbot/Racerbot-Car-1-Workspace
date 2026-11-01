@@ -174,6 +174,16 @@ def stop_distance(v0: float, delay: float, gain: float, brake_max: float, end_sp
     return distance
 
 
+def fit_braking(stops, delays, gains, maxima, end_speed: float = 0.28) -> list:
+    """Every (delay, gain, ceiling), best first, by squared relative distance error over
+    ``stops`` of (true start speed m/s, measured distance m)."""
+    rows = []
+    for delay, gain, top in itertools.product(delays, gains, maxima):
+        error = sum(((stop_distance(v0, delay, gain, top, end_speed) - d) / d) ** 2 for v0, d in stops)
+        rows.append((error, delay, gain, top))
+    return sorted(rows)
+
+
 # --- odometry --------------------------------------------------------------------------
 
 def speed_ratio(wheel, true_v, min_speed: float = 1.0) -> float:
@@ -371,11 +381,23 @@ def lidar_report(run, self_range: float = 0.45) -> dict:
 def main(argv=None) -> int:
     from run_analysis.loc import DEFAULT_OUT
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("runs", nargs="+", help="run directories located with loc.py")
+    ap.add_argument("runs", nargs="*", help="run directories located with loc.py")
     ap.add_argument("--loc", default=str(DEFAULT_OUT), help="where loc.py wrote (default %(default)s)")
     ap.add_argument("--json", help="also write the numbers here")
     ap.add_argument("--lidar", action="store_true", help="report each run's LiDAR instead; needs no loc.py")
+    ap.add_argument("--fit-stop", action="append", default=[], metavar="SPEED,METRES",
+                    help="fit braking to measured stops (true start speed, wall distance) instead; no runs read")
+    ap.add_argument("--check-stop", action="append", default=[], metavar="SPEED,METRES",
+                    help="with --fit-stop: held-out stops to predict with the best fits")
     args = ap.parse_args(argv)
+    if args.fit_stop:
+        fit = [tuple(float(v) for v in s.split(",")) for s in args.fit_stop]
+        check = [tuple(float(v) for v in s.split(",")) for s in args.check_stop]
+        rows = fit_braking(fit, np.arange(0.0, 0.2001, 0.025), np.arange(2.0, 14.01, 1.0), np.arange(2.5, 9.01, 0.25))
+        for error, delay, gain, top in rows[:8]:
+            held = "; ".join(f"{v0:.2f} m/s: {stop_distance(v0, delay, gain, top):.2f} m (real {d:.2f})" for v0, d in check)
+            print(f"delay {delay:.3f} s, gain {gain:.1f}/s, ceiling {top:.2f} m/s^2: error {error:.4f}" + (f" | {held}" if held else ""))
+        return 0
     if args.lidar:
         out = [lidar_report(run) for run in args.runs]
         text = json.dumps(out, indent=1)
