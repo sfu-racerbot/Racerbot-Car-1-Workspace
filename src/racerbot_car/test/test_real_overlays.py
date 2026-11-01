@@ -19,12 +19,3 @@ OVERLAYS = sorted(CARS.glob('*/calibration/*.yaml'))
 def test_calibration_overlay_valid(overlay):
     assert guards.check_calibration_overlay(overlay, overlay.name) == []
     assert layers.check_block_keys_match(str(CONFIGS[overlay.name]), str(overlay)) == []
-
-
-@pytest.mark.parametrize('overlay', sorted((CARS / 'rb1/calibration').glob('*.yaml')))
-def test_rb1_overlay_values_equal_shared_values_today(overlay):
-    # Oracle: shared copies remain unchanged until a later task removes them.
-    shared = guards.overlay_blocks(CONFIGS[overlay.name])
-    for block, values in guards.overlay_blocks(overlay).items():
-        for key, value in values.items():
-            assert shared[block][key] == value

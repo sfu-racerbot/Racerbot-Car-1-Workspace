@@ -33,7 +33,7 @@ neural_racer_node:
     # keeps 2.0 (training cap unchanged). See src/neural_racer/test/test_config.py.
     # max_invalid_fraction is neural_racer's own value; gap_follow has no such key.
     # Each can only lower speed.
-    max_steering_angle: 0.33
+    # per car: src/racerbot_car/cars/<id>/calibration/neural_racer.yaml
     car_width: 0.31
     car_length: 0.58
     wheelbase: 0.36

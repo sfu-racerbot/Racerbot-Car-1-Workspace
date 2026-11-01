@@ -33,13 +33,13 @@ odom_calibration_node:
 
     # --- This car ------------------------------------------------------------
     # Change these for another car; nothing else in the wizard is car-specific.
-    vehicle_model: "Traxxas Ford Fiesta ST Rally VXL 74276-4 (car 1)"
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
     physical_width_m: 0.30
     physical_length_m: 0.535
     # Largest steering angle any driving node may request (gap_follow.yaml and
     # pure_pursuit.yaml max_steering_angle). The clamp check warns when
     # servo_min/servo_max cut it short on either side.
-    planner_max_steering_rad: 0.33
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
     # Rear tire centre to centre (m). Turns an inner-tire-only circle into
     # the rear-axle circle: radius = (inner diameter + track) / 2. 0.27 m came
     # from the inner and outer circles of 2026-10-10 (outer - inner = 2 x
@@ -48,11 +48,11 @@ odom_calibration_node:
 
     # Fallbacks, used only until the live values are read from the running
     # nodes (vesc_to_odom_node, ackermann_to_vesc_node, vesc_driver_node).
-    speed_to_erpm_gain: -4040.0
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
     speed_to_erpm_offset: 0.0
-    steering_angle_to_servo_gain: -0.83
-    steering_angle_to_servo_offset: 0.366
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
     # Measured 2026-08-24, front axle to rear axle. Matches vesc.yaml.
     wheelbase: 0.36
-    servo_min: 0.05
-    servo_max: 0.75
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml
+    # per car: src/racerbot_car/cars/<id>/calibration/odom_calibration.yaml

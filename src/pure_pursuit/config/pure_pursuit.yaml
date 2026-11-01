@@ -158,7 +158,7 @@ pure_pursuit_node:
     # plans to 0.30 so this controller keeps ~2 deg to correct with on the
     # tightest planned corner. NOT yet validated on car 1: wheels up first.
     # Re-derive both if vesc.yaml's gain/offset/servo_min/servo_max ever change.
-    max_steering_angle: 0.33
+    # per car: src/racerbot_car/cars/<id>/calibration/pure_pursuit.yaml
 
     # --- Safety watchdogs ---
     pose_timeout_sec: 0.5         # stop if localization hasn't updated within this long

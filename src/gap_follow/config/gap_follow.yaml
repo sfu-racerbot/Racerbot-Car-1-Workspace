@@ -121,7 +121,7 @@ gap_follow_node:
     # docs/hardware-reference.md); 0.33 leaves ~3 deg for gain error. Must fit
     # inside vesc.yaml's servo clip (test_steering_limits_fit_servo.py).
     # NOT yet validated on car 1: wheels up first.
-    max_steering_angle: 0.33
+    # per car: src/racerbot_car/cars/<id>/calibration/gap_follow.yaml
     # Steering is proportional to the selected gap's bearing, clipped to
     # max_steering_angle: 1.0 means "point the wheels at the gap". This
     # replaced a Pure Pursuit curvature law that could not physically ask for
@@ -465,7 +465,7 @@ gap_follow_node:
     # Authority bound, checked at startup: at most half of max_steering_angle.
     # Car 1: 0.165 = half of its 0.33 (car 2 uses 0.1745, half of its 0.349);
     # gap_follow_node refuses to start if this exceeds half.
-    arc_guard_max_correction: 0.165
+    # per car: src/racerbot_car/cars/<id>/calibration/gap_follow.yaml
     arc_guard_candidates: 29       # steering angles tried across the full range
     # When no arc within the bound is clear: 'freest' takes the one with the
     # most free length, 'request' leaves the gap's own choice. 'freest' can
