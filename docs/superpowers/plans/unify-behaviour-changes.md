@@ -21,6 +21,7 @@ Everything here except the data paths, the IMU file location and the simulator f
 - **map_course maps on the gyro.** slam_toolbox and auto_map_race run on `odom_imu`, vehicle_state_node publishes `odom_imu -> odom`, and slam_toolbox takes car 2's `slam_gyro` loop-closure settings: search space and distance 8.0 m to 3.0 m, chain size 20 to 10, coarse angle offset 0.349 to 0.175 rad at 0.0175 rad steps, angle variance penalty 1.0 to 0.01, minimum angle penalty 0.9 to 0.5 (car 2's `ca79651` and `d450764`). Car 1 has not mapped with these settings on the floor.
 - **Recording and mapping code.** auto_record catches more of a run's start and reports failures (`4ec8e7b`); map_course rebuilds the map from the bag after every run, finished or stopped, and prints only the follow-up commands (`4120aed`, `b6481be`, `60316bd`); auto_map_race counts a SLAM correction as motion odometry did not see (`949cb6e`). These change behaviour without changing a launch parameter, so only the simulator and the unit tests cover them.
 - **dashboard_test_launch** starts no second dashboard unless `dashboard:=true` (decision 16).
+- **The dashboard's run-delete panel** lists car 1's own `data/rb1/racerbot_auto` and `data/rb1/racerbot_sim/auto` instead of `~/.ros/racerbot_auto` and `~/.ros/racerbot_sim/auto` (decision 15, Task 15b, approved 2026-11-01). Runs older than 2026-10-31 still under `~/.ros/` are no longer listed.
 - **Data paths.** Runs and maps go under `data/rb1/` instead of `data/` (Phase 2).
 - **IMU calibration** is read from `src/racerbot_car/cars/rb1/imu/car.yaml` (Phase 2, Task 9), byte-identical to car 1's old `tools/imu_calibration/config/car.yaml`.
 - **Simulator full lock.** Both simulators model car 1's own full lock (left +0.401 rad measured, right -0.463 rad computed) instead of car 2's (+0.509 / -0.448 rad). Autonomy is capped at 0.33 rad on car 1, so no controller reaches either. Details under Task 12e below.
@@ -202,6 +203,12 @@ Phase 2: each car's runs and maps are written under data/<car>/ (paths now resol
 Phase 2 (Task 9): each car's IMU calibration lives in its profile, cars/<car>/imu/, inside this workspace.
 
 - `rb1 ~ /imu_bridge_node car_yaml "" -> "<WS>/src/racerbot_car/cars/rb1/imu/car.yaml"` (gap_follow-default, gap_follow-fused, gap_follow-no-boost, gap_follow-no-opponent, gap_follow-opponent-slow, imu-bridge, imu-vehicle-state, map-course)
+
+#### rb1: d15-dashboard
+
+Decision 15: the dashboard's run-delete roots are this car's own data/<car>/ (car 1: Task 15b, from ~/.ros/; car 2: data/ to data/rb2/).
+
+- `rb1 ~ /web_dashboard_node map_roots ["~/.ros/racerbot_auto", "~/.ros/racerbot_sim/auto"] -> ["~/racerbot-ws/data/rb1/racerbot_auto", "~/racerbot-ws/data/rb1/racerbot_sim/auto"]` (dashboard, sim-auto-map-dashboard)
 
 #### rb1: d16-dashboard-test
 
