@@ -7,7 +7,7 @@
 How to capture everything needed to work out what a run did — and how to
 hand that to a person or an AI agent so they can act on it.
 
-This exists because of a debugging session on **2026-07-27** in which four
+This exists because of a debugging session on **2026-07-27** (TODO(verify): which car) in which four
 separate faults stacked on top of each other, each one hiding the next.
 Every recommendation below is here because its absence cost real time or a
 real collision that night. The postmortem is at the end.
@@ -45,7 +45,7 @@ one for a run that is not an algorithm (manual driving, say).
 - **Cannot move the car.** It creates no publisher and no subscription: it
   only reads the list of nodes and topics, the way `ros2 node list` does.
 
-**Why it exists:** on 2026-10-26 the races against team A were run with
+**Why it exists:** on 2026-10-26 the races against team A (TODO(verify): which car) were run with
 plain `gap_follow_launch.py`, and nothing recorded them. All that was left
 was the node's one-line-a-second log, which cannot show what the car saw or
 how smoothly it steered.
@@ -152,10 +152,11 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    bringup. `rosbag2_player` is there because it is a bag being played back.
 2. An algorithm that has been up for `start_delay_sec` (1.5 s) starts a
    recording, unless another recorder is on the graph. The delay gives a
-   launch that brings its own recorder (`map_course`) time to get it up:
-   measured on the car, `map_course`'s recorder appears about 1 s after its
-   algorithm. If one still arrives later, the recording stops and is labelled
-   `superseded: true`.
+   launch with its own recorder (`map_course`) time to start it.
+
+   In one measurement, the recorder appeared about 1 s after the algorithm
+   (TODO(verify): which car). If it arrives later, the recording stops and is
+   labelled `superseded: true`.
 3. **Another recorder** is any node named `race_diag_node` or
    `rosbag2_recorder*`. The recording `auto_record` starts is
    `record_run.py` run with `name_prefix:=auto_`, so its own nodes are
@@ -170,7 +171,7 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
 
 **Why the bag is started separately.** Starting a recording starts `ros2 bag record`
 first and on its own, and `record_run.py` with `record_bag:=false` only once the bag
-is live (or after 5 s). Measured on the Jetson on 2026-10-31:
+is live (or after 5 s). Measured on a Jetson on 2026-10-31 (TODO(verify): which car):
 
 | How the bag is started | Start of recording to topics subscribed |
 |---|---|
@@ -178,12 +179,13 @@ is live (or after 5 s). Measured on the Jetson on 2026-10-31:
 | Beside `record_run.py`, both at once | Slower than alone: the two compete for the CPU |
 | Alone | 1.4 to 2.6 s in that timing run; up to about 4 s in the test suite |
 
-On 2026-10-30, with the 3 s delay and the first row, the bag began about 9 to 10 s after
-the launch command, and two runs (`20261030-183134`, `-184149`) were already moving at
-2.3 and 3.5 m/s at their first `/odom`.
+On car 2 on 2026-10-30, with the 3 s delay and the first row,
+the bag began about 9 to 10 s after the launch command. Two runs
+(`20261030-183134`, `-184149`) were already moving at 2.3 and 3.5 m/s at
+their first `/odom`.
 
 **How much of a run's start the bag misses now.** This is from the algorithm's first
-message to the bag's first message, measured on the Jetson on 2026-10-31 with two small test topics:
+message to the bag's first message, measured on a Jetson on 2026-10-31 with two small test topics (TODO(verify): which car):
 
 | Recorder | Missed | Median | Runs |
 |---|---|---|---|
@@ -440,7 +442,7 @@ the log line reports every one as `value/limit`:
 |---|---|---|
 | departed the start | `departure_distance` | never leaves the start area |
 | distance travelled | `minimum_lap_distance` | loop shorter than the minimum can never close |
-| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session, and silently unreported by `summarize_run` before that day's regex fix |
+| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session (TODO(verify): which car), and silently unreported by `summarize_run` before that day's regex fix |
 | elapsed time | `minimum_lap_duration_sec` (4.0 s), then also `minimum_lap_duration_fraction` (0.5) of the previous lap | The first lap needs 4 s. Later laps need the larger of 4 s and half the previous lap's time, so the gate follows the course length. The former fixed 15 s blocked short, fast laps; the 300° turning gate still applies. |
 | back near the start | `closure_distance` | passes the start but too wide |
 | heading matches start | `closure_heading_deg` | comes back the "wrong way round" |
@@ -522,7 +524,7 @@ output directory. It does not write into either run.
    is shown for the whole run and for each lap window. Each lap's scans are
    placed using the poses SLAM published at that time, then compared with the
    final map. Later loop closures can move the map, so early laps may score
-   lower even when the final map is not wrong. In the 19:49 run, laps 1 and 2
+   lower even when the final map is not wrong. In car 1's 19:49 run, laps 1 and 2
    scored 19–27%, while lap 4 scored 55%. Compare corresponding laps between
    runs rather than treating an early-to-late difference as a map fault.
 6. **Scan drops** counts dropped scan messages recorded on `/rosout`. The
@@ -532,7 +534,7 @@ output directory. It does not write into either run.
    map-frame path over the same time span. A ratio near 1 means their lengths
    agree, though it does not establish that either path is accurate.
 
-For example, run `20261026-194913` used `odom_imu` in both the parameter
+For example, car 1's run `20261026-194913` used `odom_imu` in both the parameter
 snapshot and the transforms. The final heading difference between `/odom/imu`
 and SLAM was −16.44°, compared with 102.61° for `/odom` and SLAM. The report
 found 32 scan drops, but that older recording has no system log, so CPU use
@@ -567,7 +569,7 @@ It takes the last `/map` in the bag and matches every scan against it, using odo
 - **Fit:** the share of beams ending on a wall. Low means the map does not match the world. Limits: 0.90 on average, and 0.70 over its worst stretch.
 - **See-through:** the share of beams that pass through a mapped wall before they end, which a laser cannot do. High means walls are drawn twice. Limit: 15%.
 
-Fit alone cannot catch a doubled map, because a beam ending on either copy of a wall still counts: run `20261030-184556`'s doubled map fits at 0.97. Why these scores, and how they did against an independent reference: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+Fit alone cannot catch a doubled map, because a beam ending on either copy of a wall still counts: car 2's run `20261030-184556` has a doubled map that fits at 0.97. Why these scores, and how they did against an independent reference: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
 
 A map that passes gets `raceline_profiled.csv`, capped at 1.5 m/s (`--max-speed` changes it), with `raceline_2p5.csv` and `raceline_4p0.csv` beside it. A refused map gets no line, so `race_launch.py` refuses that folder too. The numbers are in `rebuild.json`.
 
@@ -575,7 +577,7 @@ The check starts from SLAM's own pose when that fits as well as the best place a
 
 ## When mapping fails: the tools, in order
 
-These are the tools that found what was wrong on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.
+These are the tools that found what was wrong on car 2 on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.
 
 **Terminal: any, with ROS sourced (`source /opt/ros/jazzy/setup.bash && source install/setup.bash`). None of them moves the car.**
 
@@ -653,7 +655,7 @@ the replay's messages on a separate ROS graph from the car.
 ### Run an exact replay
 
 In one terminal at the workspace root, replace `RUN_DIR` with the recorded run
-folder. This example uses `odom_imu`, the wheel-and-gyro odometry used by run
+folder. This example uses `odom_imu`, the wheel-and-gyro odometry used by car 1's run
 `20261026-194913`. Use `--odom odom` for a recording mapped on wheel odometry.
 
 ```bash
@@ -831,9 +833,9 @@ In all-scans mode, unbracketed boundary scans cannot have this acknowledgement;
 the feeder yields between sends so
 SLAM can handle them through its TF filter.
 
-### Measured result on the 19:49 run
+### Measured result on car 1's 19:49 run
 
-Run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
+Car 1's run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
 matches a distinct recorded scan. The SLAM report's **314 updates** count
 changes between successive `map → odom_imu` corrections; the initial
 correction is identity. That count does not mean a pose lacks its scan.
@@ -1014,7 +1016,7 @@ then automatic handover to pure pursuit]
 [e.g. handover completed, car accelerated, then hit a wall on the left]
 
 ## Recorded evidence
-Run directory: ~/racerbot-ws/data/racerbot_runs/<dir>
+Run directory: ~/racerbot-ws/data/<id>/racerbot_runs/<dir>
 - launch.log       full terminal output of every node
 - events.jsonl     probe stream: pipeline state + pose lag
 - bag/             replayable with `ros2 bag play <dir>/bag --clock`
@@ -1074,6 +1076,8 @@ Run directory: ~/racerbot-ws/data/racerbot_runs/<dir>
 ---
 
 ## Postmortem: 2026-07-27
+
+TODO(verify): which car was used in this session.
 
 Four faults, each hiding the next. In the order they had to be peeled:
 

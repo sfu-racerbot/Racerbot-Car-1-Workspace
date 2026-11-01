@@ -44,11 +44,11 @@ source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch racerbot_launch camera_launch.py
 ```
 
-**Working when:** the camera inset on the site fills in within a few seconds.
+**Working when:** the camera inset on the site fills in within a few seconds. On car 1, if the webcam is unplugged, the stream keeps running and logs that it is waiting for `/dev/video0`.
 
 `camera_launch.py` selects `webcam_launch.py` for car 1's UVC webcam and `realsense_camera_launch.py` for car 2's RealSense (source: [`camera_launch.py`](../src/racerbot_launch/launch/camera_launch.py)).
 
-**Everything but the driving stack, in one command** (LiDAR, RealSense, camera stream — for bench testing): `ros2 launch racerbot_launch dashboard_test_launch.py`. It leaves the dashboard to the boot service; add `dashboard:=true` only on a machine without it.
+**Everything but the driving stack, in one command** (LiDAR and the selected car's camera stream, for bench testing): `ros2 launch racerbot_launch dashboard_test_launch.py`. It leaves the dashboard to the boot service; add `dashboard:=true` only on a machine without it.
 
 **With the simulator:** `ros2 launch racerbot_sim sim_auto_map_race_launch.py track:=indoor_wide` — the boot service's dashboard shows it, so leave `dashboard:=` at its default `false` on car 2 ([sim-validation.md](sim-validation.md)).
 
@@ -64,6 +64,14 @@ ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --ca
 ```
 
 **Working when:** it ends with `Everything this car can check is fine`. Then open https://dashboard.sfuracerbot.ca/rb2/check for the site's side. Together they name the hop that fails.
+
+For car 1, use Terminal 1 on car 1:
+
+```bash
+ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1
+```
+
+**Working when:** it ends with `Everything this car can check is fine`. Open https://dashboard.sfuracerbot.ca/rb1/check for the site's side.
 
 Car 1's tunnel is the `rb1` tunnel in the team's Cloudflare account. A **tunnel** is `cloudflared`, a system service on the car that holds one outgoing connection to Cloudflare; each **route** maps a public hostname to a port on the car. Car 1's routes:
 
@@ -95,7 +103,9 @@ Setting one up from scratch: [web-dashboards/car/README.md](../src/web_dashboard
 
 Edit [`web_dashboard_rb1.yaml`](../src/racerbot_launch/config/web_dashboard_rb1.yaml) for car 1 or [`web_dashboard_rb2.yaml`](../src/racerbot_launch/config/web_dashboard_rb2.yaml) for car 2. The package YAML in the submodule holds generic defaults. [`dashboard_launch.py`](../src/racerbot_launch/launch/dashboard_launch.py) loads the running car's settings, with site ID `rb1` or `rb2`.
 
-Car 2's run-delete panel uses `data/rb2/racerbot_auto` and `data/rb2/racerbot_sim/auto`. Car 1's YAML currently lists `~/.ros/racerbot_auto` and `~/.ros/racerbot_sim/auto` instead. The launch loads these settings without replacing the roots ([`dashboard_launch.py`](../src/racerbot_launch/launch/dashboard_launch.py), [`web_dashboard_launch.py`](../src/web_dashboards/car/ros/web_dashboard/launch/web_dashboard_launch.py)).
+Each car's run-delete panel lists only its own `data/<id>/racerbot_auto` and `data/<id>/racerbot_sim/auto`. On car 1 these are `~/racerbot-ws/data/rb1/racerbot_auto` and `~/racerbot-ws/data/rb1/racerbot_sim/auto`. On car 2 they are `~/racerbot-ws/data/rb2/racerbot_auto` and `~/racerbot-ws/data/rb2/racerbot_sim/auto` (decision 15, Task 15b).
+
+Runs saved before 2026-10-31 that remain under `~/.ros/racerbot_auto` or `~/.ros/racerbot_sim/auto` are no longer listed. Delete those by hand.
 
 A root inside a git working tree is allowed; demo maps in `src/particle_filter/maps` remain refused by name ([`mapstore.py`](../src/web_dashboards/car/ros/web_dashboard/web_dashboard/mapstore.py)). After deleting a committed run, use `git rm` as well so `tools/save_runs.sh` sees the deletion.
 
@@ -105,7 +115,7 @@ Then check it before trusting it — **Terminal 1, from `~/racerbot-ws`:**
 python3 -m pytest src/racerbot_launch/test/ -v
 ```
 
-**Working when:** every test passes. They catch a misspelt key (which ROS would otherwise silently ignore), a LiDAR offset that disagrees with the bringup launches' transform, a site origin that disagrees with the site's own, and a stoppable process or map folder the dashboard would silently drop.
+**Working when:** every test passes. They catch misspelt keys, which ROS would otherwise silently ignore. They also check the LiDAR offset against the bringup transform, the site origin and the configured processes and map folders.
 
 ## Live tuning and the contract with the driving nodes
 
@@ -115,7 +125,9 @@ The tuning panel reaches `pure_pursuit_node` and `gap_follow_node` because each 
 
 That agreement — the spec format, who enforces bounds, how "save" rewrites `config/*.yaml` — now spans two repos. It is written down in [web-dashboards/car/docs/web-dashboard.md, "The live_tunable_spec contract"](../src/web_dashboards/car/docs/web-dashboard.md#the-live_tunable_spec-contract).
 
-This workspace's half is tested in `src/gap_follow/test/test_gap_follow_live_tuning.py` and `src/pure_pursuit/test/test_pure_pursuit_live_tuning.py`: each node's real spec must parse with the dashboard's `tuning.parse_spec`, and each node's live config must round-trip through the dashboard's YAML writer. **Change a spec or a config's shape and run those.**
+This workspace's half is tested in `src/gap_follow/test/test_gap_follow_live_tuning.py` and `src/pure_pursuit/test/test_pure_pursuit_live_tuning.py`. Each [node](glossary.md#node), a running ROS program, must provide a spec that parses with the dashboard's `tuning.parse_spec`.
+
+Each live config must round-trip through the dashboard's YAML writer. **Change a spec or a config's shape and run those.**
 
 ## The dashboard's boot service
 
@@ -144,19 +156,27 @@ sudo src/racerbot_launch/systemd/install.sh racerbotcar-2 /home/racerbotcar-2/ra
 
 **Working when:** it prints `active (running)`, and `journalctl -u racerbot-dashboard -n 20` shows `Serving the WebSocket (/ws) on port 8080`. **If it doesn't:** `install/racerbot_launch not found` means the workspace isn't built; build it first. A unit that keeps restarting usually means the same — `journalctl` shows the Python error.
 
-`src/racerbot_launch/test/test_dashboard_service.py` checks the unit runs `dashboard_launch.py` (not the bare launch, which allows no site), joins the same graph as the bridge's unit, restarts on any exit, and that `install.sh` fills in every placeholder.
+`src/racerbot_launch/test/test_dashboard_service.py` checks the unit runs `dashboard_launch.py`, because the bare launch allows no site. The test also checks the graph, restart policy and installer placeholders.
 
 ## The Lichtblick bridge's boot service
 
 `foxglove-bridge.service` starts foxglove_bridge at boot. Its unit and wrapper now live in the submodule (`src/web_dashboards/car/systemd/`), and the bridge's launch file in `web_dashboard`. **Browsers can publish to no topic through it** — see [foxglove-bridge.md](foxglove-bridge.md).
 
-It was reinstalled from the submodule on 2026-09-27. To reinstall it again — after moving the workspace, say — **Terminal 1, on the car** (needs sudo):
+It was reinstalled on car 2 from the submodule on 2026-09-27. To reinstall it again, use Terminal 1 on car 2 (needs sudo):
 
 ```bash
 sudo ~/racerbot-ws/src/web_dashboards/car/systemd/install.sh racerbotcar-2 /home/racerbotcar-2/racerbot-ws
 ```
 
-**Working when:** it prints `active (running)`, `systemctl cat foxglove-bridge` shows `ExecStart=/home/racerbotcar-2/racerbot-ws/src/web_dashboards/car/systemd/foxglove-bridge.sh`, and `journalctl -u foxglove-bridge -n 20` shows `Server listening on port 8765`.
+**Working when:** it prints `active (running)`. `systemctl cat foxglove-bridge` shows `ExecStart=/home/racerbotcar-2/racerbot-ws/src/web_dashboards/car/systemd/foxglove-bridge.sh`. `journalctl -u foxglove-bridge -n 20` shows `Server listening on port 8765`.
+
+On car 1, where it was installed in October 2026, use Terminal 1 on car 1:
+
+```bash
+sudo ~/racerbot-ws/src/web_dashboards/car/systemd/install.sh racerbotcar-1 /home/racerbotcar-1/racerbot-ws
+```
+
+**Working when:** it prints `active (running)` and `systemctl cat foxglove-bridge` names `/home/racerbotcar-1/racerbot-ws/src/web_dashboards/car/systemd/foxglove-bridge.sh`. The journal shows `Server listening on port 8765`.
 
 (Before the move the unit ran `tools/systemd/foxglove-bridge.sh` → `ros2 launch racerbot_launch foxglove_bridge_launch.py`. Both were removed once the unit was reinstalled; if `systemctl cat foxglove-bridge` still names `tools/systemd/foxglove-bridge.sh`, run the command above. Today's `tools/systemd/` holds car 1's other services, next section.)
 

@@ -115,12 +115,38 @@ LiDAR
 
 The camera never fails the run (team decision, 2026-10-01): the car drives without it, so camera problems show as `WARN`.
 
+This car 1 example was captured on 2026-10-20 with bringup and teleop running. Car 1 would not move with LB held:
+
+```
+LiDAR
+  PASS  USB device                         15d1:0000 at 1-2.2
+  PASS  kernel driver                      cdc_acm -> /dev/ttyACM0
+  PASS  /dev/sensors/hokuyo                -> ttyACM0, read/write OK
+  PASS  serial port free                   held only by urg_node_driver
+  PASS  ROS driver urg_node_driver         running (pid 87877)
+  PASS  /scan rate                         38.7 Hz
+  PASS  /scan content                      1081 beams, 100% with a return
+
+Joystick
+  PASS  USB receiver                       F710 in XInput mode (this cannot tell whether the controller itself is switched on)
+  PASS  kernel driver                      xpad -> /dev/input/js0
+  FAIL  input permissions                  event5: joy_node reads /dev/input/event5 and you cannot -- it will run, find no controller, and publish no /joy, so the car cannot be driven
+                                           fix: `sudo usermod -aG input $USER`, log out and in (or reboot), then restart bringup
+  SKIP  ROS driver joy_node .. /joy rate  (2 layers) blocked by: input permissions
+
+Drive path (teleop)
+  FAIL  /joy rate                          no /joy, so joy_teleop has nothing to act on -- see Joystick above
+  SKIP  /teleop rate .. motor command  (5 layers) blocked by: /joy rate
+```
+
 ## What it checks, device by device
 
 <details>
 <summary>The full layer list and thresholds. Skip this unless you're changing the doctor or a threshold.</summary>
 
-Hardware addresses and device paths come from `src/racerbot_car/cars/ID/car.yaml`. Driver defaults and thresholds live in [`racerbot_doctor/car.py`](racerbot_doctor/car.py), beside their sources. LiDAR calibration is in each car's `calibration/sensors.yaml`.
+Hardware addresses and device paths come from `src/racerbot_car/cars/ID/car.yaml`. Driver defaults and thresholds live in [`racerbot_doctor/car.py`](racerbot_doctor/car.py), beside their sources; [`checks.py`](racerbot_doctor/checks.py) implements the ladders.
+
+LiDAR calibration is in each car's `calibration/sensors.yaml`. The profile selects `SerialLidarSpec` and `UvcCameraSpec` for rb1, `EthernetLidarSpec` and `RealSenseSpec` for rb2.
 
 | Device | Layers, bottom → top |
 |---|---|
@@ -145,7 +171,7 @@ Hardware addresses and device paths come from `src/racerbot_car/cars/ID/car.yaml
 | under 10.8 V (3.6 V/cell) | `WARN`: low |
 | over 12.75 V (4.25 V/cell) | `WARN`: more than a full 3S pack. Is a 4S pack fitted? |
 
-Limits: the per-cell figure is the total divided by 3. The VESC can't see individual cells, so one bad cell can hide behind a healthy total. The reading hasn't yet been checked against a multimeter on this car.
+Limits: the per-cell figure is the total divided by 3. The VESC can't see individual cells, so one bad cell can hide behind a healthy total. TODO(verify): which car's reading had not been checked against a multimeter when this was written.
 
 **Why `js0` being readable isn't enough.** Jazzy's `joy_node` uses SDL2, which opens the gamepad's `/dev/input/event*` device file, not `js0`. On the Jetsons `js0` is world-readable but `event*` is `root:input`, mode `0660`.
 
