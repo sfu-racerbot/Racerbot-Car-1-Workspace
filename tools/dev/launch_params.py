@@ -113,6 +113,10 @@ def normalize(obj, ws_root, sandbox=None, *, matrix_dir=None):
 
 
 def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=None):
+    # Finalize cyclic ROS launch objects from the preceding capture before its
+    # temporary parameter files can be mistaken for writes by this sandbox.
+    import gc
+    gc.collect()
     if sandbox is None:
         with tempfile.TemporaryDirectory(prefix='launch_params_') as directory:
             return capture(launch_file, launch_args, ws_root, sandbox=directory, matrix_dir=matrix_dir)
