@@ -30,6 +30,12 @@ def test_serial_empty_is_none(tmp_path):
     assert identity.read_serial(str(path)) is None
 
 
+def test_serial_strips_embedded_nul(tmp_path):
+    path = tmp_path / 'serial'
+    path.write_bytes(b'12\x003')
+    assert identity.read_serial(str(path)) == '123'
+
+
 def test_known_car_ids_requires_pattern_and_car_yaml(tmp_path):
     for name in ('rb1', 'rb2', 'notacar'):
         (tmp_path / name).mkdir()

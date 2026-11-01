@@ -1,10 +1,16 @@
 # Car identity and profiles
 
-> **Who this is for:** developers configuring the workspace for a car or simulator.
+> **Who this is for:** developers configuring the workspace (the shared project folder) for a car or simulator.
 > **Read first:** [Hardware reference](../../docs/hardware-reference.md) for the car's devices.
 > **What's in it:** identity resolution, profile locations and adding a car.
 
 `racerbot_car` identifies the car, loads its hardware profile and locates its data.
+
+## Highlights
+
+- Resolves a car ID from the Jetson serial or a development override.
+- Refuses a conflicting override rather than selecting the wrong car.
+- Validates hardware profiles and locates per-car data without creating folders.
 
 ## Identity resolution
 

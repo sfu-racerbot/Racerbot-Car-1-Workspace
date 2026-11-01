@@ -24,7 +24,7 @@ class CarMismatchError(RuntimeError):
 
 def read_serial(path: str = SERIAL_PATH) -> str | None:
     try:
-        serial = Path(path).read_text().strip('\x00 \t\r\n\v\f')
+        serial = Path(path).read_text().replace('\x00', '').strip()
     except (OSError, UnicodeError):
         return None
     return serial or None
