@@ -159,6 +159,7 @@ def test_a_dashboard_save_lands_in_the_file_that_holds_the_key(tmp_path):
     assert shared_index != overlay_index
     assert sum('max_speed' in p for p in before) == 1
     assert sum('max_steering_angle' in p for p in before) == 1
+    # A key absent from every layer falls back to the first (shared) file.
     assert all('test_new_key' not in p for p in before)
     tuning.save_layered(copies, 'gap_follow_node', {
         'max_speed': 2.123, 'max_steering_angle': 0.234, 'test_new_key': 123})
