@@ -1,0 +1,14 @@
+demo_node:
+  ros__parameters:
+    servo_min: 0.05
+    servo_max: 0.75
+    human_control:
+      axis_mappings:
+        drive-steering_angle:
+          scale: 0.38
+/**:
+  ros__parameters:
+    use_sim_time: false
+other_node:
+  ros__parameters:
+    servo_min: 9.0
