@@ -1,0 +1,23 @@
+# noVNC: the remote desktop in a browser, on 127.0.0.1:6080.
+#
+# A template: tools/systemd/install.sh fills in @USER@ and installs it as
+# /etc/systemd/system/novnc.service. websockify serves the noVNC page and
+# relays it to x11vnc (x11vnc.service) on 127.0.0.1:5900.
+#
+# Reached as rd-rb1.sfuracerbot.ca -> http://localhost:6080 through the
+# tunnel, behind a Cloudflare Access application that admits the team's
+# emails. Open https://rd-rb1.sfuracerbot.ca/vnc.html.
+[Unit]
+Description=noVNC websockify proxy (web VNC client on 127.0.0.1:6080, proxied by cloudflared)
+After=network.target x11vnc.service
+Wants=x11vnc.service
+
+[Service]
+Type=simple
+User=@USER@
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc/ 127.0.0.1:6080 127.0.0.1:5900
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

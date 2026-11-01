@@ -117,6 +117,53 @@ def test_dashboard_launch_loads_car_1s_settings():
     assert configs == {'web_dashboard_rb1.yaml'}
 
 
+# ------------------------------------------------------ car 1's boot services
+
+_SYSTEMD = os.path.join(_SRC, '..', 'tools', 'systemd')
+
+
+def _systemd_file(name):
+    with open(os.path.join(_SYSTEMD, name)) as f:
+        return f.read()
+
+
+def _exec_start(unit):
+    lines = [l for l in unit.splitlines() if l.startswith('ExecStart=')]
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def test_web_dashboard_service_starts_car_1s_dashboard_launch():
+    # Car 1 runs the dashboard at boot (docs/car1-vs-car2.md); the service
+    # must start dashboard_launch.py, which loads rb1's settings (test above),
+    # not the bare web_dashboard_launch.py, which allows no site.
+    cmd = _exec_start(_systemd_file('web-dashboard.service'))
+    assert 'ros2 launch racerbot_launch dashboard_launch.py' in cmd
+    assert 'web_dashboard_launch.py' not in cmd
+
+
+def test_x11vnc_follows_the_live_display_not_car_2s_fixed_one():
+    # Car 2's unit hard-codes `-display :1` and crash-loops on car 1, where
+    # nobody is logged in (docs/car1-vs-car2.md, "Remote desktop").
+    unit = _systemd_file('x11vnc.service')
+    script = _systemd_file('x11vnc-follow.sh')
+    for text in (unit, script):
+        assert not re.search(r'-display\s+:\d', text)
+    assert re.search(r'-display\s+":\$\{target', script), \
+        'x11vnc-follow.sh no longer passes the display it picked'
+
+
+def test_x11vnc_runs_a_root_owned_copy_not_the_workspace_script():
+    # x11vnc.service runs as root. Running a file the car's user can edit
+    # would hand that user root (docs/web-dashboard.md, "Car 1's boot services").
+    unit = _systemd_file('x11vnc.service')
+    assert not re.search(r'^User=', unit, re.M)
+    assert _exec_start(unit) == 'ExecStart=/usr/local/sbin/racerbot-x11vnc-follow'
+    assert re.search(r'install -m 0755 -o root -g root "\$here/x11vnc-follow\.sh" '
+                     r'/usr/local/sbin/racerbot-x11vnc-follow',
+                     _systemd_file('install.sh'))
+
+
 # ------------------------------------------------------------- Steering
 
 def _hw_doc():
