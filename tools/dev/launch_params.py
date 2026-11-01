@@ -244,6 +244,12 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
             return original(*args, **kwargs)
         return guarded
 
+    def guard_truncate(original):
+        def guarded(path, length):
+            check_write(path)
+            return original(path, length)
+        return guarded
+
     logger = logging.getLogger('launch')
     handler = ErrorHandler(level=logging.ERROR)
     with ExitStack() as stack:
@@ -274,6 +280,8 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
         for owner, name in [(builtins, 'open'), (io, 'open')]:
             stack.enter_context(patch.object(owner, name, guard_open(getattr(owner, name))))
         stack.enter_context(patch.object(os, 'open', guard_os_open(os.open)))
+        stack.enter_context(patch.object(os, 'truncate', guard_truncate(os.truncate)))
+        # os.write needs a descriptor already vetted by guarded open/os.open.
         for owner, names, indices in [
                 (os, ('mkdir', 'makedirs', 'remove', 'unlink', 'rmdir'), (0,)),
                 (os, ('rename', 'replace'), (0, 1)),

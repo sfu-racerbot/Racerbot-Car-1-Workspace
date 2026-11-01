@@ -142,6 +142,15 @@ def test_write_outside_sandbox_refused(tmp_path):
     assert not target.exists()
 
 
+def test_truncate_outside_sandbox_refused(tmp_path):
+    # oracle: a refused truncate must preserve the outside file's contents.
+    target = tmp_path / 'outside.txt'
+    target.write_text('keep this', encoding='utf-8')
+    with pytest.raises(CaptureError, match=f'launch-time write outside the oracle sandbox: {re.escape(str(target))}'):
+        capture(str(FIXTURES / 'truncate_launch.py'), [f'target:={target}'])
+    assert target.read_text(encoding='utf-8') == 'keep this'
+
+
 def test_git_and_ps_probes_simulated():
     expected = stub_probes()
     result = capture(str(FIXTURES / 'git_ps_launch.py'), [])
