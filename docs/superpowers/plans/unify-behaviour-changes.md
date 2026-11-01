@@ -11,7 +11,12 @@ This file lists every difference the unified workspace makes to what each car ru
 
 Everything here except the data paths, the IMU file location and the simulator full lock is car 2's newer work, taken for both cars by decision 14.
 
-- **gap_follow** gains four settings car 2 already ran. `aim_depth_bias: 0.0` aims at the middle of the chosen gap, and `aim_depth_bias_fallback: 1.0` aims a fallback gap at its deepest beam. `swept_clearance_max_length` goes from 3.0 m to 5.0 m because the model needs 5.4 m to stop from 5 m/s, and at 3.0 m the simulated car ran into square corners off long straights. `opponent_follow_floor: 0.5` keeps the follow law at 0.5 m/s or more behind a slower car instead of braking to a stop, while TTC and the emergency stop still apply. `time_trial:=true` (aim depth 1.0, one car against the clock) is new and off unless asked for.
+- **gap_follow** gains four settings car 2 already ran, plus one launch argument:
+  - `aim_depth_bias: 0.0` aims at the middle of the chosen gap, as car 1's old code already did when both gap edges are real.
+  - `aim_depth_bias_fallback: 1.0` aims a fallback gap at its deepest beam.
+  - `swept_clearance_max_length` goes from 3.0 m to 5.0 m, because the model needs 5.4 m to stop from 5 m/s and at 3.0 m the simulated car ran into square corners off long straights. This is the one change that alters car 1's lap times (see Simulator A/B).
+  - `opponent_follow_floor: 0.5` keeps the follow law at 0.5 m/s or more behind a slower car instead of braking to a stop, while TTC and the emergency stop still apply.
+  - `time_trial:=true` (aim depth 1.0, for one car against the clock) is new and off unless asked for.
 - **vehicle_state_node** carries car 2's four-state speed filter, x = [v, a, b_vesc, b_bno]. Its four new noise settings (`sigma_jerk`, `sigma_accel_bno`, `sigma_accel_vesc`, `sigma_accel0`) act only with `accel_source: both`; the shipped `accel_source` is `bno`, which keeps the two-state filter on [v, b], now written in matrix form (car 2's `602286d`).
 - **map_course maps on the gyro.** slam_toolbox and auto_map_race run on `odom_imu`, vehicle_state_node publishes `odom_imu -> odom`, and slam_toolbox takes car 2's `slam_gyro` loop-closure settings: search space and distance 8.0 m to 3.0 m, chain size 20 to 10, coarse angle offset 0.349 to 0.175 rad at 0.0175 rad steps, angle variance penalty 1.0 to 0.01, minimum angle penalty 0.9 to 0.5 (car 2's `ca79651` and `d450764`). Car 1 has not mapped with these settings on the floor.
 - **Recording and mapping code.** auto_record catches more of a run's start and reports failures (`4ec8e7b`); map_course rebuilds the map from the bag after every run, finished or stopped, and prints only the follow-up commands (`4120aed`, `b6481be`, `60316bd`); auto_map_race counts a SLAM correction as motion odometry did not see (`949cb6e`). These change behaviour without changing a launch parameter, so only the simulator and the unit tests cover them.
@@ -32,7 +37,80 @@ Car 2's driving code is the merged code, so its launch parameters change only in
 
 ## Simulator A/B
 
-Results pending: the run is in progress (see the ledger, Task 13 step 3).
+The merged code (`unify/merge-car2` at `e50bc57`, exported so that later merges could not shift it) and each car's old code (car 1: `ae7ceeb`; car 2: `9c2c2ed`) drove the same courses under that car's own calibration, on the same F1TENTH Gym commit (`bdaec14`). Solo runs use `tools/f1tenth_sim/eval_gap.py` for one lap of the car's course and the five indoor layouts. Two-car runs use `eval_gap_multi.py` for two laps of the car's course and `indoor_wide`. Car 1's course is `car1_course_2026_10_26` and car 2's is `course_2026_10_30`. Every row runs both directions with seeds 12345 to 12349 at `--workers 2` and no `--floor`, which makes 320 runs in all.
+
+Contact is judged only by the simulator's own chassis checks: `contact_steps`, against the map's distance transform, for solo runs, and `wall_contact` and `car_contact` for two-car runs. Gym's collision flag is never the verdict. A row passes when the merged code has no contact, finishes every run, and its mean time is no more than the old code's spread (maximum minus minimum over the five seeds) above the old code's mean. The report script was checked first: it flagged a doctored contact, a slower lap and an unfinished lap in both kinds of run.
+
+Commands, from `~/racerbot-merge`: `res/t13_ab.sh all`, `res/t13_ab_rb2_multi.sh` (car 2's two-car rows), `res/t13_attr.sh` (the attribution below), then `res/t13_ab_report.py runs/t13-ab --markdown` and `res/t13_attr_report.py --markdown` for the two tables. Raw results are in `runs/t13-ab` and `runs/t13-attr`.
+
+**Results.**
+
+- **No contact in any of the 320 runs**, for either version on either car.
+- **Car 2 (rb2): no change.** All 16 rows give the same times as car 2's old code to 0.01 s, with the same body clearance, because car 2's driving code is the merged code.
+- **Car 1 (rb1): slower on the hallway layouts, faster and further from the walls where corners are square.** Ten of 16 rows are flagged slower than the spread allows: `indoor_oval`, `indoor_tight`, `indoor_wide` and `asb_10000` solo by 0.27 to 0.56 s a lap (3 to 5 %), and two cars on `indoor_wide` by 1.14 to 1.16 s over two laps. Car 1's course in reverse is 0.37 s slower, exactly the old code's spread, so it passes only at the second decimal; every merged lap (12.43 to 12.58 s) is slower than every old lap but one 12.40 s outlier. Car 1's course forward is 0.58 s faster, with all five merged laps between 11.85 and 11.95 s against old laps of 11.88 to 13.38 s, and `asb_sharp` is 0.34 to 0.62 s faster. On those two the old code's closest approach to a wall was 0.06 to 0.07 m of body clearance, against 0.17 to 0.38 m for the merged code.
+- **The cause is one setting.** With `swept_clearance_max_length` set back to car 1's old 3.0 m, the merged code reproduces car 1's old lap times to 0.01 s on all ten solo rows, including the faster ones. `aim_depth_bias_fallback` changes nothing (second table). Car 2 raised the look-ahead to 5 m because the braking check counted any path clear for 3 m as fully clear at any speed. Stopping from 5 m/s takes about 5.4 m in the model (5 m/s × 0.25 s of `braking_latency_sec` plus 5² / (2 × 3 m/s²) of `max_braking_decel`), and car 2's real car took 3.4 m from 5.41 m/s (run `20261030-175124`). Car 1 has the same braking model and 5 m/s cap.
+- **Two cars on car 1's course, forward: the old code deadlocks.** In 2 of 5 runs (seeds 12347 and 12349) both cars stalled below one lap at a mean of about 0.35 m/s, without contact, and never finished in the 90 s allowed. The merged code finished all five, which matches `opponent_follow_floor: 0.5` replacing the old brake-to-zero behind a slower car.
+- **Car 2's own two-car harness could not run.** `eval_gap_multi.py` at `9c2c2ed` passes a stray `None` in its job tuple (`run_multi() takes from 4 to 9 positional arguments but 10 were given`). The merged tree's version is fixed (Task 11). Car 2's old-code rows used a copy with only that `None` removed (`car2/tools/f1tenth_sim/eval_gap_multi_t13.py`).
+- **ROS simulator.** The `racerbot_sim` tests pass as rb1 and as rb2 on `1d7225c`, 201 of 201 each.
+
+**Decision for the team lead.** `swept_clearance_max_length` is shared tuning, and the Task 14 guards make it a safety floor, so no car's overlay may lower it. The choice applies to both cars:
+
+1. Keep 5.0 m (recommended). The braking check then looks as far as the car needs to stop from its 5 m/s cap. Car 1 pays 0.27 to 0.56 s a lap on the hallway layouts and gains on square corners and on its own course forward.
+2. Set the shared value back to 3.0 m. Car 1 gets its old hallway times back, and both cars again treat a path clear for 3 m as clear at any speed.
+
+Approved by: ______ on ______ (choice: 1 / 2).
+
+Per-row results:
+
+| car | kind | track | dir | merged: contacts / finished / mean s / min body clearance | old: same (lap-time spread) | merged - old | verdict |
+|---|---|---|---|---|---|---|---|
+| rb1 | multi | `car1_course_2026_10_26` | fwd | 0 / 5/5 / 59.39 | 0 / 3/5 / 58.63 (7.00) | +0.76 | PASS |
+| rb1 | multi | `car1_course_2026_10_26` | rev | 0 / 5/5 / 26.01 | 0 / 5/5 / 26.43 (1.20) | -0.42 | PASS |
+| rb1 | multi | `indoor_wide` | fwd | 0 / 5/5 / 26.04 | 0 / 5/5 / 24.88 (0.18) | +1.16 | FLAG: slower by 1.16 s > spread 0.18 s |
+| rb1 | multi | `indoor_wide` | rev | 0 / 5/5 / 25.99 | 0 / 5/5 / 24.85 (0.10) | +1.14 | FLAG: slower by 1.14 s > spread 0.10 s |
+| rb1 | solo | `asb_10000` | fwd | 0 / 5/5 / 14.44 / 0.38 m | 0 / 5/5 / 14.07 / 0.39 m (0.13) | +0.37 | FLAG: slower by 0.37 s > spread 0.13 s |
+| rb1 | solo | `asb_10000` | rev | 0 / 5/5 / 14.30 / 0.34 m | 0 / 5/5 / 13.97 / 0.39 m (0.18) | +0.33 | FLAG: slower by 0.33 s > spread 0.18 s |
+| rb1 | solo | `asb_sharp` | fwd | 0 / 5/5 / 14.68 / 0.34 m | 0 / 5/5 / 15.02 / 0.07 m (1.00) | -0.34 | PASS |
+| rb1 | solo | `asb_sharp` | rev | 0 / 5/5 / 14.67 / 0.38 m | 0 / 5/5 / 15.29 / 0.06 m (1.15) | -0.62 | PASS |
+| rb1 | solo | `car1_course_2026_10_26` | fwd | 0 / 5/5 / 11.91 / 0.17 m | 0 / 5/5 / 12.49 / 0.06 m (1.50) | -0.58 | PASS |
+| rb1 | solo | `car1_course_2026_10_26` | rev | 0 / 5/5 / 12.51 / 0.16 m | 0 / 5/5 / 12.14 / 0.16 m (0.37) | +0.37 | PASS |
+| rb1 | solo | `indoor_oval` | fwd | 0 / 5/5 / 10.12 / 0.51 m | 0 / 5/5 / 9.69 / 0.47 m (0.20) | +0.44 | FLAG: slower by 0.44 s > spread 0.20 s |
+| rb1 | solo | `indoor_oval` | rev | 0 / 5/5 / 10.09 / 0.51 m | 0 / 5/5 / 9.66 / 0.49 m (0.20) | +0.43 | FLAG: slower by 0.43 s > spread 0.20 s |
+| rb1 | solo | `indoor_tight` | fwd | 0 / 5/5 / 9.84 / 0.36 m | 0 / 5/5 / 9.38 / 0.32 m (0.27) | +0.46 | FLAG: slower by 0.46 s > spread 0.27 s |
+| rb1 | solo | `indoor_tight` | rev | 0 / 5/5 / 9.84 / 0.33 m | 0 / 5/5 / 9.57 / 0.26 m (0.20) | +0.27 | FLAG: slower by 0.27 s > spread 0.20 s |
+| rb1 | solo | `indoor_wide` | fwd | 0 / 5/5 / 12.46 / 0.93 m | 0 / 5/5 / 11.90 / 0.76 m (0.08) | +0.56 | FLAG: slower by 0.56 s > spread 0.08 s |
+| rb1 | solo | `indoor_wide` | rev | 0 / 5/5 / 12.43 / 0.92 m | 0 / 5/5 / 11.91 / 0.76 m (0.07) | +0.53 | FLAG: slower by 0.53 s > spread 0.07 s |
+| rb2 | multi | `course_2026_10_30` | fwd | 0 / 5/5 / 39.81 | 0 / 5/5 / 39.81 (0.07) | +0.00 | PASS |
+| rb2 | multi | `course_2026_10_30` | rev | 0 / 5/5 / 40.28 | 0 / 5/5 / 40.28 (0.90) | +0.00 | PASS |
+| rb2 | multi | `indoor_wide` | fwd | 0 / 5/5 / 26.03 | 0 / 5/5 / 26.03 (0.13) | +0.00 | PASS |
+| rb2 | multi | `indoor_wide` | rev | 0 / 5/5 / 25.98 | 0 / 5/5 / 25.98 (0.08) | +0.00 | PASS |
+| rb2 | solo | `asb_10000` | fwd | 0 / 5/5 / 14.45 / 0.37 m | 0 / 5/5 / 14.45 / 0.37 m (0.18) | +0.00 | PASS |
+| rb2 | solo | `asb_10000` | rev | 0 / 5/5 / 14.44 / 0.37 m | 0 / 5/5 / 14.44 / 0.37 m (0.40) | +0.00 | PASS |
+| rb2 | solo | `asb_sharp` | fwd | 0 / 5/5 / 14.58 / 0.35 m | 0 / 5/5 / 14.58 / 0.35 m (0.30) | +0.00 | PASS |
+| rb2 | solo | `asb_sharp` | rev | 0 / 5/5 / 14.53 / 0.35 m | 0 / 5/5 / 14.53 / 0.35 m (0.17) | +0.00 | PASS |
+| rb2 | solo | `course_2026_10_30` | fwd | 0 / 5/5 / 19.37 / 0.17 m | 0 / 5/5 / 19.37 / 0.17 m (0.18) | +0.00 | PASS |
+| rb2 | solo | `course_2026_10_30` | rev | 0 / 5/5 / 19.27 / 0.13 m | 0 / 5/5 / 19.27 / 0.13 m (1.00) | +0.00 | PASS |
+| rb2 | solo | `indoor_oval` | fwd | 0 / 5/5 / 10.13 / 0.51 m | 0 / 5/5 / 10.13 / 0.51 m (0.10) | +0.00 | PASS |
+| rb2 | solo | `indoor_oval` | rev | 0 / 5/5 / 10.08 / 0.50 m | 0 / 5/5 / 10.08 / 0.50 m (0.12) | +0.00 | PASS |
+| rb2 | solo | `indoor_tight` | fwd | 0 / 5/5 / 9.81 / 0.30 m | 0 / 5/5 / 9.81 / 0.30 m (0.25) | +0.00 | PASS |
+| rb2 | solo | `indoor_tight` | rev | 0 / 5/5 / 9.83 / 0.36 m | 0 / 5/5 / 9.83 / 0.36 m (0.12) | +0.00 | PASS |
+| rb2 | solo | `indoor_wide` | fwd | 0 / 5/5 / 12.45 / 0.93 m | 0 / 5/5 / 12.45 / 0.93 m (0.05) | +0.00 | PASS |
+| rb2 | solo | `indoor_wide` | rev | 0 / 5/5 / 12.43 / 0.94 m | 0 / 5/5 / 12.43 / 0.94 m (0.10) | +0.00 | PASS |
+
+Attribution, car 1 solo: mean lap time in seconds over the same five seeds; `swept3` is the merged code with `swept_clearance_max_length=3.0`, `fallback0` with `aim_depth_bias_fallback=0.0`, `both` with the two together.
+
+| track | dir | old | merged | swept3 | fallback0 | both |
+|---|---|---|---|---|---|---|
+| `indoor_wide` | fwd | 11.90 | 12.46 | 11.90 | 12.46 | 11.90 |
+| `indoor_wide` | rev | 11.91 | 12.43 | 11.91 | 12.43 | 11.91 |
+| `indoor_oval` | fwd | 9.69 | 10.12 | 9.69 | 10.12 | 9.69 |
+| `indoor_oval` | rev | 9.66 | 10.09 | 9.66 | 10.09 | 9.66 |
+| `indoor_tight` | fwd | 9.38 | 9.84 | 9.38 | 9.84 | 9.38 |
+| `indoor_tight` | rev | 9.57 | 9.84 | 9.57 | 9.84 | 9.57 |
+| `asb_10000` | fwd | 14.07 | 14.44 | 14.07 | 14.44 | 14.07 |
+| `asb_10000` | rev | 13.97 | 14.30 | 13.97 | 14.30 | 13.97 |
+| `car1_course_2026_10_26` | fwd | 12.49 | 11.91 | 12.49 | 11.91 | 12.49 |
+| `car1_course_2026_10_26` | rev | 12.14 | 12.51 | 12.14 | 12.51 | 12.14 |
 
 ## Task 12e: full-lock steering in the simulators
 
