@@ -1,0 +1,1017 @@
+{
+ "about": "Hard rule 1 for the 2026-10-30/31 SLAM reliability work: every break here must fail its tests. Run: python3 tools/check_mutations.py tools/mutations/slam_reliability.json",
+ "copy": [
+  "src/pure_pursuit",
+  "src/racerbot_launch",
+  "tools/run_analysis"
+ ],
+ "mutations": [
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "anchor = expected or self.last_pose",
+   "new": "anchor = self.last_pose",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "left = -sin_odom * dx + cos_odom * dy",
+   "new": "left = sin_odom * dx + cos_odom * dy",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "previous_y + sin_map * forward + cos_map * left",
+   "new": "previous_y + sin_map * forward - cos_map * left",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "forward = cos_odom * dx + sin_odom * dy",
+   "new": "forward = dx",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "> self.max_pose_jump\n            or (expected",
+   "new": ">= self.max_pose_jump\n            or (expected",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "> UNEXPLAINED_YAW_LIMIT_RAD))",
+   "new": "> 10 * UNEXPLAINED_YAW_LIMIT_RAD))",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "self._reanchor(x, y, yaw, expected)",
+   "new": "self._reanchor(x, y, yaw)",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "self.last_odom_xy = odom_xy if odom_yaw is not None else None",
+   "new": "self.last_odom_xy = odom_xy or self.last_odom_xy",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "if odom_xy is not None and not all(math.isfinite(value) for value in odom_xy):",
+   "new": "if False:",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "previous_yaw + angle_difference(odom_yaw, self.last_odom_yaw))",
+   "new": "previous_yaw)",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "at = rclpy.time.Time() if stamp is None else rclpy.time.Time.from_msg(stamp)",
+   "new": "at = rclpy.time.Time()",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "except TransformException:\n            return None, None",
+   "new": "except ValueError:\n            return None, None",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/auto_map_race_node.py",
+   "old": "odom_yaw, odom_xy = self._lookup_odom_pose()\n            if self.recorder.update(*pose, now_sec, odom_yaw, odom_xy):",
+   "new": "odom_yaw, odom_xy = self._lookup_odom_pose()\n            if self.recorder.update(*pose, now_sec, odom_yaw):",
+   "tests": [
+    "src/pure_pursuit/test/test_lap_recorder_corrections.py",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_the_control_loop_hands_odometry_to_the_lap_recorder",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_odometry_is_read_at_the_stamp_of_the_map_pose",
+    "src/pure_pursuit/test/test_auto_map_race.py::test_no_odometry_transform_means_no_odometry"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "go = (fit >= MIN_FIT and through <= map_localize.MAX_SEE_THROUGH\n          and offset_m <= MAX_OFFSET_M and offset_deg <= MAX_OFFSET_DEG)",
+   "new": "go = True",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "and offset_m <= MAX_OFFSET_M and offset_deg <= MAX_OFFSET_DEG)",
+   "new": "and offset_deg <= MAX_OFFSET_DEG)",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "and offset_m <= MAX_OFFSET_M and offset_deg <= MAX_OFFSET_DEG)",
+   "new": "and offset_m <= MAX_OFFSET_M)",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "go = (fit >= MIN_FIT and through",
+   "new": "go = (through",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "if near_fit >= fit - NEAR_FIT_MARGIN:",
+   "new": "if True:",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "if check.fit < MIN_FIT or check.see_through > map_localize.MAX_SEE_THROUGH:",
+   "new": "if check.fit < MIN_FIT:",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "{c * dx + s * dy:+.2f} m forward",
+   "new": "{-c * dx - s * dy:+.2f} m forward",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/check_start.py",
+   "old": "if start is None:\n        raise ValueError",
+   "new": "if False:\n        raise ValueError",
+   "tests": [
+    "src/pure_pursuit/test/test_check_start.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "ranges > MIN_RANGE_M",
+   "new": "ranges > -1e9",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "ranges < max_range",
+   "new": "ranges < 1e9",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "laser_x + ranges[usable] * np.cos(angles)",
+   "new": "ranges[usable] * np.cos(angles)",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "ranges[usable] * np.sin(angles)",
+   "new": "-ranges[usable] * np.sin(angles)",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "return float((field.distance(*_to_map(bx, by, pose)) < within).mean())",
+   "new": "return 1.0",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "step = -np.linalg.solve(jacobian.T @ jacobian + weight,",
+   "new": "step = np.linalg.solve(jacobian.T @ jacobian + weight,",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "weight = np.diag([PRIOR_WEIGHT, PRIOR_WEIGHT, PRIOR_WEIGHT])",
+   "new": "weight = np.diag([1e-3, 1e-3, 1e-2])",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "jacobian.T @ d[keep] + weight @ (np.array([x, y, yaw]) - anchor))",
+   "new": "jacobian.T @ d[keep])",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "forward, left = c * dx + s * dy, -s * dx + c * dy",
+   "new": "forward, left = dx, dy",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "pose[2] + here[2] - last[2])",
+   "new": "pose[2])",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "pose = match_scan(field, bx, by, pose)\n        poses[index] = pose",
+   "new": "poses[index] = pose",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "before_end = distances < (ranges[beams] - margin)[:, None]",
+   "new": "before_end = distances < (ranges[beams] + 1.0)[:, None]",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "(on_wall & before_end).any(axis=1).mean()",
+   "new": "(on_wall & before_end).all(axis=1).mean()",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "turned = np.abs(yaw - yaw[start]) >= 2.0 * math.pi - heading_tolerance",
+   "new": "turned = np.ones(len(yaw), dtype=bool)",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "travelled_enough = travelled - travelled[start] >= min_length",
+   "new": "travelled_enough = np.ones(len(yaw), dtype=bool)",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if best_gap > max_gap:\n            break",
+   "new": "if False:\n            break",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if mean_fit < MIN_MEAN_FIT:",
+   "new": "if False:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if worst < MIN_WINDOW_FIT:",
+   "new": "if False:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if through > MAX_SEE_THROUGH:",
+   "new": "if through >= MAX_SEE_THROUGH:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if not (np.all(np.isfinite(fit)) and np.all(np.isfinite(see_through))):",
+   "new": "if False:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if fit.size == 0 or see_through.size == 0:\n        return Verdict(False, 'no scans were localized on this map')",
+   "new": "if fit.size == 0 or see_through.size == 0:\n        return Verdict(True, 'no scans were localized on this map')",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "if not field.is_free(pose[0], pose[1]):",
+   "new": "if False:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "return 0 <= row < self.free.shape[0] and 0 <= col < self.free.shape[1] and bool(self.free[row, col])",
+   "new": "return bool(self.free[row, col])",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "col = int(math.floor((x - self.origin_x) / self.resolution))",
+   "new": "col = int(math.floor(x / self.resolution))",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/pure_pursuit/pure_pursuit/map_localize.py",
+   "old": "    if len(bx) < MIN_BEAMS:",
+   "new": "    if len(bx) < 0:",
+   "tests": [
+    "src/pure_pursuit/test/test_map_localize.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "loop_match_minimum_chain_size: 10",
+   "new": "loop_match_minimum_chain_size: 20",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "loop_match_minimum_chain_size: 10",
+   "new": "loop_match_minimum_chain_size: 7",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "angle_variance_penalty: 0.01",
+   "new": "angle_variance_penalty: 1.0",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "minimum_angle_penalty: 0.5",
+   "new": "minimum_angle_penalty: 0.9",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "coarse_angle_resolution: 0.0175",
+   "new": "coarse_angle_resolution: 0.0349",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "loop_search_space_dimension: 3.0",
+   "new": "loop_search_space_dimension: 8.0",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_gyro.yaml",
+   "old": "    coarse_search_angle_offset: 0.175\n",
+   "new": "",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/config/slam_tracking.yaml",
+   "old": "minimum_time_interval: 0.2",
+   "new": "minimum_time_interval: 0.2\n    angle_variance_penalty: 0.01",
+   "tests": [
+    "src/racerbot_launch/test/test_slam_gyro_profile.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if switches['rebuild']:",
+   "new": "if False:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle) and analysis",
+   "new": "rebuild_step(recorded_run, output_directory(launch_argv), handle)",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "emit(f'Map check interrupted; re-run: {shlex.join(command)}')\n        return False",
+   "new": "raise",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "text=True, errors='replace', start_new_session=True)",
+   "new": "text=True, errors='replace')",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if result.returncode not in (0, 1, 2):",
+   "new": "if result.returncode:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if result.returncode not in (0, 1, 2):",
+   "new": "if False:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if value.lower() not in ('true', 'false'):",
+   "new": "if False:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "'--out-root', str(parent)]",
+   "new": "'--out-root', '/tmp/x']",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if run is None or script is None or not script.is_file():",
+   "new": "if script is None or not script.is_file():",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "switches = {'analysis': False, 'rebuild': True}",
+   "new": "switches = {'analysis': True, 'rebuild': True}",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if stopped or code != 0:",
+   "new": "if stopped:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if stopped or code != 0:",
+   "new": "if code != 0:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if stopped or code != 0:",
+   "new": "if True:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "                stopped = True\n",
+   "new": "                stopped = False\n",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "                if not stopped:\n                    print(",
+   "new": "                if True:\n                    print(",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "laps[int(closed.group(1))] = float(closed.group(3))",
+   "new": "pass",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "except (OSError, ValueError, KeyError, TypeError):\n            result = None",
+   "new": "except OSError:\n            result = None",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "'GO' if result.get('raceline_ok') else 'NO-GO'",
+   "new": "'GO'",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "if 'tracked_path_m' in result:",
+   "new": "if False:",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "lines.append('  Map: not checked.')",
+   "new": "pass",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "f'  Full reports, when you want them: python3 {tools / \"slam_report.py\"} {run}'",
+   "new": "''",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "            print(summary, flush=True)\n            handle.write(summary)\n        text = report(",
+   "new": "        text = report(",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "src/racerbot_launch/scripts/map_course",
+   "old": "result.get('laps', 0)} whole lap(s)",
+   "new": "result.get('laps', 0)} lap(s)",
+   "tests": [
+    "src/racerbot_launch/test/test_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "handle.write(image[::-1].tobytes())",
+   "new": "handle.write(image.tobytes())",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "image[inputs.grid >= 50] = 0",
+   "new": "image[inputs.grid >= 50] = 254",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if not verdict.ok:\n        return finish(verdict, 0, False, verdict.reason + weaker)",
+   "new": "if False:\n        return finish(verdict, 0, False, verdict.reason + weaker)",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "v_max=min(speed_cap, config['profile_max_speed'])",
+   "new": "v_max=config['profile_max_speed']",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "run_commands.write_start_pose(out_dir, stop)",
+   "new": "run_commands.write_start_pose(out_dir, track.poses[0])",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "np.unique(np.r_[np.arange(first, len(inputs.times), SCAN_STRIDE), len(inputs.times) - 1])",
+   "new": "np.arange(first, len(inputs.times), SCAN_STRIDE)",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if out_dir.exists():\n        raise FileExistsError",
+   "new": "if False:\n        raise FileExistsError",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if room > best[0]:\n            best = (room, prepared.xy, raw)",
+   "new": "if room > best[0]:\n            best = (room, raw, raw)",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if slam['map'] is None:",
+   "new": "if False:",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if len(run.scan_t) == 0:",
+   "new": "if False:",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "use_gyro = len(slam['odom_imu']) >= MIN_ODOM_ROWS",
+   "new": "use_gyro = True",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "except slam_bag.NoSlamMapping as exc:",
+   "new": "except KeyError as exc:",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "except (FileNotFoundError, OSError) as exc:",
+   "new": "except KeyError as exc:",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "return 0 if result.raceline_ok else 1",
+   "new": "return 0",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if not raceable:\n        return",
+   "new": "if False:\n        return",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "except ValueError as exc:\n        return finish(map_localize.Verdict(False, str(exc)), 0, False, str(exc))",
+   "new": "except KeyError as exc:\n        return finish(map_localize.Verdict(False, str(exc)), 0, False, str(exc))",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if not laps:\n        return finish",
+   "new": "if False:\n        return finish",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "fit >= MIN_START_FIT and fit >= found_fit - SAME_FIT_MARGIN",
+   "new": "fit >= MIN_START_FIT",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "fit >= found_fit - SAME_FIT_MARGIN",
+   "new": "fit > found_fit",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "guess = _slam_pose_at(inputs, inputs.times[index])",
+   "new": "guess = None",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "return pose, index, 'SLAM pose'",
+   "new": "return pose, index, 'map search'",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "start, first, report['start_from'] = placed",
+   "new": "start, first, _ = placed",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "slam_pose=np.asarray(slam.get('slam_pose', np.zeros((0, 4))), dtype=float).reshape(-1, 4)",
+   "new": "slam_pose=np.zeros((0, 4))",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "if len(rows) < 2:\n        return None",
+   "new": "if len(rows) < 0:\n        return None",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/rebuild_run.py",
+   "old": "weaker = ('' if inputs.odom_source != '/odom' else",
+   "new": "weaker = ('' if inputs.odom_source == '/odom' else",
+   "tests": [
+    "tools/run_analysis/tests/test_rebuild_run.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "abs(speed) > still_speed",
+   "new": "speed > still_speed",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "abs(speed) > still_speed",
+   "new": "abs(speed) >= still_speed",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": " or speed != speed",
+   "new": "",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "last - start >= min_seconds:\n                return start, last",
+   "new": "last - start >= 0.0:\n                return start, last",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "    if start is not None and last - start >= min_seconds:\n        return start, last\n    return None",
+   "new": "    return None",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "t.header.frame_id == 'odom' and t.child_frame_id == 'base_link'",
+   "new": "t.child_frame_id == 'base_link' or t.child_frame_id == 'odom'",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "t.header.frame_id == 'odom' and t.child_frame_id == 'base_link'",
+   "new": "True",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "wanted = int(match.group(2))",
+   "new": "wanted = int(match.group(1))",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "laps[int(match.group(1))] = float(match.group(3))",
+   "new": "laps[int(match.group(1))] = 1.0",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "return Path(match.group(1)) if match else None",
+   "new": "return Path('/x')",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "return False, 'the map check wrote no rebuild.json', 0",
+   "new": "return True, 'the map check wrote no rebuild.json', 0",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "bool(verdict['ok']) and bool(data['raceline_ok'])",
+   "new": "bool(verdict['ok'])",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "bool(verdict['ok']) and bool(data['raceline_ok'])",
+   "new": "bool(data['raceline_ok'])",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "int(data['laps'])",
+   "new": "3",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "    if found:\n        return ('refusing",
+   "new": "    if False:\n        return ('refusing",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "'vesc_driver_node', 'urg_node_driver', 'gym_bridge_node', 'async_slam_toolbox_node'",
+   "new": "'urg_node_driver', 'gym_bridge_node', 'async_slam_toolbox_node'",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "ROS_DOMAIN = '78'",
+   "new": "ROS_DOMAIN = '0'",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "ROS_AUTOMATIC_DISCOVERY_RANGE='LOCALHOST', ROS_STATIC_PEERS='')\n    return env",
+   "new": "ROS_STATIC_PEERS='')\n    return env",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/replay_map_course.py",
+   "old": "env = dict(os.environ, HOME=str(home), ",
+   "new": "env = dict(os.environ, ",
+   "tests": [
+    "tools/run_analysis/tests/test_replay_map_course.py"
+   ]
+  }
+ ]
+}
