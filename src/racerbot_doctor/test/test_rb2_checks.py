@@ -53,6 +53,10 @@ def camera(snap, sample):
     return checks.camera_ladder(spec().camera, snap, sample)
 
 
+def camera_device(snap):
+    return next(d for d in snap.usb if (d.vid, d.pid) == ('8086', '0b3a'))
+
+
 def test_lidar_no_carrier_blames_cable_or_power():
     snap = healthy_snap()
     snap.ifaces['enP8p1s0'].carrier = False
@@ -129,7 +133,7 @@ def test_camera_missing_is_warn_not_fail():
 
 def test_camera_on_usb2_warns_and_continues():
     snap = healthy_snap()
-    snap.usb[0].speed_mbps = 480
+    camera_device(snap).speed_mbps = 480
     r = camera(snap, live())
     assert layer(r, 'USB speed').status is W
     assert 'USB 2' in layer(r, 'USB speed').detail
@@ -138,15 +142,16 @@ def test_camera_on_usb2_warns_and_continues():
 
 def test_camera_speed_boundary():
     snap = healthy_snap()
-    snap.usb[0].speed_mbps = 5000
+    camera_device(snap).speed_mbps = 5000
     assert layer(camera(snap, None), 'USB speed').status is P
-    snap.usb[0].speed_mbps = 4999
+    camera_device(snap).speed_mbps = 4999
     assert layer(camera(snap, None), 'USB speed').status is W
 
 
 def test_camera_no_uvc_is_warn():
     snap = healthy_snap()
-    snap.usb[0].drivers, snap.usb[0].videos = ['usbhid'], []
+    cam = camera_device(snap)
+    cam.drivers, cam.videos = ['usbhid'], []
     bad = first_bad(camera(snap, live()))
     assert bad.status is W and 'uvcvideo' in bad.detail
 

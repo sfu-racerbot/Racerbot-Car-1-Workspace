@@ -5,7 +5,7 @@
 > **You'll be able to:** check the VESC, LiDAR, joystick and webcam in one go, and get told which exact thing is wrong and how to fix it. With teleop running, it also tells you why the car won't move when you hold LB.
 > **Time:** 5 seconds to run.
 
-> **This is car 1's doctor.** It checks car 1's **USB** Hokuyo at `/dev/sensors/hokuyo` and car 1's **UVC webcam** at `/dev/video0`. Car 2's copy checks an Ethernet Hokuyo and a RealSense instead. When porting from car 2, keep this package's LiDAR and camera code: see [car1-vs-car2.md](../../docs/car1-vs-car2.md).
+The doctor selects hardware checks from the running car's [profile](../racerbot_car/README.md), the configuration that describes its devices. On rb1 it checks the USB Hokuyo and UVC webcam; on rb2 it checks the Ethernet Hokuyo and RealSense D435i.
 
 `racerbot_doctor` is a self-check for the car. Run it before a session, or the moment something doesn't work. It answers "is it plugged in?", "did the driver load?" and "is data actually coming out?" for every device, in that order.
 
@@ -18,8 +18,8 @@
 - **Every failure comes with a fix line**: the actual command or physical action, e.g. `sudo usermod -aG input $USER` or "flip the X/D switch on the back to X".
 - **Reads the battery** (3S LiPo) from the VESC's own voltage measurement, and tells "battery off" (VESC alive on USB power only) apart from "battery low".
 - **Works before bringup, too.** With nothing running it checks all the hardware layers and reports the ROS layers as "not running", which is not a failure.
-- **Exit code** 0 = nothing failed, 1 = something failed, 2 = the doctor itself crashed, so scripts can use it.
-- **150 tests**, written failing-first and checked by deliberately breaking each verdict (flipped comparisons, deleted checks) to confirm a test catches it, per [TEST_QUALITY_STANDARDS.md](../../TEST_QUALITY_STANDARDS.md).
+- **Exit code** 0 = nothing failed, 1 = something failed, 2 = car selection failed or the doctor crashed, so scripts can use it.
+- **Tests for both cars**, including deliberately broken checks to confirm the tests detect regressions, per [TEST_QUALITY_STANDARDS.md](../../TEST_QUALITY_STANDARDS.md).
 
 **Why it exists:** most entries in [troubleshooting.md](../../docs/troubleshooting.md) are an hour spent finding something a ten-line check would have caught. A gamepad switched to the wrong mode, a missing device link, a VESC with its battery off. This tool runs all of those checks at once.
 
@@ -36,6 +36,16 @@ ros2 run racerbot_doctor doctor
 **Working when:** the last line reads `0 FAIL, ...`. A `WARN` is worth reading but won't stop you driving.
 
 **If it doesn't:** read the `FAIL` lines. Each has a `fix:` line under it. The summary at the bottom names the first broken layer of each device.
+
+On a development machine, select the car whose hardware is being inspected. **Terminal 1**, after [sourcing](../../docs/glossary.md#sourcing) ROS and the workspace:
+
+```bash
+ros2 run racerbot_doctor doctor --car rb2 --no-live
+```
+
+**Working when:** the LiDAR section starts with `Ethernet link` and the camera section checks the RealSense. Missing hardware can still produce `FAIL` or `WARN` findings.
+
+`--car` overrides automatic identity selection. Without it, the doctor uses the Jetson serial or `RACERBOT_CAR`. If neither resolves a car, it exits 2 with instructions; an unknown `--car` also exits 2 and lists the known IDs.
 
 To check the ROS side as well (topic rates, the battery, VESC faults), start bringup first in another terminal, then run the doctor:
 
@@ -63,6 +73,7 @@ Options:
 
 | Flag | What it does |
 |---|---|
+| `--car rb1` or `--car rb2` | Override automatic car selection for this inspection |
 | `--window 5` | Sample each topic for 5 s instead of 3 (more stable rate numbers) |
 | `--no-live` | Hardware and OS checks only; never joins the ROS graph |
 | `--no-color` | Plain text, e.g. for pasting into a chat |
@@ -110,14 +121,16 @@ The camera never fails the run (team decision, 2026-10-01): the car drives witho
 <details>
 <summary>The full layer list and thresholds. Skip this unless you're changing the doctor or a threshold.</summary>
 
-All numbers live in [`racerbot_doctor/car.py`](racerbot_doctor/car.py), each one next to a note saying where it comes from.
+Hardware addresses and device paths come from `src/racerbot_car/cars/ID/car.yaml`. Driver defaults and thresholds live in [`racerbot_doctor/car.py`](racerbot_doctor/car.py), beside their sources. LiDAR calibration is in each car's `calibration/sensors.yaml`.
 
 | Device | Layers, bottom → top |
 |---|---|
 | **VESC** | USB `0483:5740` present → `cdc_acm` kernel driver made a `/dev/ttyACM*` → `/dev/sensors/vesc` points at it and you can read/write it (`dialout` group) → no other program has the port open → `vesc_driver_node` running → `/sensors/core` ≥ 25 Hz → `fault_code` 0 → battery |
 | **LiDAR** (USB) | USB `15d1:0000` present → `cdc_acm` made a `/dev/ttyACM*` → `/dev/sensors/hokuyo` points at it and you can read/write it (`99-hokuyo.rules`) → no program other than `urg_node` has the port open → `urg_node_driver` running → `/scan` ≥ 30 Hz → at least one beam has a return (`WARN` under 50 %) |
+| **LiDAR** (rb2 Ethernet) | Interface `enP8p1s0` present with carrier → host IP `192.168.0.15/24` → ping `192.168.0.10` → TCP port `10940` probe, only while `urg_node_driver` is down → driver running → `/scan` ≥ 30 Hz → scan content as above |
 | **Joystick** | F710 receiver present **in XInput mode** (`c21f`; DirectInput `c219` fails with "flip the switch") → `xpad` made `/dev/input/js*` → you can read **both** `js*` and `event*` (`input` group; `joy_node` uses `event*`, see below) → `joy_node` running → `/joy` ≥ 5 Hz |
 | **Camera** | some USB device bound to `uvcvideo` (any make of webcam) → `/dev/video0` exists and you can read/write it (`video` group) → `camera_stream_node` running (`INFO` if not: it's optional, started by `webcam_launch.py`). No rate layer: the stream goes straight to the browser on port 9090, not over a ROS topic |
+| **Camera** (rb2 RealSense) | USB `8086:0b3a` → USB speed ≥ 5000 Mb/s (`WARN` below) → `uvcvideo` created video nodes → `realsense2_camera_node` running → `/camera/camera/color/image_raw` ≥ 8 Hz. Camera failures become `WARN`; a profile without a camera reports `INFO` |
 | **Bringup** | `ackermann_mux`, `ackermann_to_vesc_node`, `vesc_to_odom_node` running → `/odom` ≥ 25 Hz (`INFO`, not `FAIL`, while no servo command has ever been sent: `vesc_to_odom_node` waits for the first one) → `base_link→laser` transform is `0.26 0 0.11` (±1 mm) → `INFO` if something publishes `/teleop` (that blocks autonomy's `/drive`) |
 | **Drive path** | only with `teleop_launch.py` running: `/joy` → `/teleop` → `/ackermann_cmd` → `/commands/motor/speed`, each ≥ 5 Hz (each hop republishes once per `/joy` message) → LB held in at least one `/joy` message (`INFO` if not) → at least one non-zero motor speed command (`WARN` if LB was held but the stick wasn't moved) |
 | **Environment** | `ROS_DISTRO=jazzy` → workspace sourced → `ROS_DOMAIN_ID` isn't the test domain 79 → `racerbot_sim` not running (`FAIL` if it's running beside the real drivers) |
@@ -139,7 +152,7 @@ Limits: the per-cell figure is the total divided by 3. The VESC can't see indivi
 
 So a user outside the `input` group passes a `js0`-only check, yet `joy_node` runs, finds no controller, and publishes nothing. That happened on 2026-10-20, and it is why the doctor checks both files.
 
-**Known blind spots.**
+**Limitations.**
 - It can't tell whether the F710 *controller* is switched on: the USB receiver looks the same either way. Press a button and watch `ros2 topic echo /joy` if in doubt.
 - It can't see other users' processes holding the VESC port without root.
 
@@ -159,7 +172,13 @@ So a user outside the `input` group passes a `js0`-only check, yet `joy_node` ru
 | `racerbot_doctor/report.py`, `cli.py` | Printing and the command line. |
 | `racerbot_doctor/car.py` | Every threshold and hardware ID, each with its source. |
 
+`spec_for(profile)` builds frozen hardware specifications by device kind. The CLI passes the same specification to OS gathering, live sampling and report checks.
+
+rb1 never runs network probes; rb2 never checks the Hokuyo serial link or video device permissions. Only rb2 samples a camera ROS topic. The legacy `check_lidar`, `check_camera` and default Python arguments retain rb1 behaviour for existing callers.
+
 Running the tests: everything except `test_live.py` runs with no ROS at all. `test_live.py` needs ROS sourced and the isolated test domain:
+
+**Terminal 1**, at the workspace root:
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source install/setup.bash
@@ -167,7 +186,7 @@ export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 python3 -m pytest src/racerbot_doctor/test/ -v
 ```
 
-**Working when:** `150 passed`. Unsourced, `test_live.py` fails to collect. That's deliberate and loud, so don't add `--continue-on-collection-errors`.
+**Working when:** `190 passed` on domain 79. On domain 72, 189 pass and `test_runs_on_the_isolated_test_domain` fails because it explicitly requires 79. Unsourced, `test_live.py` fails to collect because `rclpy` is unavailable; do not add `--continue-on-collection-errors`.
 
 The plan this was built from: [docs/superpowers/plans/2026-10-01-racerbot-doctor.md](../../docs/superpowers/plans/2026-10-01-racerbot-doctor.md).
 

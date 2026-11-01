@@ -214,6 +214,62 @@ def check_vesc(snap, live):
 # ------------------------------------------------------------------- LiDAR
 
 def check_lidar(snap, live):
+    """Car 1 compatibility entry point; the CLI uses lidar_ladder."""
+    return lidar_ladder(car.RB1_LIDAR, snap, live)
+
+
+def _ethernet_layers(spec, snap):
+    iface = snap.ifaces.get(spec.iface)
+    urg_running = bool(_pids(snap, car.EXE_URG))
+
+    def link():
+        name = 'Ethernet link'
+        if iface is None or iface.carrier is None:
+            return Layer(name, F, f'{spec.iface} is missing or down',
+                         f'`nmcli device connect {spec.iface}`')
+        if not iface.carrier:
+            return Layer(name, F, f'no link on {spec.iface}: Ethernet '
+                         'cable unplugged, or the LiDAR has no power',
+                         'check the cable at both ends and the LiDAR power '
+                         '(battery on?)')
+        return Layer(name, P, f'{spec.iface} carrier up')
+
+    def host_ip():
+        name = 'host IP'
+        if spec.host_ip not in iface.ipv4:
+            have = ', '.join(iface.ipv4) or 'no IPv4 address'
+            return Layer(name, F, f'{spec.iface} has {have}, needs '
+                         f'{spec.host_ip}', '`nmcli connection up hokuyo`')
+        return Layer(name, P, spec.host_ip)
+
+    def ping():
+        name = 'ping'
+        if snap.lidar_ping is None:
+            return Layer(name, W, 'could not run `ping`; reachability unknown')
+        if not snap.lidar_ping:
+            return Layer(name, F, f'{spec.ip} does not answer: LiDAR '
+                         'still booting (~10 s after power), or its IP was '
+                         'changed', 'wait and retry; see docs/hardware-reference.md')
+        return Layer(name, P, f'{spec.ip} answers')
+
+    def tcp():
+        name = f'TCP {spec.port}'
+        if urg_running:
+            return Layer(name, S, 'not probed: urg_node owns the sensor')
+        if snap.lidar_tcp is None:
+            return Layer(name, S, 'not probed')
+        if not snap.lidar_tcp:
+            return Layer(name, F, f'{spec.ip}:{spec.port} refused '
+                         'the connection -- another client may hold the '
+                         'sensor', 'stop any other urg_node/UrgBenri; '
+                         'power-cycle the LiDAR')
+        return Layer(name, P, 'accepts connections')
+
+    return [('Ethernet link', link), ('host IP', host_ip), ('ping', ping),
+            (f'TCP {spec.port}', tcp)]
+
+
+def lidar_ladder(spec, snap, live=None):
     def content():
         name = '/scan content'
         if live is None:
@@ -233,16 +289,25 @@ def check_lidar(snap, live):
                          'open room, suspicious near walls')
         return Layer(name, P, detail)
 
-    return ladder('LiDAR', _serial_layers(
-        snap, 'LiDAR', car.LIDAR_USB, car.LIDAR_KERNEL_DRIVER,
-        car.LIDAR_SYMLINK, snap.lidar_symlink, snap.lidar_symlink_rw,
-        '99-hokuyo.rules', car.EXE_URG) + [
+    if isinstance(spec, car.SerialLidarSpec):
+        layers = _serial_layers(
+            snap, 'LiDAR', spec.usb, spec.kernel_driver,
+            spec.symlink, snap.lidar_symlink, snap.lidar_symlink_rw,
+            '99-hokuyo.rules', car.EXE_URG)
+        silent = ('urg_node is running but publishes no scans: it could not '
+                  'open or talk to the LiDAR -- usually the LiDAR has no '
+                  'power (battery off?) or was re-plugged after bringup started')
+    elif isinstance(spec, car.EthernetLidarSpec):
+        layers = _ethernet_layers(spec, snap)
+        silent = ('urg_node is running but publishes no scans: it could not '
+                  'reach or talk to the LiDAR -- usually the LiDAR has no '
+                  'power (battery off?) or was still booting when bringup started')
+    else:
+        raise TypeError(f'unsupported lidar spec: {spec!r}')
+    return ladder('LiDAR', layers + [
         (f'ROS driver {car.EXE_URG}', lambda: _process_layer(snap, car.EXE_URG)),
         ('/scan rate', lambda: _rate_layer(
-            live, '/scan', car.SCAN_MIN_HZ, silent_detail='urg_node is '
-            'running but publishes no scans: it could not open or talk to '
-            'the LiDAR -- usually the LiDAR has no power (battery off?) or '
-            'was re-plugged after bringup started',
+            live, '/scan', car.SCAN_MIN_HZ, silent_detail=silent,
             silent_fix='read the bringup terminal for urg_node errors; '
             'check LiDAR power, then restart bringup')),
         ('/scan content', content)])
@@ -311,14 +376,25 @@ def check_joystick(snap, live):
 # ------------------------------------------------------------------ camera
 
 def check_camera(snap, live):
-    cams = [d for d in snap.usb if car.CAMERA_KERNEL_DRIVER in d.drivers]
+    """Car 1 compatibility entry point; the CLI uses camera_ladder."""
+    return camera_ladder(car.RB1_CAMERA, snap, live)
+
+
+def camera_ladder(spec, snap, live=None):
+    if spec is None:
+        return DeviceReport('Camera', [Layer('camera', I, 'no camera is fitted')])
+    if isinstance(spec, car.RealSenseSpec):
+        return _realsense_ladder(spec, snap, live)
+    if not isinstance(spec, car.UvcCameraSpec):
+        raise TypeError(f'unsupported camera spec: {spec!r}')
+    cams = [d for d in snap.usb if spec.kernel_driver in d.drivers]
     cam = cams[0] if cams else None
-    dev = f'/dev/{car.CAMERA_DEVICE}'
+    dev = f'/dev/{spec.device}'
 
     def usb():
         if cam is None:
             return Layer('USB webcam', F, 'no USB webcam (no device bound to '
-                         f'{car.CAMERA_KERNEL_DRIVER})', 'plug in the webcam')
+                         f'{spec.kernel_driver})', 'plug in the webcam')
         return Layer('USB webcam', P, f'{cam.product or "UVC camera"} at '
                      f'{cam.sysname}')
 
@@ -336,12 +412,53 @@ def check_camera(snap, live):
 
     report = ladder('Camera', [
         ('USB webcam', usb), (dev, node),
-        (f'stream {car.EXE_CAMERA}', lambda: _process_layer(
-            snap, car.EXE_CAMERA, optional_fix='ros2 launch racerbot_launch '
+        (f'stream {spec.exe}', lambda: _process_layer(
+            snap, spec.exe, optional_fix='ros2 launch racerbot_launch '
             'webcam_launch.py'))])
     # The car drives without a camera (team decision 2026-10-01): report
     # every camera failure, never fail the run on one. Capped *after* the
     # ladder so a missing camera still blocks the layers above it.
+    for layer in report.layers:
+        if layer.status is F:
+            layer.status = W
+    return report
+
+
+def _realsense_ladder(spec, snap, live):
+    cams = _usb(snap, *spec.usb)
+    cam = cams[0] if cams else None
+
+    def usb():
+        if cam is None:
+            return Layer('USB device', F, 'RealSense D435i not plugged in',
+                         'plug it into a USB 3 (blue) port')
+        return Layer('USB device', P, f'{cam.product or "D435i"} at {cam.sysname}')
+
+    def speed():
+        name = 'USB speed'
+        if cam.speed_mbps < spec.min_speed_mbps:
+            return Layer(name, W, f'running at USB 2 ({cam.speed_mbps:g} Mb/s): '
+                         'works at the low 424x240@15 profile, no headroom',
+                         'use a USB 3 cable and push the plug fully home; '
+                         'a half-seated USB 3 plug falls back to USB 2')
+        return Layer(name, P, f'{cam.speed_mbps:g} Mb/s')
+
+    def kernel():
+        name = 'kernel driver'
+        if spec.kernel_driver not in cam.drivers or not cam.videos:
+            return Layer(name, F, f'{spec.kernel_driver} has not created '
+                         '/dev/video* nodes', 're-plug the camera')
+        return Layer(name, P, f'{spec.kernel_driver} -> '
+                     f'{len(cam.videos)} /dev/video* nodes')
+
+    report = ladder('Camera', [
+        ('USB device', usb), ('USB speed', speed), ('kernel driver', kernel),
+        (f'ROS driver {spec.exe}', lambda: _process_layer(
+            snap, spec.exe, optional_fix='ros2 launch racerbot_launch '
+            'realsense_camera_launch.py')),
+        (f'{spec.topic} rate', lambda: _rate_layer(
+            live, spec.topic, spec.min_hz))])
+    # Optional camera failures are warnings, after blocking dependent layers.
     for layer in report.layers:
         if layer.status is F:
             layer.status = W
@@ -513,7 +630,8 @@ def check_environment(snap, live):
     return DeviceReport('Environment', layers)
 
 
-def run_all(snap, live):
-    return [check(snap, live) for check in (
-        check_environment, check_vesc, check_lidar, check_joystick,
-        check_camera, check_bringup, check_drive_path)]
+def run_all(snap, live, *, spec=car.RB1):
+    return [check_environment(snap, live), check_vesc(snap, live),
+            lidar_ladder(spec.lidar, snap, live), check_joystick(snap, live),
+            camera_ladder(spec.camera, snap, live), check_bringup(snap, live),
+            check_drive_path(snap, live)]

@@ -1,13 +1,17 @@
-"""What car 1's hardware is, and what healthy looks like.
+"""Hardware specifications for both cars, and shared health thresholds.
 
-Car 1, not car 2: a USB-serial Hokuyo UST-30LX at /dev/sensors/hokuyo (car 2:
-Ethernet UST-10LX) and a UVC webcam at /dev/video0 (car 2: RealSense
-D435i). Adapted 2026-10-20; a sync from the car 2 repo must keep this file's
-LiDAR and camera sections -- see docs/car1-vs-car2.md.
+Car 1's constants remain the USB-serial Hokuyo and UVC webcam defaults.
+Car 2's Ethernet Hokuyo and RealSense defaults live in RB2_LIDAR/RB2_CAMERA.
+spec_for takes addresses from the profile and selects by hardware kind.
 
 Every number cites where it comes from, so a hardware change has an
 obvious place to update. Keep in step with the files named.
 """
+
+from dataclasses import dataclass, replace
+
+from racerbot_car.profile import (
+    CameraRealSense, CameraUVC, LidarEthernet, LidarSerial)
 
 # --- VESC: /etc/udev/rules.d/99-vesc.rules, f1tenth_stack config/vesc.yaml
 VESC_USB = ('0483', '5740')
@@ -75,3 +79,89 @@ BRINGUP_EXES = (EXE_VESC_DRIVER, EXE_URG, EXE_JOY, EXE_MUX,
 SIM_EXES = ('gym_bridge_node', 'sim_joy_node')
 
 TEST_DOMAIN_ID = '79'                       # CLAUDE.md: tests only
+
+
+@dataclass(frozen=True)
+class SerialLidarSpec:
+    usb: tuple[str, str]
+    symlink: str
+    kernel_driver: str
+
+
+@dataclass(frozen=True)
+class EthernetLidarSpec:
+    iface: str
+    host_ip: str
+    ip: str
+    port: int
+
+
+@dataclass(frozen=True)
+class UvcCameraSpec:
+    device: str
+    kernel_driver: str
+    exe: str
+
+
+@dataclass(frozen=True)
+class RealSenseSpec:
+    usb: tuple[str, str]
+    kernel_driver: str
+    min_speed_mbps: float
+    topic: str
+    min_hz: float
+    exe: str
+
+
+@dataclass(frozen=True)
+class DoctorSpec:
+    lidar: SerialLidarSpec | EthernetLidarSpec
+    camera: UvcCameraSpec | RealSenseSpec | None
+
+
+RB1_LIDAR = SerialLidarSpec(LIDAR_USB, LIDAR_SYMLINK, LIDAR_KERNEL_DRIVER)
+RB1_CAMERA = UvcCameraSpec(CAMERA_DEVICE, CAMERA_KERNEL_DRIVER, EXE_CAMERA)
+
+# Car 2's car.py: Hokuyo UST-10LX over Ethernet, f1tenth_stack config/sensors.yaml
+# (ip_address/ip_port) and the `hokuyo` NetworkManager profile on enP8p1s0.
+RB2_LIDAR = EthernetLidarSpec(
+    iface='enP8p1s0',          # `hokuyo` NetworkManager profile on enP8p1s0
+    host_ip='192.168.0.15/24',  # `hokuyo` NetworkManager profile on enP8p1s0
+    ip='192.168.0.10',        # f1tenth_stack config/sensors.yaml (ip_address)
+    port=10940,              # f1tenth_stack config/sensors.yaml (ip_port)
+)
+# Car 2's car.py: RealSense D435i, racerbot_launch realsense_camera_launch.py
+# (424x240 @ 15 fps). Optional: never fails the run (team, 2026-10-01).
+RB2_CAMERA = RealSenseSpec(
+    usb=('8086', '0b3a'),     # RealSense D435i, realsense_camera_launch.py
+    kernel_driver='uvcvideo',  # RealSense D435i, realsense_camera_launch.py
+    min_speed_mbps=5000.0,   # USB 3; 480 = USB 2
+    topic='/camera/camera/color/image_raw',  # realsense_camera_launch.py
+    min_hz=8.0,              # realsense_camera_launch.py (424x240 @ 15 fps)
+    exe='realsense2_camera_node',  # Executable basename in /proc/<pid>/cmdline
+)
+
+RB1 = DoctorSpec(RB1_LIDAR, RB1_CAMERA)
+
+
+def spec_for(profile) -> DoctorSpec:
+    """Use profile hardware kinds and values, with each driver's fixed defaults."""
+    if isinstance(profile.lidar, LidarSerial):
+        lidar = replace(RB1_LIDAR, usb=tuple(profile.lidar.usb_id.split(':')),
+                        symlink=profile.lidar.port.removeprefix('/dev/'))
+    elif isinstance(profile.lidar, LidarEthernet):
+        lidar = replace(RB2_LIDAR, iface=profile.lidar.iface,
+                        host_ip=profile.lidar.host_ip, ip=profile.lidar.ip,
+                        port=profile.lidar.port)
+    else:
+        raise ValueError(f'unsupported lidar: {profile.lidar!r}')
+    if isinstance(profile.camera, CameraUVC):
+        camera = replace(RB1_CAMERA, device=profile.camera.device.removeprefix('/dev/'))
+    elif isinstance(profile.camera, CameraRealSense):
+        camera = replace(RB2_CAMERA, usb=tuple(profile.camera.usb_id.split(':')),
+                         topic=profile.camera.topic)
+    elif profile.camera is None:
+        camera = None
+    else:
+        raise ValueError(f'unsupported camera: {profile.camera!r}')
+    return DoctorSpec(lidar, camera)
