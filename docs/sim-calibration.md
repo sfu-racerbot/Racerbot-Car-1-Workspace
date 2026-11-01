@@ -246,16 +246,16 @@ Opponent awareness costs about 0.5 s on one car (20.25 s without it, 6-seed pass
 
 ## Trying it on the floor
 
-This needs the branch `worktree-gap-follow-speed` built, because `time_trial:=true` is on it. Put the car on a stand first, so the wheels are off the ground.
+This needs `main` from 2026-11-01 or later built, because `time_trial:=true` arrived then. Put the car on a stand first, so the wheels are off the ground.
 
-**Terminal 1, once:** build the branch.
+**Terminal 1, once:** update and build.
 
 ```bash
-cd ~/racerbot-ws && git fetch origin && git switch --detach origin/worktree-gap-follow-speed
+cd ~/racerbot-ws && git pull
 source /opt/ros/jazzy/setup.bash && colcon build --symlink-install --packages-select gap_follow
 ```
 
-**Working when:** colcon ends with `Summary: 1 package finished`. `git switch main` goes back afterwards.
+**Working when:** colcon ends with `Summary: 1 package finished`.
 
 **Terminal 1:** the hardware. Leave it running.
 
