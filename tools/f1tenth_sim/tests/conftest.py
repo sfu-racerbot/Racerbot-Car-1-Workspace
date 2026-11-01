@@ -18,6 +18,21 @@ def selected_test_car(request, monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', request.param)
 
 
+def car_config_args(path):
+    """gap_follow's node-test helper (src/gap_follow/test/conftest.py), reached by name.
+
+    test_traction_ceiling_parity imports gap_follow node-test modules, whose
+    `from conftest import car_config_args` resolves to the conftest module already
+    loaded -- this one, under this suite. Delegate to gap_follow's own, loaded from its
+    file, so there is one definition."""
+    import importlib.util
+    path_to = Path(__file__).resolve().parents[3] / 'src/gap_follow/test/conftest.py'
+    spec = importlib.util.spec_from_file_location('gap_follow_test_conftest', path_to)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.car_config_args(path)
+
+
 @pytest.fixture
 def car_profiles(tmp_path, monkeypatch):
     """Two real layered profiles with distinguishable calibration and tuning."""
