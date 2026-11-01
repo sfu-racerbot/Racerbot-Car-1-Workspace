@@ -12,7 +12,7 @@ from racerbot_car.layers import layered, launch_car_id
 
 def generate_launch_description():
     """Everything the web dashboard can show, minus anything that can move
-    the car: LiDAR + UVC webcam stream + the
+    the car: LiDAR + the car's camera stream + the
     dashboard itself, all in one launch, for testing the dashboard/sensors
     without bringing up the driving stack (VESC/joy/ackermann_mux from
     f1tenth_stack's bringup_launch.py).
@@ -58,11 +58,11 @@ def generate_launch_description():
         arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser'],
     )
 
-    webcam_stream_launch = IncludeLaunchDescription(
+    camera_stream_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
                 get_package_share_directory('racerbot_launch'), 'launch',
-                'webcam_launch.py')
+                'camera_launch.py')
         )
     )
     web_dashboard_launch = IncludeLaunchDescription(
@@ -81,6 +81,6 @@ def generate_launch_description():
                         'their boot service already runs it.'),
         urg_node,
         static_tf_node,
-        webcam_stream_launch,
+        camera_stream_launch,
         web_dashboard_launch,
     ])

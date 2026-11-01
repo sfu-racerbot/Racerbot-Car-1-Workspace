@@ -28,6 +28,7 @@ entries:
   - {id: auto-map-no-bringup, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['include_bringup:=false']}
   - {id: slam, package: racerbot_launch, launch: slam_launch.py, args: []}
   - {id: dashboard-test, package: racerbot_launch, launch: dashboard_test_launch.py, args: []}
+  - {id: camera, package: racerbot_launch, launch: camera_launch.py, args: []}
   - {id: webcam, package: racerbot_launch, launch: webcam_launch.py, args: [], cars: [rb1]}
   - id: race
     package: racerbot_launch

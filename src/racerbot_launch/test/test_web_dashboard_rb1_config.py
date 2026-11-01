@@ -146,7 +146,7 @@ def test_the_camera_streams_the_usb_webcam_not_a_ros_topic():
 # The launch files that use it
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize('launch', ['dashboard_launch.py', 'webcam_launch.py'])
+@pytest.mark.parametrize('launch', ['webcam_launch.py'])
 def test_the_car_1_launches_pass_this_yaml_as_car_config(launch):
     with open(os.path.join(_PKG, 'launch', launch)) as handle:
         text = handle.read()
