@@ -82,7 +82,7 @@ class ImuBridgeNode(Node):
     def __init__(self):
         super().__init__('imu_bridge_node')
 
-        self.declare_parameter('racer_imu_root', '~/imu-calibration')
+        self.declare_parameter('racer_imu_root', '~/racerbot-ws/tools/imu_calibration')
         self.declare_parameter('car_yaml', '')
         self.declare_parameter('vesc_topic', '/sensors/imu/raw')
         self.declare_parameter('odom_topic', '/odom')
@@ -113,10 +113,10 @@ class ImuBridgeNode(Node):
 
         if not os.path.isfile(car_yaml):
             raise FileNotFoundError(
-                f'{car_yaml} not found. imu_bridge needs the imu-calibration repo for the '
+                f'{car_yaml} not found. imu_bridge needs the IMU calibration for the '
                 'IMU mount rotation (the VESC is mounted rotated ~85 deg, so identity would '
-                'swap x and y): clone github.com/sfu-racerbot/imu-calibration to '
-                f'{self.racer_imu_root}, or set racer_imu_root / car_yaml.')
+                'swap x and y): it ships in this workspace as tools/imu_calibration/; '
+                f'racer_imu_root is {self.racer_imu_root}. Set racer_imu_root / car_yaml.')
 
         self.vesc = self._make_stream('vesc', car_yaml, bias_s)
         self.vesc_all_zero = 0

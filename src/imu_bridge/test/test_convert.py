@@ -6,7 +6,7 @@ No ROS needed -- convert.py imports nothing from rclpy:
     python3 -m pytest src/imu_bridge/test/ -v
 
 The cross-check against racer_imu itself reads the imu-calibration repo from
-$RACER_IMU_ROOT (default ~/imu-calibration) and skips only if it is absent.
+$RACER_IMU_ROOT (default ~/racerbot-ws/tools/imu_calibration) and skips only if it is absent.
 
 Oracles: every expected value below is a closed form written in the test
 (unit definitions, elementary rotations, the calibration formula from
@@ -423,13 +423,13 @@ def test_unknown_primary_is_refused():
 
 # ---------------------------------------------------------------- racer_imu
 
-RACER_IMU_ROOT = Path(os.environ.get('RACER_IMU_ROOT', '~/imu-calibration')).expanduser()
+RACER_IMU_ROOT = Path(os.environ.get('RACER_IMU_ROOT', '~/racerbot-ws/tools/imu_calibration')).expanduser()
 
 
 @pytest.mark.skipif(
     not (RACER_IMU_ROOT / 'racer_imu' / 'calibration.py').is_file(),
-    reason=f'imu-calibration repo not found at {RACER_IMU_ROOT} '
-           '(clone github.com/sfu-racerbot/imu-calibration there, or set RACER_IMU_ROOT); '
+    reason=f'IMU calibration not found at {RACER_IMU_ROOT} '
+           '(tools/imu_calibration/ in this workspace, or set RACER_IMU_ROOT); '
            'runs whenever it is present')
 @pytest.mark.parametrize('with_device_offsets', [False, True])
 def test_matches_racer_imu_on_its_real_calibration_file(tmp_path, with_device_offsets):

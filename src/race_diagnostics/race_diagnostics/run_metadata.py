@@ -111,6 +111,20 @@ def team_repos(workspace_root):
     return {name: src / name for name in TEAM_REPOS if (src / name / '.git').exists()}
 
 
+def metadata_repos(workspace_root, racer_imu_root):
+    """{name: path} of the repos whose git state a run records. The IMU
+    calibration is its own entry only while it is its own repo: once inside
+    the workspace (tools/imu_calibration/, since 2026-10-31) the workspace's
+    state already covers it, and a second copy would just repeat that diff."""
+    repos = {'racerbot-ws': workspace_root}
+    if racer_imu_root is not None:
+        imu_repo = find_repo_root(Path(racer_imu_root).expanduser())
+        if workspace_root is None or imu_repo is None or \
+                imu_repo.resolve() != Path(workspace_root).resolve():
+            repos['imu-calibration'] = racer_imu_root
+    return repos
+
+
 def imu_calibration_files(racer_imu_root):
     """car.yaml and every calibration JSON under racer_imu_root/calib."""
     root = Path(racer_imu_root).expanduser()

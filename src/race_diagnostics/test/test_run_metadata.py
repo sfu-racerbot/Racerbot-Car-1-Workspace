@@ -100,6 +100,27 @@ def test_imu_calibration_files_are_car_yaml_and_every_calib_json(tmp_path):
                      tmp_path / 'calib' / 'vesc_calib.json']
 
 
+def test_vendored_imu_calibration_is_covered_by_the_workspace_state(repo, tmp_path):
+    # oracle: invariant -- a directory inside the workspace repo has no git
+    # state of its own; recording it again would only repeat racerbot-ws's.
+    inside = repo / 'tools' / 'imu_calibration'
+    inside.mkdir(parents=True)
+    assert rm.metadata_repos(repo, inside) == {'racerbot-ws': repo}
+
+
+def test_a_separate_imu_calibration_clone_is_still_recorded(repo, tmp_path):
+    # oracle: spec -- a run records the commit of every repo it ran from
+    # (docs/run-diagnostics.md, metadata/). A clone outside the workspace is one.
+    outside = tmp_path / 'imu-calibration'
+    outside.mkdir()
+    subprocess.run(['git', 'init', '-q', str(outside)], check=True)
+    assert rm.metadata_repos(repo, outside) == {'racerbot-ws': repo, 'imu-calibration': outside}
+    # Not a git checkout at all: still listed, so the run says 'not a git ...'.
+    plain = tmp_path / 'plain'
+    plain.mkdir()
+    assert rm.metadata_repos(repo, plain) == {'racerbot-ws': repo, 'imu-calibration': plain}
+
+
 def test_write_run_metadata_layout(repo, tmp_path):
     (tmp_path / 'imu' / 'config').mkdir(parents=True)
     (tmp_path / 'imu' / 'config' / 'car.yaml').write_text('car: {}\n')
@@ -148,8 +169,7 @@ def test_record_run_writes_metadata_and_snapshots_parameters():
     # IMU calibration files, never lets it stop a run, and starts the
     # parameter snapshot into that folder.
     code = LAUNCH.read_text()
-    assert "'racerbot-ws': find_repo_root(os.path.realpath(__file__))" in code
-    assert "'imu-calibration': racer_imu_root" in code
+    assert 'repos = metadata_repos(find_repo_root(os.path.realpath(__file__)), racer_imu_root)' in code
     assert 'imu_calibration_files(racer_imu_root)' in code
     assert "except Exception as e:  # noqa: BLE001 -- a metadata failure must not stop a run" in code
     assert "executable='snapshot_params'" in code

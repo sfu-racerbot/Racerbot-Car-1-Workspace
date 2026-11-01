@@ -1,5 +1,12 @@
 # racer_imu: VESC IMU + BNO085, calibrated, time-synced, in the car frame
 
+> **Part of racerbot-ws since 2026-10-31.** This was the separate
+> [sfu-racerbot/imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo; it now lives at
+> `tools/imu_calibration/` with its history, and `imu_bridge` reads it from here by default
+> (`racer_imu_root`). `config/car.yaml` and `calib/` hold **car 1's** values. Raw calibration recordings
+> go in `data/imu_calibration/`. Tests, from the workspace root: `python3 -m pytest tools/imu_calibration/tests/ -q`
+> (two known failures in `test_online.py`, see the workspace CLAUDE.md).
+
 Two IMUs on the car:
 - **VESC built-in IMU**, read over USB with the VESC binary protocol.
 - **BNO085**, read through a microcontroller running `firmware/bno085_stream`.

@@ -63,6 +63,9 @@ This workspace vendors exactly one package, for exactly that reason.
 | `transport_drivers` | **real git submodule** | `ros-drivers/transport_drivers` | `humble` |
 | `web_dashboards` | **team git submodule** | `sfu-racerbot/web-dashboards` | `main` (pinned commit; holds the `web_dashboard` and `usb_cam_stream` packages under `car/ros/`) |
 | `f1tenth_system` | **vendored (plain tracked files, NOT a submodule)** | was `f1tenth/f1tenth_system` | was `humble-devel` |
+| `tools/imu_calibration` (not under `src/`) | **merged in with its history (git subtree, 2026-10-31), plain tracked files** | was `sfu-racerbot/imu-calibration` | was `main` (`0d99cd2`) |
+
+**`tools/imu_calibration` is now the copy that counts.** It is the club's IMU calibration stack (`racer_imu`, the BNO085 firmware and bridge, `config/car.yaml`, `calib/*.json`). Its three commits are in this repo's history (`git log -- tools/imu_calibration`), and car 1's calibration, which was never committed upstream, was committed here on top. Edit it here; the old GitHub repo no longer receives changes. Its raw calibration recordings are in `data/imu_calibration/`.
 
 **Team-developed vs. workspace code.** `racerbot_a` and `racerbot_b` are the codebases the Racerbot teams are actively developing.
 

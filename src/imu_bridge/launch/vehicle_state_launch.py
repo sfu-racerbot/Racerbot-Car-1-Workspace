@@ -66,7 +66,7 @@ def _actions(context, *args, **kwargs):
                 f'--pty {pty} --no-dyncal.')))
         elif not os.path.isfile(script):
             actions.append(LogInfo(msg=(
-                f'{script} not found: no BNO085. Clone imu-calibration to {root} '
+                f'{script} not found: no BNO085. tools/imu_calibration/ (in this workspace) is missing from {root} '
                 '(or pass racer_imu_root:=...). Steering uses the VESC gyro alone; '
                 '/odom/fused is the wheel speed.')))
         else:
@@ -105,8 +105,8 @@ def generate_launch_description():
             'bno', default_value='true',
             description='Use the BNO085 (front axle, Jetson I2C). false = VESC IMU only.'),
         DeclareLaunchArgument(
-            'racer_imu_root', default_value='~/imu-calibration',
-            description='Where imu-calibration is cloned (car.yaml, calibration, '
+            'racer_imu_root', default_value='~/racerbot-ws/tools/imu_calibration',
+            description='Where the IMU calibration lives (car.yaml, calibration, '
                         'the I2C bridge).'),
         DeclareLaunchArgument(
             'bno_pty', default_value='/tmp/bno085',

@@ -204,7 +204,7 @@ ros2 launch imu_bridge vehicle_state_launch.py
 ros2 topic echo /imu/bno/data --field linear_acceleration
 ```
 
-**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/imu-calibration`. Then `Ctrl+C` terminals 2 and 3.
+**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/racerbot-ws/tools/imu_calibration`. Then `Ctrl+C` terminals 2 and 3.
 
 **2. Run A, today's odometry.** Car on the tape mark. **Terminal 2:**
 
