@@ -10,6 +10,9 @@ still there).
 |---|---|---|
 | `racerbot_runs/<timestamp>/` | bringup's automatic recorder (`auto_record`, every algorithm run, off with `record:=false`), `ros2 launch race_diagnostics record_run.py`, and `map_course` / `auto_map_race_launch.py` with diagnostics on | rosbag (`bag/`), `launch.log`, `metadata/` (git state, node parameters). See `docs/run-diagnostics.md` |
 | `racerbot_runs/map_course-<timestamp>.log` | `ros2 run racerbot_launch map_course` | that session's terminal output |
+| `racerbot_runs/20261026-*/live_map/` | `tools/run_analysis/extract_map.py`, by hand (2026-10-26) | the last live SLAM map of each 2026-10-26 mapping run, which saved none; which ones are good: `racerbot_runs/LIVE_MAPS_2026-10-26.txt` |
+| `racerbot_auto/20261026-194514-clean/` | `tools/run_analysis/clean_map.py` | the cleaned map that became the simulator's car 1 course |
+| `imu_calibration/<timestamp>_<step>/` | `tools/imu_calibration/tools/calibrate_imu.py` / `verify_calibration.py` | raw IMU recordings behind `tools/imu_calibration/calib/*.json` (car 1's BNO085, 2026-10-23) |
 | `racerbot_auto/<timestamp>/` | `auto_map_race_node` (via `map_course` or `auto_map_race_launch.py`) on the real car | map, pose graph, racing lines, `commands.txt` |
 | `racerbot_sim/auto/<timestamp>/` | `sim_auto_map_race_launch.py` | the same output from simulator runs |
 | `racerbot_sim/races/<timestamp>/` | `sim_race_launch.py`'s race referee | `race.json`: standings, finish times, contacts |

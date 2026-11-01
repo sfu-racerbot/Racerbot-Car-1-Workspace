@@ -1,0 +1,11 @@
+{
+  "created": "2026-10-23 19:33:50",
+  "clock": "host time.monotonic() [s]",
+  "units": "acc m/s^2 (raw, before calibration), gyro rad/s, quat w x y z",
+  "imu": "bno",
+  "steps": [
+    "gyro",
+    "accel"
+  ],
+  "sim": false
+}

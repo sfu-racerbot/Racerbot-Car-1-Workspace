@@ -31,7 +31,7 @@ from launch_ros.substitutions import ExecutableInPackage
 from race_diagnostics.auto_record import recorder_node_names
 from race_diagnostics.recording import bag_record_command, DEFAULT_TOPICS
 from race_diagnostics.run_metadata import (
-    find_repo_root, imu_calibration_files, team_repos, write_packages,
+    find_repo_root, imu_calibration_files, metadata_repos, team_repos, write_packages,
     write_run_metadata, write_submodules)
 import yaml
 
@@ -69,10 +69,10 @@ def _setup(context, *args, **kwargs):
     # What the run was made with -- code, calibration, parameters -- written
     # into <run>/metadata/ (race_diagnostics/run_metadata.py). Never fatal.
     racer_imu_root = os.path.expanduser(
-        LaunchConfiguration('racer_imu_root', default='~/imu-calibration').perform(context))
+        LaunchConfiguration('racer_imu_root',
+                            default='~/racerbot-ws/tools/imu_calibration').perform(context))
     try:
-        repos = {'racerbot-ws': find_repo_root(os.path.realpath(__file__)),
-                 'imu-calibration': racer_imu_root}
+        repos = metadata_repos(find_repo_root(os.path.realpath(__file__)), racer_imu_root)
         # Team A's (and B's) checked-out code, so a run of their algorithm
         # records exactly which commit and edits ran.
         repos.update(team_repos(repos['racerbot-ws']))
