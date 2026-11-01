@@ -167,6 +167,24 @@ def test_truncate_outside_sandbox_refused(tmp_path):
     assert target.read_text(encoding='utf-8') == 'keep this'
 
 
+@pytest.mark.parametrize('api', ['builtins', 'io', 'os'])
+@pytest.mark.parametrize('symlink', [False, True])
+def test_device_open_refused(tmp_path, api, symlink):
+    # oracle: all three open APIs must refuse the device, even via a symlink.
+    alias = tmp_path / 'device'
+    alias.symlink_to('/dev/tty')
+    target = str(alias) if symlink else '/dev/tty'
+    with pytest.raises(CaptureError, match='^launch-time device open refused by the oracle: /dev/tty$'):
+        capture(str(FIXTURES / 'device_launch.py'), [f'target:={target}', f'api:={api}'])
+
+
+@pytest.mark.parametrize('api', ['builtins', 'io', 'os'])
+def test_dev_null_allowed(api):
+    # oracle: the explicitly allowed null device supplies an empty read.
+    result = capture(str(FIXTURES / 'device_launch.py'), ['target:=/dev/null', f'api:={api}'])
+    assert node(result, '/device_read')['params'] == {'bytes_read': 0}
+
+
 def test_git_and_ps_probes_simulated():
     expected = stub_probes()
     result = capture(str(FIXTURES / 'git_ps_launch.py'), [])

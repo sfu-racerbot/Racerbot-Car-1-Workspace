@@ -228,8 +228,21 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
             refuse(f'launch-time write outside the oracle sandbox: {path}')
         result['writes'].append(resolved)
 
+    def check_device(path, dir_fd=None):
+        if isinstance(path, int):
+            return
+        path = os.fsdecode(path)
+        if dir_fd is not None and not os.path.isabs(path):
+            path = os.path.join('/proc/self/fd', str(dir_fd), path)
+        resolved = os.path.realpath(path)
+        if (resolved.startswith('/dev/')
+                and resolved not in ('/dev/null', '/dev/zero', '/dev/random', '/dev/urandom')
+                and not resolved.startswith('/dev/shm/')):
+            refuse(f'launch-time device open refused by the oracle: {resolved}')
+
     def guard_open(original):
         def guarded(file, mode='r', *args, **kwargs):
+            check_device(file)
             if any(flag in mode for flag in 'wax+'):
                 check_write(file)
             return original(file, mode, *args, **kwargs)
@@ -237,6 +250,7 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
 
     def guard_os_open(original):
         def guarded(path, flags, *args, **kwargs):
+            check_device(path, kwargs.get('dir_fd'))
             if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC):
                 check_write(path, kwargs.get('dir_fd'))
             return original(path, flags, *args, **kwargs)
