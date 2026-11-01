@@ -4,11 +4,12 @@
 car:
   length: 0.55          # body outline for the GUI [m]
   width: 0.30
-  wheelbase: 0.33       # front-to-rear axle [m]
+  wheelbase: 0.36       # front-to-rear axle [m]; car 1 (racerbot-ws vesc.yaml, 2026-10-24)
   track: 0.26           # left-to-right wheel centers [m]
   wheel_radius: 0.05
   wheel_width: 0.045
-  speed_to_erpm_gain: 4614.0    # erpm = gain * v[m/s] + offset  (copy from the f1tenth vesc.yaml)
+  speed_to_erpm_gain: -4040.0   # erpm = gain * v[m/s] + offset; car 1's vesc_to_odom_node gain
+                                # (racerbot-ws vesc.yaml, tape-calibrated 2026-10-21; negative = car 1's motor direction)
   speed_to_erpm_offset: 0.0
 
 imus:
@@ -16,14 +17,22 @@ imus:
     position: [-0.01, 0.09, 0.08]     # [m] from car center: 1 cm behind, 9 cm left, 8 cm above axle height (measured 2026-09-30)
     rpy_deg: [-0.35, -0.07, -84.69]   # sensor -> car mount rotation (roll, pitch, yaw) AFTER the VESC's own rot_*
                                       # setting. Measured 2026-09-28 (calibrate_imu.py --step mount)
+                                      # NOT car 1's: position, rpy_deg and calib/vesc_calib.json are another car's.
+                                      # Redo calibrate_imu.py --step mount (and the calibration) on car 1.
     weight: 1.0
     port: /dev/ttyACM0
     rate_hz: 200
     can_id: null                 # set if this VESC is reached through another one over CAN
     calib: calib/vesc_calib.json
   bno:                           # BNO085 via microcontroller (front)
-    position: [0.14, 0.00, 0.06]
-    rpy_deg: [0.0, 0.0, 0.0]
+    position: [0.18, 0.00, 0.06]      # car 1: centre of the front axle = wheelbase / 2 ahead of car center.
+                                      # z (0.06) not measured on car 1.
+    rpy_deg: [92.44, 5.22, 90.11]     # car 1, 2026-10-24: roll/pitch refined from 10 s at rest on a level floor
+                                      # (2539 samples): gravity in car axes was [-0.41, -0.89, 9.71] m/s^2 with the
+                                      # nominal [90.0, 0.0, 90.0] (2026-10-23: sensor X -> car left, Y -> up,
+                                      # Z -> forward), [0.00, 0.00, 9.76] with this. Yaw is NOT measured at rest
+                                      # (the 0.11 is a side effect of the minimal correction): confirm with a
+                                      # forward push, or calibrate_imu.py --imu bno --step mount.
     weight: 1.0
     port: /dev/ttyACM1
     baud: 921600
