@@ -44,6 +44,29 @@ TOPIC = '/test_only/drive'
 CONFIG = Path(__file__).resolve().parents[1] / 'config' / 'auto_record.yaml'
 
 
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_output_directory_resolves_per_car(tmp_path, monkeypatch, car, explicit):
+    # Task 7: an empty default selects this car; an explicit path always wins.
+    from race_diagnostics.auto_record_node import AutoRecordNode
+    monkeypatch.setenv('RACERBOT_CAR', car)
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    requested = tmp_path / 'override'
+    args = ['--ros-args']
+    if explicit:
+        args += ['-p', f'output_directory:={requested}']
+    rclpy.init(args=args)
+    node = None
+    try:
+        node = AutoRecordNode()
+        assert node.output_directory == (requested if explicit else
+                                          tmp_path / 'data' / car / 'racerbot_runs')
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
+
 class Graph:
     """Fake algorithms and recorders, spun in a background thread."""
 

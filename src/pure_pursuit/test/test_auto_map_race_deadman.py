@@ -38,6 +38,28 @@ LB_BUTTON = 4
 # The length of a full pad's button list; LB sits inside it, not at the end.
 PAD_BUTTON_COUNT = 11
 
+
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_output_directory_resolves_per_car(tmp_path, monkeypatch, car, explicit):
+    # Task 7 default; explicit overrides remain usable on either car.
+    monkeypatch.setenv('RACERBOT_CAR', car)
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    requested = tmp_path / 'override'
+    args = ['--ros-args', '-p', 'drive_topic:=/test_only/drive']
+    if explicit:
+        args += ['-p', f'output_directory:={requested}']
+    rclpy.init(args=args)
+    node = None
+    try:
+        node = AutoMapRaceNode()
+        assert node.output_directory == (requested if explicit else
+                                          tmp_path / 'data' / car / 'racerbot_auto')
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
 # The mapping command gap_follow would send. Non-zero, so a forwarded command
 # and a stop are told apart by speed alone.
 MAPPING_SPEED = 0.8       # m/s
