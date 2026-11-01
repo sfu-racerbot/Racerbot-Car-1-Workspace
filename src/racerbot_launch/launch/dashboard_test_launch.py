@@ -9,7 +9,6 @@ from racerbot_car.layers import layered, launch_car_id
 
 
 def generate_launch_description():
-    car_id = launch_car_id()
     """Everything the web dashboard can show, minus anything that can move
     the car: LiDAR + UVC webcam stream + the
     dashboard itself, all in one launch, for testing the dashboard/sensors
@@ -33,6 +32,7 @@ def generate_launch_description():
     Then open https://dashboard.sfuracerbot.ca and pick car 1 -- the car
     serves no pages itself any more.
     """
+    car_id = launch_car_id()
     sensors_config = os.path.join(
         get_package_share_directory('f1tenth_stack'), 'config', 'sensors.yaml')
 
