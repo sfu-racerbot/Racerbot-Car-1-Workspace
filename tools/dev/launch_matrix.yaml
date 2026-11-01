@@ -3,6 +3,7 @@ entries:
   - {id: gap_follow-no-opponent, package: gap_follow, launch: gap_follow_launch.py, args: ['opponent_awareness:=false']}
   - {id: gap_follow-no-boost, package: gap_follow, launch: gap_follow_launch.py, args: ['launch_boost:=false']}
   - {id: gap_follow-fused, package: gap_follow, launch: gap_follow_launch.py, args: ['fused_speed:=true']}
+  - {id: gap_follow-opponent-slow, package: gap_follow, launch: gap_follow_launch.py, args: ['opponent_awareness:=true', 'max_speed:=1.0']}
   - {id: imu-ekf-shadow, package: imu_bridge, launch: imu_ekf_shadow_launch.py, args: []}
   - {id: imu-vehicle-state, package: imu_bridge, launch: vehicle_state_launch.py, args: []}
   - {id: imu-bridge, package: imu_bridge, launch: imu_bridge_launch.py, args: []}

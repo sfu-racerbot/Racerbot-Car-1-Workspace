@@ -3,25 +3,29 @@
 Run with: python3 tools/dev/launch_params.py --help (inside ROS 2 Jazzy).
 """
 import argparse
+import builtins
 from collections import Counter
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
+import io
 import json
 import logging
 import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
 
 import yaml
+import launch.logging
 from launch import LaunchService, LaunchDescriptionSource
 from launch.actions import ExecuteLocal, GroupAction, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.launch_description_sources import get_launch_description_from_python_launch_file
 from launch.utilities import perform_substitutions
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
 
 
 class CaptureError(RuntimeError):
@@ -63,25 +67,40 @@ def flatten_params(entries, node_fqn):
     return result
 
 
-def normalize(obj, ws_root):
+def normalize(obj, ws_root, sandbox=None):
     if isinstance(obj, dict):
-        return {normalize(k, ws_root): normalize(v, ws_root) for k, v in obj.items()}
+        return {normalize(k, ws_root, sandbox): normalize(v, ws_root, sandbox) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [normalize(v, ws_root) for v in obj]
+        return [normalize(v, ws_root, sandbox) for v in obj]
     if not isinstance(obj, str):
         return obj
-    for path in sorted({os.path.realpath(ws_root), str(ws_root)}, key=len, reverse=True):
-        obj = obj.replace(path, '<WS>')
-    obj = obj.replace(os.path.expanduser('~'), '<HOME>')
+    replacements = [(os.path.realpath(ws_root), '<WS>'), (str(ws_root), '<WS>'),
+                    (os.path.expanduser('~'), '<HOME>')]
+    if sandbox:
+        replacements.append((os.path.realpath(sandbox), '<SANDBOX>'))
+    for path, replacement in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
+        obj = obj.replace(path, replacement)
     tmp = re.escape(tempfile.gettempdir().rstrip('/'))
-    return re.sub(tmp + r'/[^\s\"\']+', lambda m: '<TMP>/' + os.path.basename(m.group()), obj)
+    return re.sub(r'(?<!>)' + tmp + r'/[^\s\"\']+', lambda m: '<TMP>/' + os.path.basename(m.group()), obj)
 
 
-def capture(launch_file, launch_args, ws_root=None):
+def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
+    if sandbox is None:
+        with tempfile.TemporaryDirectory(prefix='launch_params_') as directory:
+            return capture(launch_file, launch_args, ws_root, sandbox=directory)
     ws_root = ws_root or os.environ.get('RB_WS') or os.getcwd()
-    result = {'nodes': [], 'processes': [], 'deferred_callables': [], 'errors': [], 'probes': []}
+    sandbox = os.path.realpath(sandbox)
+    os.makedirs(sandbox, exist_ok=True)
+    home, tmp = os.path.join(sandbox, 'home'), os.path.join(sandbox, 'tmp')
+    os.makedirs(home, exist_ok=True)
+    os.makedirs(tmp, exist_ok=True)
+    result = {'nodes': [], 'processes': [], 'deferred_callables': [], 'errors': [], 'probes': [], 'writes': []}
     deferred = set()
-    original_register = RegisterEventHandler.execute
+    violations = []
+
+    def refuse(message):
+        violations.append(message)
+        raise CaptureError(message)
 
     def node_execute(self, context):
         self._perform_substitutions(context)
@@ -121,60 +140,123 @@ def capture(launch_file, launch_args, ws_root=None):
         return mark(self, list(self._TimerAction__actions))
 
     def register_execute(self, context):
-        original_register(self, context)
         handler = self.event_handler
         actions = getattr(handler, '_OnActionEventBase__actions_on_event', None)
+        if actions is None:
+            actions = getattr(handler, 'entities', None)
         callback = getattr(handler, '_OnActionEventBase__on_event', None)
+        if callback is None:
+            callback = getattr(handler, '_OnShutdown__on_shutdown', None)
         if callback:
-            result['deferred_callables'].append(callback.__qualname__)
+            result['deferred_callables'].append(f'{type(handler).__name__}:{callback.__qualname__}')
         if isinstance(actions, (list, tuple)):
             deferred.update(id(action) for action in actions)
             return list(actions)
 
     def guarded_argv(args):
         argv = shlex.split(args) if isinstance(args, str) else [str(part) for part in args]
-        if not argv or os.path.basename(argv[0]) != 'pgrep':
-            raise CaptureError(f'launch-time subprocess not allowed by the oracle: {argv}')
-        result['probes'].append({'cmd': argv, 'simulated': 'no match'})
+        programs = {'pgrep': (1, 'no match'), 'git': (128, 'not a repository'), 'ps': (0, 'empty')}
+        program = os.path.basename(argv[0]) if argv else ''
+        if program not in programs:
+            refuse(f'launch-time subprocess not allowed by the oracle: {argv}')
+        code, description = programs[program]
+        result['probes'].append({'cmd': argv, 'simulated': description})
+        return code
 
     def empty(kwargs):
         return '' if kwargs.get('text') or kwargs.get('universal_newlines') or kwargs.get('encoding') else b''
 
     def run(args, *unused, **kwargs):
-        guarded_argv(args)
-        return subprocess.CompletedProcess(args, 1, empty(kwargs), empty(kwargs))
+        code = guarded_argv(args)
+        return subprocess.CompletedProcess(args, code, empty(kwargs), empty(kwargs))
 
     def check_output(args, *unused, **kwargs):
-        guarded_argv(args)
-        raise subprocess.CalledProcessError(1, args, output=empty(kwargs))
+        code = guarded_argv(args)
+        if code:
+            raise subprocess.CalledProcessError(code, args, output=empty(kwargs))
+        return empty(kwargs)
 
     def call(args, *unused, **kwargs):
-        guarded_argv(args)
-        return 1
+        return guarded_argv(args)
 
     class Popen:
         def __init__(self, args, *unused, **kwargs):
-            guarded_argv(args)
-            self.returncode = 1
+            self.returncode = guarded_argv(args)
             self.output = empty(kwargs)
 
         def communicate(self, *args, **kwargs):
             return self.output, self.output
 
         def wait(self, *args, **kwargs):
-            return 1
+            return self.returncode
 
         def poll(self):
-            return 1
+            return self.returncode
 
     class ErrorHandler(logging.Handler):
         def emit(self, record):
             result['errors'].append(record.getMessage())
 
+    def check_write(path, dir_fd=None):
+        if isinstance(path, int) or dir_fd is not None:
+            refuse(f'launch-time write outside the oracle sandbox: {path}')
+        resolved = os.path.realpath(os.fsdecode(path))
+        if os.path.commonpath([sandbox, resolved]) != sandbox:
+            refuse(f'launch-time write outside the oracle sandbox: {path}')
+        result['writes'].append(resolved)
+
+    def guard_open(original):
+        def guarded(file, mode='r', *args, **kwargs):
+            if any(flag in mode for flag in 'wax+'):
+                check_write(file)
+            return original(file, mode, *args, **kwargs)
+        return guarded
+
+    def guard_os_open(original):
+        def guarded(path, flags, *args, **kwargs):
+            if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC):
+                check_write(path, kwargs.get('dir_fd'))
+            return original(path, flags, *args, **kwargs)
+        return guarded
+
+    def guard_paths(original, indices):
+        def guarded(*args, **kwargs):
+            for index in indices:
+                check_write(args[index], kwargs.get('dir_fd') or kwargs.get('src_dir_fd') or kwargs.get('dst_dir_fd'))
+            return original(*args, **kwargs)
+        return guarded
+
     logger = logging.getLogger('launch')
     handler = ErrorHandler(level=logging.ERROR)
     with ExitStack() as stack:
+        stack.enter_context(patch.dict(os.environ, {'HOME': home, 'TMPDIR': tmp, 'ROS_LOG_DIR': os.path.join(sandbox, 'log')}))
+        stack.enter_context(patch.object(tempfile, 'tempdir', tmp))
+        stack.enter_context(patch.object(sys, 'dont_write_bytecode', True))
+        config = launch.logging.launch_config
+        stack.enter_context(patch.object(config, '_log_dir', sandbox))
+        stack.enter_context(patch.object(config, 'file_handlers', {}))
+        stack.enter_context(patch.object(config, 'get_log_file_handler', lambda *a, **kw: logging.NullHandler()))
+        for existing in list(logging.root.manager.loggerDict.values()):
+            if isinstance(existing, logging.Logger):
+                for old_handler in list(existing.handlers):
+                    if isinstance(old_handler, logging.FileHandler):
+                        existing.removeHandler(old_handler)
+                        stack.callback(existing.addHandler, old_handler)
+        for owner, name in [(builtins, 'open'), (io, 'open')]:
+            stack.enter_context(patch.object(owner, name, guard_open(getattr(owner, name))))
+        stack.enter_context(patch.object(os, 'open', guard_os_open(os.open)))
+        for owner, names, indices in [
+                (os, ('mkdir', 'makedirs', 'remove', 'unlink', 'rmdir'), (0,)),
+                (os, ('rename', 'replace'), (0, 1)),
+                (os, ('symlink',), (1,)),
+                (os, ('link',), (0, 1)),
+                (shutil, ('rmtree',), (0,)),
+                (shutil, ('copy', 'copy2', 'copyfile', 'copytree'), (1,)),
+                (shutil, ('move',), (0, 1))]:
+            for name in names:
+                stack.enter_context(patch.object(owner, name, guard_paths(getattr(owner, name), indices)))
         for owner, attr, replacement in [(Node, 'execute', node_execute),
+                (LifecycleNode, 'execute', node_execute),
                 (ExecuteLocal, 'execute', process_execute), (TimerAction, 'execute', timer_execute),
                 (RegisterEventHandler, 'execute', register_execute),
                 (subprocess, 'run', run), (subprocess, 'Popen', Popen),
@@ -192,15 +274,19 @@ def capture(launch_file, launch_args, ws_root=None):
             description = get_launch_description_from_python_launch_file(launch_file)
         except Exception as exc:
             raise CaptureError(f'{type(exc).__name__}: {exc}') from exc
+        if violations:
+            raise CaptureError(violations[0])
         arguments = [tuple(arg.split(':=', 1)) for arg in launch_args]
         service = LaunchService(noninteractive=True)
         service.include_launch_description(IncludeLaunchDescription(
             LaunchDescriptionSource(description), launch_arguments=arguments))
         rc = service.run(shutdown_when_idle=True)
+        if violations:
+            raise CaptureError(violations[0])
         if rc or result['errors']:
             raise CaptureError('\n'.join(result['errors']) or f'launch returned {rc}')
     result['nodes'].sort(key=lambda n: (n['namespace'] or '', n['name'] or '', n['package'], n['executable']))
-    return normalize(result, ws_root)
+    return normalize(result, ws_root, sandbox)
 
 
 def diff_captures(a, b):
@@ -288,6 +374,7 @@ def main(argv=None):
     if options.command == 'capture-one':
         if bool(options.file) == bool(options.package) or bool(options.package) != bool(options.launch):
             parser.error('specify --file or --package with --launch')
+        launch_output = io.StringIO()
         try:
             if options.file:
                 path = options.file
@@ -295,10 +382,14 @@ def main(argv=None):
                 from ros2launch.api import get_share_file_path_from_package
                 path = get_share_file_path_from_package(package_name=options.package, file_name=options.launch)
             args = options.args[1:] if options.args[:1] == ['--'] else options.args
-            print(json.dumps(capture(path, args, options.ws), sort_keys=True, indent=1))
+            with redirect_stdout(launch_output):
+                captured = capture(path, args, options.ws)
+            print(json.dumps(captured, sort_keys=True, indent=1))
+            print(launch_output.getvalue(), end='', file=sys.stderr)
             return 0
         except (CaptureError, OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
+            print(launch_output.getvalue(), end='', file=sys.stderr)
             return 2
     if options.command == 'capture':
         try:
@@ -321,6 +412,11 @@ def main(argv=None):
             try:
                 proc = subprocess.run(cmd, text=True, capture_output=True, timeout=120, env=env)
                 error = proc.stderr if proc.returncode else None
+                if error is None:
+                    try:
+                        json.loads(proc.stdout)
+                    except json.JSONDecodeError as exc:
+                        error = f'invalid capture JSON: {exc}'
             except subprocess.TimeoutExpired:
                 error = 'capture timed out after 120 seconds'
             if error is not None:

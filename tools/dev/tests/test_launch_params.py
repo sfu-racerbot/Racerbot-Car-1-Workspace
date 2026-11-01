@@ -1,9 +1,11 @@
 """Run with: RB_WS=$PWD rb python3 -m pytest tools/dev/tests/test_launch_params.py."""
 import copy
+import json
 import os
 from pathlib import Path
 import re
 import sys
+import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 
@@ -71,6 +73,17 @@ def test_event_handler_actions_captured_as_deferred():
     assert result['processes'] == [{'cmd': ['true'], 'deferred': False}]
 
 
+def test_lifecycle_node_is_captured_without_ros_manager(monkeypatch):
+    import launch_ros.utilities.lifecycle_event_manager as manager
+
+    def forbidden(context):
+        raise RuntimeError('lifecycle manager must not create a ROS node')
+
+    monkeypatch.setattr(manager, 'get_ros_node', forbidden)
+    result = capture(str(FIXTURES / 'lifecycle_launch.py'), [])
+    assert node(result, '/lifecycle_node')['executable'] == 'lifecycle_exe'
+
+
 def test_broken_launch_raises_capture_error():
     with pytest.raises(CaptureError, match='car id unknown: 999'):
         capture(str(FIXTURES / 'broken_launch.py'), [])
@@ -85,6 +98,42 @@ def test_pgrep_probe_simulated_no_match():
 def test_other_subprocess_refused():
     with pytest.raises(CaptureError, match='launch-time subprocess not allowed'):
         capture(str(FIXTURES / 'forbidden_launch.py'), [])
+
+
+def test_shutdown_handler_recorded_never_run():
+    result = capture(str(FIXTURES / 'shutdown_launch.py'), [])
+    assert node(result, '/safe')['executable'] == 'exe'
+    assert any(item.startswith('OnShutdown:') for item in result['deferred_callables'])
+
+
+def test_write_inside_sandbox_recorded(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    result = capture(str(FIXTURES / 'writes_launch.py'), [])
+    assert '<SANDBOX>/home/x/out.txt' in result['writes']
+    assert not (tmp_path / 'x/out.txt').exists()
+
+
+def test_write_outside_sandbox_refused(tmp_path):
+    target = tmp_path / 'outside.txt'
+    with pytest.raises(CaptureError, match='outside the oracle sandbox'):
+        capture(str(FIXTURES / 'writes_outside_launch.py'), [f'target:={target}'])
+    assert not target.exists()
+
+
+def test_git_and_ps_probes_simulated():
+    result = capture(str(FIXTURES / 'git_ps_launch.py'), [])
+    assert node(result, '/n128')['executable'] == 'exe'
+    assert result['probes'] == [
+        {'cmd': ['git', '-C', '/', 'status'], 'simulated': 'not a repository'},
+        {'cmd': ['ps', '-e'], 'simulated': 'empty'},
+    ]
+
+
+def test_capture_one_stdout_is_pure_json(tmp_path):
+    command = [sys.executable, str(ROOT / 'tools/dev/launch_params.py'), 'capture-one',
+               '--file', str(FIXTURES / 'demo_launch.py'), '--', f'marker:={tmp_path}/m']
+    process = subprocess.run(command, capture_output=True, text=True, check=True)
+    assert node(json.loads(process.stdout), '/demo_node')['executable'] == 'does_not_exist_exe'
 
 
 def test_normalize_replaces_ws_home_tmp():
@@ -108,6 +157,8 @@ def test_diff_ignores_param_files():
     b = copy.deepcopy(a)
     b['nodes'][0]['param_files'] = ['b']
     assert diff_captures(a, b) == []
+    b['nodes'][0]['params']['x'] = 2
+    assert diff_captures(a, b) == ['~ /n x 1 -> 2']
 
 
 def test_resolve_args_data_placeholder(tmp_path):
