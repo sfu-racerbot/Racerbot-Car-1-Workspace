@@ -63,7 +63,7 @@ cd ~/racerbot-ws
 python3 -m pytest src/racerbot_launch/test/ -v
 ```
 
-**Working when:** every test passes, including all of `test_car1_hardware_config.py`. That file fails if car 2's Ethernet LiDAR settings, a RealSense launch, a car 2 dashboard config, car 2's steering calibration or limits, or a doctor that disagrees with car 1's udev rule or webcam path comes back. It also fails if car 1's I2C BNO085 setup is lost: the bridge, `--no-dyncal`, the driver restart, `map_course` running the IMU side, or `vehicle_state`'s wheelbase.
+**Working when:** every test passes, including all of `test_car_profiles.py`. That file fails if car 2's Ethernet LiDAR settings, a RealSense launch, a car 2 dashboard config, car 2's steering calibration or limits, or a doctor that disagrees with car 1's udev rule or webcam path comes back. It also fails if car 1's I2C BNO085 setup is lost: the bridge, `--no-dyncal`, the driver restart, `map_course` running the IMU side, or `vehicle_state`'s wheelbase.
 
 **If it doesn't:** the failing test's name says which row of the tables above was clobbered.
 
@@ -79,7 +79,7 @@ ros2 run racerbot_doctor doctor
 
 ## Updating this page
 
-When you find a new car 1 difference, add a row here **and**, if it lives in a file, a check to `src/racerbot_launch/test/test_car1_hardware_config.py`. A difference that's only written down will eventually be overwritten by a port.
+When you find a new car 1 difference, add a row here **and**, if it lives in a file, a check to `src/racerbot_launch/test/test_car_profiles.py`. A difference that's only written down will eventually be overwritten by a port.
 
 ## See also
 

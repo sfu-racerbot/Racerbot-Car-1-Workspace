@@ -73,11 +73,15 @@ def test_bridge_loads_rb1_bno_calibration():
         np.testing.assert_array_equal(getattr(cal, key), data[key])
 
 
-def test_rb2_imu_car_yaml_agrees_with_rb2_calibration():
+def _rb2_imu_car_yaml():
     import yaml
+    return yaml.safe_load((CAR / 'rb2/imu/car.yaml').read_text())
+
+
+def test_rb2_imu_car_yaml_agrees_with_rb2_calibration():
     from racerbot_car.layers import effective_config
 
-    car_yaml = yaml.safe_load((CAR / 'rb2/imu/car.yaml').read_text())
+    car_yaml = _rb2_imu_car_yaml()
     gain = effective_config('vesc.yaml', '/**', 'rb2')['speed_to_erpm_gain']
     assert car_yaml['car']['wheelbase'] == 0.36
     assert car_yaml['car']['speed_to_erpm_gain'] == gain
