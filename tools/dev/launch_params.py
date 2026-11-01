@@ -333,26 +333,27 @@ def diff_captures(a, b):
         result = {}
         for n in nodes:
             if n['name']:
-                key = (n['namespace'], n['name'], n['package'], n['executable'])
+                identity = (n['namespace'], n['name'], n['package'], n['executable'])
             else:
-                pair = (n['package'], n['executable'])
-                key = (*pair, counts[pair])
-                counts[pair] += 1
+                identity = (n['package'], n['executable'])
+            key = (*identity, counts[identity])
+            counts[identity] += 1
             result[key] = n
         return result
-    def label(n):
-        return n['name'] or f"{n['package']}/{n['executable']}"
+    def label(n, key):
+        name = n['name'] or f"{n['package']}/{n['executable']}"
+        return name + (f'#{key[-1] + 1}' if key[-1] else '')
     def value(v):
         return json.dumps(v, sort_keys=True)
     left, right = indexed(a['nodes']), indexed(b['nodes'])
     lines = []
     for key in left.keys() - right.keys():
-        lines.append('- node ' + label(left[key]))
+        lines.append('- node ' + label(left[key], key))
     for key in right.keys() - left.keys():
-        lines.append('+ node ' + label(right[key]))
+        lines.append('+ node ' + label(right[key], key))
     for key in left.keys() & right.keys():
         x, y = left[key], right[key]
-        name = label(x)
+        name = label(x, key)
         for param in x['params'].keys() - y['params'].keys():
             lines.append(f"- {name} {param}={value(x['params'][param])}")
         for param in y['params'].keys() - x['params'].keys():

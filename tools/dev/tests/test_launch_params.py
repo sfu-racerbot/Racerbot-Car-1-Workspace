@@ -249,6 +249,18 @@ def test_diff_reports_type_change_inside_unnamed_blocks():
     assert diff_captures(a, b) == ['~ p/exe blocks {"/**": {"x": [true]}} -> {"/**": {"x": [1]}}']
 
 
+def test_diff_reports_duplicate_named_node():
+    # oracle: each repeated identity represents another node, not an overwrite.
+    a = {'nodes': [record('/x', {})], 'processes': []}
+    b = {'nodes': [record('/x', {}), record('/x', {})], 'processes': []}
+    assert diff_captures(a, b) == ['+ node /x#2']
+    assert diff_captures(b, a) == ['- node /x#2']
+    b['nodes'][1]['params'] = {'gain': 2}
+    c = copy.deepcopy(b)
+    c['nodes'][1]['params']['gain'] = 3
+    assert diff_captures(b, c) == ['~ /x#2 gain 2 -> 3']
+
+
 def test_diff_ignores_param_files():
     a = {'nodes': [record('/n', {'x': 1}, ['a'])], 'processes': []}
     b = copy.deepcopy(a)
