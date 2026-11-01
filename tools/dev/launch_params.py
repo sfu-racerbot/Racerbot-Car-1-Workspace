@@ -98,7 +98,8 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
     home, tmp = os.path.join(sandbox, 'home'), os.path.join(sandbox, 'tmp')
     os.makedirs(home, exist_ok=True)
     os.makedirs(tmp, exist_ok=True)
-    result = {'nodes': [], 'processes': [], 'deferred_callables': [], 'errors': [], 'probes': [], 'writes': []}
+    result = {'nodes': [], 'processes': [], 'deferred_callables': [], 'errors': [],
+              'probes': [], 'writes': [], 'missing_includes': []}
     deferred = set()
     violations = []
 
@@ -282,7 +283,15 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
         for cls in (GroupAction, IncludeLaunchDescription, OpaqueFunction):
             original = cls.execute
             def propagate(self, context, original=original):
-                return mark(self, original(self, context))
+                try:
+                    return mark(self, original(self, context))
+                except Exception as exc:
+                    match = re.search(r"package '([^']+)' not found", str(exc))
+                    if isinstance(self, IncludeLaunchDescription) and match:
+                        result['missing_includes'].append(
+                            {'package': match.group(1), 'deferred': id(self) in deferred})
+                        return None
+                    raise
             stack.enter_context(patch.object(cls, 'execute', propagate))
         logger.addHandler(handler)
         stack.callback(logger.removeHandler, handler)
@@ -302,6 +311,7 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
         if rc or result['errors']:
             raise CaptureError('\n'.join(result['errors']) or f'launch returned {rc}')
     result['nodes'].sort(key=lambda n: (n['namespace'] or '', n['name'] or '', n['package'], n['executable']))
+    result['missing_includes'].sort(key=lambda entry: (entry['package'], entry['deferred']))
     return normalize(result, ws_root, sandbox)
 
 
@@ -345,6 +355,10 @@ def diff_captures(a, b):
         counts = Counter(json.dumps(p, sort_keys=True) for p in first['processes']) - Counter(json.dumps(p, sort_keys=True) for p in second['processes'])
         for item, count in counts.items():
             lines.extend([f"{sign} process {value(json.loads(item)['cmd'])}"] * count)
+        missing = Counter(entry['package'] for entry in first.get('missing_includes', [])) - Counter(
+            entry['package'] for entry in second.get('missing_includes', []))
+        for package, count in missing.items():
+            lines.extend([f'{sign} missing_include {package}'] * count)
     return sorted(lines)
 
 

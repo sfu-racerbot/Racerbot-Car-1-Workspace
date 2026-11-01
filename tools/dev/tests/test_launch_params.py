@@ -74,6 +74,13 @@ def test_include_and_namespace_followed(demo):
     assert node(demo, '/ns2/named_node')['params']['gain'] == 2.0
 
 
+def test_missing_package_include_recorded():
+    # oracle: missing include is reported and does not hide its sibling node.
+    result = capture(str(FIXTURES / 'missing_include_launch.py'), [])
+    assert node(result, '/after_include')['executable'] == 'exe'
+    assert result['missing_includes'] == [{'package': 'no_such_pkg_xyz', 'deferred': False}]
+
+
 def test_event_handler_actions_captured_as_deferred():
     result = capture(str(FIXTURES / 'handler_launch.py'), [])
     assert node(result, '/after_node')['deferred'] is True
@@ -187,6 +194,13 @@ def test_diff_ignores_param_files():
     assert diff_captures(a, b) == []
     b['nodes'][0]['params']['x'] = 2
     assert diff_captures(a, b) == ['~ /n x 1 -> 2']
+
+
+def test_diff_reports_missing_include():
+    # oracle: added and removed missing includes are visible in the diff.
+    a = {'nodes': [], 'processes': [], 'missing_includes': [{'package': 'old', 'deferred': False}]}
+    b = {'nodes': [], 'processes': [], 'missing_includes': [{'package': 'new', 'deferred': True}]}
+    assert diff_captures(a, b) == ['+ missing_include new', '- missing_include old']
 
 
 def test_resolve_args_data_placeholder(tmp_path):
