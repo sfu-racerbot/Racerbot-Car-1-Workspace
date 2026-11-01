@@ -29,13 +29,35 @@ use `src/racerbot_car/cars/CAR/imu/car.yaml`, where `CAR` is the selected car ID
 An unresolved car or missing file causes an error naming `RACERBOT_CAR` and `--config`.
 
 Relative calibration paths are read beside that `car.yaml` first, then under
-`tools/imu_calibration/`. New calibration JSONs are written beside the selected
+`tools/imu_calibration/`.
+
+New calibration JSONs are written beside the selected
 configuration, in its `calib/` directory. Explicit output paths take precedence.
+
 Simulation calibration stays under `tools/imu_calibration/calib/sim/`.
 The former `config/` and `calib/` directories here contain no per-car files.
 
 From a terminal at the workspace root, run `python3 -m pytest tools/imu_calibration/tests/ -q`.
 Expect two known `test_online.py` failures with car 1's mount; see the workspace `CLAUDE.md`.
+
+### Check calibration path selection
+
+From a terminal at the workspace root, run:
+
+```bash
+python3 -m pytest tools/imu_calibration/tests/test_car_yaml_relative_paths.py -q -p no:cacheprovider
+```
+
+Expect seven passing tests. They check local-first reads, root fallback, per-car
+outputs and defaults, refusal of an unknown car, and simulator path isolation.
+The BNO test compares loaded calibration values with car 1's JSON file.
+
+These regressions were also checked with deliberate resolver breaks: root-only
+reads, local-only reads, root-directed outputs, local simulator paths and a
+fallback to the removed default configuration.
+
+Each break caused its relevant
+test to fail; the implementation was restored before running the suite again.
 
 Two IMUs on the car:
 - **VESC built-in IMU**, read over USB with the VESC binary protocol.
