@@ -56,6 +56,20 @@ def test_default_config_is_car_profile(monkeypatch):
     assert frames.default_config_path() == CAR
 
 
+def test_default_config_follows_cars_dir_override(tmp_path, monkeypatch):
+    source = CAR.parents[2]
+    cars = tmp_path / 'cars'
+    (cars / 'rb1/imu').mkdir(parents=True)
+    machine_map = yaml.safe_load((source / 'machines.yaml').read_text())
+    serial_rb1 = next(serial for serial, car in machine_map.items() if car == 'rb1')
+    (cars / 'machines.yaml').write_text(yaml.safe_dump({serial_rb1: 'rb1'}))
+    (cars / 'rb1/car.yaml').write_text((source / 'rb1/car.yaml').read_text())
+    (cars / 'rb1/imu/car.yaml').write_text(CAR.read_text())
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    assert frames.default_config_path() == cars / 'rb1/imu/car.yaml'
+
+
 def test_default_config_refuses_unknown_car(monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', 'rbX')
     with pytest.raises(FileNotFoundError, match='RACERBOT_CAR'):

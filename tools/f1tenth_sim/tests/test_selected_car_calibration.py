@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / 'tools/f1tenth_sim'))
 sys.path.insert(0, str(ROOT / 'src/racerbot_car'))
 
 from racerbot_car.layers import effective_config  # noqa: E402
+from racerbot_car import identity  # noqa: E402
 from racerbot_car.identity import known_car_ids  # noqa: E402
 from racerbot_car.paths import cars_dir  # noqa: E402
 from sim_fidelity import calibration  # noqa: E402
@@ -80,3 +81,32 @@ def test_import_without_car_and_entry_point_refuses():
     assert 'imported' in result.stdout
     assert result.returncode != 0
     assert 'RACERBOT_CAR' in result.stderr
+
+
+def _set_machine_identity(tmp_path, monkeypatch, car):
+    machines = yaml.safe_load((cars_dir() / 'machines.yaml').read_text())
+    serial = tmp_path / 'serial'
+    serial.write_text(next(key for key, value in machines.items() if value == car))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(serial))
+
+
+def test_implicit_selection_refuses_serial_mismatch(tmp_path, monkeypatch):
+    _set_machine_identity(tmp_path, monkeypatch, 'rb2')
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    with pytest.raises(identity.CarMismatchError, match='identifies rb2, but RACERBOT_CAR is rb1'):
+        calibration.selected_car()
+
+
+def test_explicit_car_may_differ_from_machine(tmp_path, monkeypatch, capsys):
+    _set_machine_identity(tmp_path, monkeypatch, 'rb2')
+    monkeypatch.delenv('RACERBOT_CAR', raising=False)
+    selected = calibration.selected_car('rb1')
+    assert selected == 'rb1'
+    assert calibration.calibration_for_car(selected).speed_to_erpm_gain == effective_config(
+        'vesc.yaml', '/**', 'rb1')['speed_to_erpm_gain']
+    assert 'Machine identity is rb2; explicitly selected rb1' in capsys.readouterr().out
+
+
+def test_explicit_unknown_car_refuses():
+    with pytest.raises(identity.UnknownCarError, match="unknown car 'rb9'"):
+        calibration.selected_car('rb9')
