@@ -1,0 +1,220 @@
+[INFO] [launch]: All log files can be found below /home/racerbotcar-1/.ros/log/2026-10-26-19-44-22-094308-racerbot-car1-156737
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 
+========================================================================
+Recording run to: /home/racerbotcar-1/.ros/racerbot_runs/20261026-194422
+Start the driving stack in another terminal, ideally WITH tee
+so its terminal output is captured directly:
+
+  ros2 launch racerbot_launch auto_map_race_launch.py \
+    2>&1 | tee /home/racerbotcar-1/.ros/racerbot_runs/20261026-194422/launch.log
+
+`| tee` is optional, not required: if you forget it, summarize_run
+reconstructs an equivalent log from each node's own ~/.ros/log/
+file instead -- see docs/run-diagnostics.md.
+
+Afterwards:
+  ros2 run race_diagnostics summarize_run /home/racerbotcar-1/.ros/racerbot_runs/20261026-194422
+========================================================================
+[INFO] [race_diag_node-1]: process started with pid [156898]
+[INFO] [snapshot_params-2]: process started with pid [156899]
+[INFO] [ros2-3]: process started with pid [156900]
+[INFO] [async_slam_toolbox_node-4]: process started with pid [156901]
+[INFO] [bno_i2c_bridge-5]: process started with pid [156902]
+[INFO] [imu_bridge_node-6]: process started with pid [156903]
+[INFO] [vehicle_state_node-7]: process started with pid [156904]
+[INFO] [gap_follow_node-8]: process started with pid [156905]
+[INFO] [auto_map_race_node-9]: process started with pid [156906]
+[async_slam_toolbox_node-4] [INFO] [1793069063.629828105] [slam_toolbox]: Node using stack size 40000000
+[async_slam_toolbox_node-4] [INFO] [1793069063.631689501] [slam_toolbox]: Configuring
+[async_slam_toolbox_node-4] [INFO] [1793069063.683195942] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[async_slam_toolbox_node-4] [INFO] [1793069063.696010766] [slam_toolbox]: CeresSolver: Using HuberLoss loss function.
+[async_slam_toolbox_node-4] [INFO] [1793069063.697136206] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[INFO] [launch.user]: [LifecycleLaunch] slam_toolbox configured; activating.
+[async_slam_toolbox_node-4] [INFO] [1793069063.920552507] [slam_toolbox]: Activating
+[bno_i2c_bridge-5] # dynamic calibration before {'accel': 1, 'gyro': 0, 'mag': 1, 'planar': 0, 'on_table': 0}
+[bno_i2c_bridge-5] # dynamic calibration now    {'accel': 0, 'gyro': 0, 'mag': 1, 'planar': 0, 'on_table': 0}
+[bno_i2c_bridge-5] # virtual serial port /tmp/bno085 -> /dev/pts/8
+[async_slam_toolbox_node-4] [INFO] [1793069064.078126827] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069064.045 for reason 'discarding message because the queue is full'
+[ros2-3] [WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+[ros2-3] stdin is not a terminal device. Keyboard handling disabled.[INFO] [1793069064.806882015] [rosbag2_recorder]: Press SPACE for pausing/resuming
+[ros2-3] [INFO] [1793069064.807427054] [rosbag2_recorder]: Event publisher thread: Started
+[ros2-3] [INFO] [1793069064.850102302] [rosbag2_recorder]: Starting recording to '/home/racerbotcar-1/.ros/racerbot_runs/20261026-194422/bag'
+[imu_bridge_node-6] [INFO] [1793069064.850540107] [imu_bridge_node]: vesc: mount rpy_deg=[-0.35, -0.07, -84.69], calibration: /home/racerbotcar-1/imu-calibration/calib/vesc_calib.json
+[ros2-3] [INFO] [1793069064.879886020] [rosbag2_recorder]: Subscribed to topic '/rosout'
+[ros2-3] [INFO] [1793069064.880207437] [rosbag2_recorder]: Listening for topics...
+[ros2-3] [INFO] [1793069064.880249358] [rosbag2_recorder]: Recording...
+[ros2-3] [INFO] [1793069064.880351921] [rosbag2_recorder]: Topics discovery started.
+[ros2-3] [INFO] [1793069064.940264647] [rosbag2_recorder]: Subscribed to topic '/parameter_events'
+[ros2-3] [INFO] [1793069065.062073705] [rosbag2_recorder]: Subscribed to topic '/imu/vesc/data'
+[ros2-3] [INFO] [1793069065.065841011] [rosbag2_recorder]: Subscribed to topic '/imu/data'
+[ros2-3] [INFO] [1793069065.075839116] [rosbag2_recorder]: Subscribed to topic '/imu_bridge/wheel_odom'
+[imu_bridge_node-6] [INFO] [1793069065.079090088] [imu_bridge_node]: bno: mount rpy_deg=[92.44, 5.22, 90.11], calibration: /home/racerbotcar-1/imu-calibration/calib/bno_calib.json
+[ros2-3] [INFO] [1793069065.090155839] [rosbag2_recorder]: Subscribed to topic '/odom/fused'
+[ros2-3] [INFO] [1793069065.101419036] [rosbag2_recorder]: Subscribed to topic '/odom/imu'
+[imu_bridge_node-6] [INFO] [1793069065.104485490] [imu_bridge_node]: imu_bridge up: primary=bno, frame_id=base_link, startup bias 3.0 s (keep the car still), BNO on /tmp/bno085
+[ros2-3] [INFO] [1793069065.106193122] [rosbag2_recorder]: Subscribed to topic '/steering/measured'
+[imu_bridge_node-6] [INFO] [1793069065.113358604] [imu_bridge_node]: /imu/status: waiting: startup gyro bias not removed yet (keep the car still)
+[ros2-3] [INFO] [1793069065.114488107] [rosbag2_recorder]: Subscribed to topic '/imu/bno/data'
+[ros2-3] [INFO] [1793069065.123062365] [rosbag2_recorder]: Subscribed to topic '/imu/bno/raw'
+[ros2-3] [INFO] [1793069065.138639571] [rosbag2_recorder]: Subscribed to topic '/tf'
+[vehicle_state_node-7] [INFO] [1793069065.192863304] [vehicle_state_node]: vehicle_state up: /odom -> /odom/fused, /steering/measured at 50 Hz, /odom/imu in odom_imu; accel from bno, heading from ['bno', 'vesc'], gyro weights {'bno': 1.0, 'vesc': 1.0}, wheelbase 0.36 m; publishing odom_imu -> odom
+[ros2-3] [INFO] [1793069065.311723671] [rosbag2_recorder]: Subscribed to topic '/auto_map/drive'
+[ros2-3] [INFO] [1793069065.323338654] [rosbag2_recorder]: Subscribed to topic '/drive_intent'
+[gap_follow_node-8] [INFO] [1793069065.440664450] [gap_follow_node]: gap_follow_node ready: scan='/scan' -> drive='/auto_map/drive', speed=1.00-3.50m/s, deadman ENABLED (LB must be held), decision logs every 1.0s (plus immediate state changes).
+[gap_follow_node-8] [WARN] [1793069065.671194327] [gap_follow_node]: STOP [waiting_for_scan] no LaserScan received on '/scan'; no drive command is being generated; command: none (ackermann_mux publishes no zero; only the VESC's own command timeout stops the motor)
+[race_diag_node-1] [19:44:25] ARMED: probe armed (subscribe-only); waiting for the stack
+[race_diag_node-1] [19:44:26] FIRST_MESSAGE: first odom: linear.x=+0.00m/s
+[gap_follow_node-8] [WARN] [1793069066.065169473] [gap_follow_node]: STOP [waiting_for_joy] no Joy messages received on '/joy'; LB cannot be verified; command: steering=+0.000rad, speed=0.00m/s
+[ros2-3] [INFO] [1793069066.075211259] [rosbag2_recorder]: Subscribed to topic '/tf_static'
+[ros2-3] [INFO] [1793069066.117719719] [rosbag2_recorder]: Subscribed to topic '/scan'
+[gap_follow_node-8] [WARN] [1793069066.183827691] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [INFO] [1793069066.197228772] [auto_map_race_node]: Automatic mapping started: gap follow will map 3 lap(s), then the generated profile will be loaded and pure pursuit will race. Deadman ENABLED (hold LB); mapping source='/auto_map/drive', racing source='/auto_race/drive', output='/drive'; decision logs every 1.0s (plus immediate state changes).
+[auto_map_race_node-9] [WARN] [1793069066.204646932] [auto_map_race_node]: Waiting for map->base_link from SLAM: "map" passed to lookupTransform argument target_frame does not exist. 
+[auto_map_race_node-9] [WARN] [1793069066.211512021] [auto_map_race_node]: STOP [waiting_for_joy] no Joy messages received on '/joy'; LB cannot be verified; output command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069066.238932153] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[ros2-3] [INFO] [1793069066.387146626] [rosbag2_recorder]: Subscribed to topic '/drive'
+[ros2-3] [INFO] [1793069066.402115847] [rosbag2_recorder]: Subscribed to topic '/slam_pose'
+[ros2-3] [INFO] [1793069066.449316982] [rosbag2_recorder]: Subscribed to topic '/joy'
+[ros2-3] [INFO] [1793069066.548430682] [rosbag2_recorder]: Subscribed to topic '/diagnostics'
+[ros2-3] [INFO] [1793069066.566220879] [rosbag2_recorder]: Subscribed to topic '/ackermann_cmd'
+[async_slam_toolbox_node-4] [INFO] [1793069066.578879699] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069066.544 for reason 'discarding message because the queue is full'
+[ros2-3] [INFO] [1793069066.585749684] [rosbag2_recorder]: Subscribed to topic '/initialpose'
+[race_diag_node-1] [19:44:26] STATUS: scan=NEVER | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released
+[race_diag_node-1] [19:44:26] FIRST_MESSAGE: first scan: 1081 beams, frame_id=laser
+[race_diag_node-1] [19:44:26] FIRST_MESSAGE: first drive: speed=0.00m/s
+[race_diag_node-1] [19:44:26] FIRST_MESSAGE: first joy: 11 buttons
+[gap_follow_node-8] [WARN] [1793069067.199263837] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069067.232188027] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [WARN] [1793069067.395460524] [imu_bridge_node]: /imu/status: fault: input stale (no sample for 0.33 s, limit 0.10 s)
+[ros2-3] [INFO] [1793069067.403914265] [rosbag2_recorder]: Subscribed to topic '/sensors/imu/raw'
+[imu_bridge_node-6] [INFO] [1793069067.423161207] [imu_bridge_node]: /imu/status: waiting: startup gyro bias not removed yet (keep the car still)
+[ros2-3] [INFO] [1793069067.434555159] [rosbag2_recorder]: Subscribed to topic '/sensors/core'
+[ros2-3] [INFO] [1793069067.447021046] [rosbag2_recorder]: Subscribed to topic '/sensors/servo_position_command'
+[ros2-3] [INFO] [1793069067.566689564] [rosbag2_recorder]: Subscribed to topic '/odom'
+[gap_follow_node-8] [WARN] [1793069068.200133141] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069068.207050904] [auto_map_race_node]: Waiting for map->base_link from SLAM: "map" passed to lookupTransform argument target_frame does not exist. 
+[auto_map_race_node-9] [WARN] [1793069068.236351760] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[ros2-3] [INFO] [1793069068.356024246] [rosbag2_recorder]: Subscribed to topic '/map_metadata'
+[ros2-3] [INFO] [1793069068.362319079] [rosbag2_recorder]: Subscribed to topic '/map'
+[ros2-3] [INFO] [1793069068.376581720] [rosbag2_recorder]: Subscribed to topic '/pose'
+[ros2-3] [INFO] [1793069068.408390711] [rosbag2_recorder]: Subscribed to topic '/slam_toolbox/graph_visualization'
+[async_slam_toolbox_node-4] Registering sensor: [Custom Described Lidar]
+[race_diag_node-1] [19:44:28] FIRST_MESSAGE: first map: 228x171 @ 0.050m/cell, 210 occupied cells
+[gap_follow_node-8] [WARN] [1793069069.225412316] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069069.258177301] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[race_diag_node-1] [19:44:29] FIRST_MESSAGE: first pose: map-frame (+19.60, +40.70)
+[auto_map_race_node-9] [INFO] [1793069069.431185783] [auto_map_race_node]: Start pose recorded: x=19.60 y=40.70 yaw=34deg (map frame). Racing on this map starts from here.
+[async_slam_toolbox_node-4] [INFO] [1793069069.546866061] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069069.519 for reason 'discarding message because the queue is full'
+[race_diag_node-1] [19:44:29] TF_UP: map->base_link available; SLAM is localizing
+[imu_bridge_node-6] [INFO] [1793069069.968399998] [imu_bridge_node]: bno: startup gyro bias removed [+0.00002, -0.00002, -0.00002] rad/s ([+0.001, -0.001, -0.001] deg/s)
+[imu_bridge_node-6] [INFO] [1793069070.009240442] [imu_bridge_node]: /imu/status: ok
+[imu_bridge_node-6] [INFO] [1793069070.104355277] [imu_bridge_node]: rates: vesc 27.0 Hz, odom 27.8 Hz, bno 252.8 Hz
+[vehicle_state_node-7] [INFO] [1793069070.150702405] [vehicle_state_node]: rates: bno 221 Hz, vesc 27 Hz | speed: fused 131, wheel_only 1 | accel bias +0.602 m/s^2 | steering valid 0/219 | heading: bno 211, model 6
+[gap_follow_node-8] [WARN] [1793069070.249260921] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069070.284504472] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [INFO] [1793069070.500972929] [imu_bridge_node]: vesc: startup gyro bias removed [+0.00063, -0.00203, +0.00012] rad/s ([+0.036, -0.116, +0.007] deg/s)
+[gap_follow_node-8] [WARN] [1793069071.249168789] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069071.306380734] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069072.249510300] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069072.306866665] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069073.272587427] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069073.331553437] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069074.272842246] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069074.331511993] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [INFO] [1793069075.130178103] [imu_bridge_node]: rates: vesc 49.6 Hz, odom 49.8 Hz, bno 251.2 Hz
+[vehicle_state_node-7] [INFO] [1793069075.154085783] [vehicle_state_node]: rates: bno 249 Hz, vesc 49 Hz | speed: fused 250 | accel bias +0.662 m/s^2 | steering valid 0/250 | heading: bno 249, model 1
+[async_slam_toolbox_node-4] [INFO] [1793069075.175959070] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069075.142 for reason 'discarding message because the queue is full'
+[gap_follow_node-8] [WARN] [1793069075.287455838] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069075.349984028] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069076.297373265] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069076.359771531] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069077.300918768] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069077.381505002] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069078.327795902] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[async_slam_toolbox_node-4] [INFO] [1793069078.345468111] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069078.317 for reason 'discarding message because the queue is full'
+[auto_map_race_node-9] [WARN] [1793069078.384987975] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069079.347324350] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069079.383796607] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [INFO] [1793069080.114582375] [imu_bridge_node]: rates: vesc 49.0 Hz, odom 48.8 Hz, bno 252.0 Hz
+[vehicle_state_node-7] [INFO] [1793069080.160612309] [vehicle_state_node]: rates: bno 239 Hz, vesc 49 Hz | speed: fused 250 | accel bias +0.673 m/s^2 | steering valid 0/247 | heading: bno 242, model 8
+[gap_follow_node-8] [WARN] [1793069080.347913832] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069080.413320504] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069081.374039776] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069081.434707082] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[async_slam_toolbox_node-4] [INFO] [1793069081.846478470] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069081.816 for reason 'discarding message because the queue is full'
+[gap_follow_node-8] [WARN] [1793069082.395904160] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069082.447466570] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069083.423263002] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069083.456714790] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069084.447997961] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069084.482181546] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [INFO] [1793069085.104670122] [imu_bridge_node]: rates: vesc 50.0 Hz, odom 50.0 Hz, bno 252.6 Hz
+[vehicle_state_node-7] [INFO] [1793069085.151809784] [vehicle_state_node]: rates: bno 244 Hz, vesc 50 Hz | speed: fused 250 | accel bias +0.677 m/s^2 | steering valid 0/250 | heading: bno 250
+[gap_follow_node-8] [WARN] [1793069085.471607416] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069085.485072211] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[async_slam_toolbox_node-4] [INFO] [1793069086.169000210] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069086.140 for reason 'discarding message because the queue is full'
+[auto_map_race_node-9] [WARN] [1793069086.485524503] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069086.496242084] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069087.496811018] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069087.508965280] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[race_diag_node-1] [19:44:47] STATUS: scan=ok | map=228x171@0.050 7%known 210occ | map->base_link=OK | pose=ok lag=0.02s(max 0.12) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released
+[gap_follow_node-8] [WARN] [1793069088.521320306] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069088.531577394] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069089.531737228] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069089.546513867] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[imu_bridge_node-6] [INFO] [1793069090.103791905] [imu_bridge_node]: rates: vesc 50.2 Hz, odom 50.2 Hz, bno 251.2 Hz
+[vehicle_state_node-7] [INFO] [1793069090.150567460] [vehicle_state_node]: rates: bno 251 Hz, vesc 50 Hz | speed: fused 250 | accel bias +0.681 m/s^2 | steering valid 0/250 | heading: bno 250
+[auto_map_race_node-9] [WARN] [1793069090.532925762] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069090.550485232] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069091.557342693] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069091.571450930] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[auto_map_race_node-9] [WARN] [1793069092.583061453] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069092.595374151] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[async_slam_toolbox_node-4] [INFO] [1793069093.566550256] [slam_toolbox]: Message Filter dropping message: frame 'laser' at time 1793069093.538 for reason 'discarding message because the queue is full'
+[auto_map_race_node-9] [WARN] [1793069093.584408998] [auto_map_race_node]: STOP [deadman_released] LB deadman button is not held; output command: steering=+0.000rad, speed=0.00m/s
+[gap_follow_node-8] [WARN] [1793069093.596353878] [gap_follow_node]: STOP [deadman_released] LB deadman button is not held; command: steering=+0.000rad, speed=0.00m/s
+[race_diag_node-1] [19:44:54] CLOSING: worst pose lag this run: 0.12s
+[INFO] [bno_i2c_bridge-5]: process has finished cleanly [pid 156902]
+[INFO] [async_slam_toolbox_node-4]: process has finished cleanly [pid 156901]
+[INFO] [auto_map_race_node-9]: process has finished cleanly [pid 156906]
+[INFO] [vehicle_state_node-7]: process has finished cleanly [pid 156904]
+[INFO] [snapshot_params-2]: process has finished cleanly [pid 156899]
+[ros2-3] [INFO] [1793069094.421418163] [rosbag2_recorder]: Topics discovery stopped.
+[ros2-3] [INFO] [1793069094.421760604] [rosbag2_recorder]: Pausing recording.
+[ros2-3] [INFO] [1793069094.422311340] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[ros2-3] [INFO] [1793069094.584159762] [rosbag2_recorder]: Recording stopped
+[ros2-3] [WARN] [1793069094.584268181] [rosbag2_recorder]: Number of messages lost on the transport layer: 1
+[ros2-3] [INFO] [1793069094.669514482] [rosbag2_recorder]: Event publisher thread: Exited
+[INFO] [gap_follow_node-8]: process has finished cleanly [pid 156905]
+[async_slam_toolbox_node-4] [INFO] [1793069094.422957374] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[async_slam_toolbox_node-4] Unregistering sensor: Custom Described Lidar
+[race_diag_node-1] Traceback (most recent call last):
+[race_diag_node-1]   File "/home/racerbotcar-1/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/race_diag_node", line 33, in <module>
+[race_diag_node-1]     sys.exit(load_entry_point('race-diagnostics', 'console_scripts', 'race_diag_node')())
+[race_diag_node-1]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[race_diag_node-1]   File "/home/racerbotcar-1/racerbot-ws/build/race_diagnostics/race_diagnostics/race_diag_node.py", line 297, in main
+[race_diag_node-1]     rclpy.spin(node)
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+[race_diag_node-1]     executor.spin_once()
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+[race_diag_node-1]     self._spin_once_impl(timeout_sec)
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 918, in _spin_once_impl
+[race_diag_node-1]     raise handler.exception()
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/task.py", line 286, in _execute_coroutine_step
+[race_diag_node-1]     result = coro.send(None)
+[race_diag_node-1]              ^^^^^^^^^^^^^^^
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 584, in handler
+[race_diag_node-1]     call_coroutine = take_from_wait_list(entity)
+[race_diag_node-1]                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[race_diag_node-1]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 470, in _take_subscription
+[race_diag_node-1]     msg_info = sub.handle.take_message(sub.msg_type, sub.raw)
+[race_diag_node-1]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[race_diag_node-1] RuntimeError: Unable to convert call argument '0' to Python object (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)
+[ERROR] [launch]: Caught exception in launch (see debug for traceback): Cannot shutdown a ROS adapter that is not running
+[INFO] [ros2-3]: process has finished cleanly [pid 156900]
+[INFO] [imu_bridge_node-6]: process has finished cleanly [pid 156903]
+[ERROR] [race_diag_node-1]: process has died [pid 156898, exit code 1, cmd '/home/racerbotcar-1/racerbot-ws/install/race_diagnostics/lib/race_diagnostics/race_diag_node --ros-args -r __node:=race_diag_node --params-file /home/racerbotcar-1/racerbot-ws/install/race_diagnostics/share/race_diagnostics/config/race_diagnostics.yaml --params-file /tmp/launch_params_fma2g_bh'].
+
+No map was saved by this run: it ended before the laps were done (Ctrl+C, LB released for good, or an error above).
+Earlier runs, if any, are in /home/racerbotcar-1/.ros/racerbot_auto/ -- each has a commands.txt.

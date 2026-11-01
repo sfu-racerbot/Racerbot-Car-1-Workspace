@@ -1,0 +1,6 @@
+Cleaned final SLAM map of run 20261026-194514 (map_course gyro_odom:=true, 2026-10-26 19:45,
+max_speed 3.5). Clean single-wall map; the run saved nothing because every lap failed
+the ~29 deg lap-closure heading artifact (see docs/superpowers/specs/2026-10-26-slam-and-gap-follow-plan.md).
+Made by clean_map.py: specks <= 8 cells cleared; track = free space 4-connected to the
+driven SLAM path and within 2.0 m of it; walls = 0.15 m ring around the track.
+Resolution 0.05000000074505806 m, origin (-13.434, -7.584).
