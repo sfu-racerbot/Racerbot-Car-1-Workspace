@@ -80,18 +80,107 @@ def _pose_at(s):
 COURSE = _course()
 
 
-def _inputs(laps=2.3, map_walls=COURSE, spacing=0.4, odom_source='/odom/imu'):
-    """The arrays a recorded run yields: true scans, and a grid that may or may not match them."""
+def _plain_ring():
+    """The same ring with no bumps: it looks the same from a pose and from that pose turned 180 deg about the
+    centre, (24 - x, 14 - y, yaw + pi). A scan alone cannot tell the two apart."""
+    g = np.zeros((int(14 / RES), int(24 / RES)), dtype=bool)
+    g[:2, :] = g[-2:, :] = True
+    g[:, :2] = g[:, -2:] = True
+    g[int(4 / RES):int(10 / RES), int(5 / RES):int(19 / RES)] = True
+    return g
+
+
+def _twin(pose):
+    return 24.0 - pose[0], 14.0 - pose[1], pose[2] + math.pi
+
+
+def _yaw_gap(a, b):
+    return abs(math.atan2(math.sin(a - b), math.cos(a - b)))
+
+
+def _inputs(laps=2.3, map_walls=COURSE, spacing=0.4, odom_source='/odom/imu', world=COURSE, slam_pose=None):
+    """The arrays a recorded run yields: true scans of `world`, and a grid that may or may not match them.
+
+    slam_pose: 'truth' gives SLAM's live pose as the true pose; an array is used as given.
+    """
     distances = np.arange(0.0, laps * LAP_M, spacing)
     times = 100.0 + distances / 2.5
     poses = np.array([_pose_at(s) for s in distances])
     poses[:, 2] = np.unwrap(poses[:, 2])
-    scans = np.array([_ray_cast(pose, COURSE) for pose in poses])
+    scans = np.array([_ray_cast(pose, world) for pose in poses])
     grid = np.zeros(map_walls.shape, dtype=np.int8)
     grid[map_walls] = 100
+    if isinstance(slam_pose, str) and slam_pose == 'truth':
+        slam_pose = np.c_[times, poses]
+    extra = {} if slam_pose is None else {'slam_pose': slam_pose}
     return rb.RunInputs(grid=grid, resolution=RES, origin_x=0.0, origin_y=0.0, times=times, scans=scans,
                         angle_min=ANGLE_MIN, angle_increment=ANGLE_INC, odom=np.c_[times, poses],
-                        odom_source=odom_source)
+                        odom_source=odom_source, **extra)
+
+
+def _field(walls):
+    """The field the rebuild matches against: walls, and everything else free, as _inputs' grid says."""
+    return rb.map_localize.WallField(walls, ~walls, RES, 0.0, 0.0)
+
+
+def test_a_course_that_looks_the_same_both_ways_starts_where_slam_put_the_car():
+    # oracle: closed form. On the plain ring the true pose and its 180 deg twin fit the first scan equally, so a
+    # whole-map search alone can land on the twin, 4 m or more away, and the check then loses the car on the
+    # first stretch that differs (the simulator's oval did this). SLAM's own pose there is the true one.
+    ring = _plain_ring()
+    inputs = _inputs(map_walls=ring, world=ring, slam_pose='truth')
+    pose, index, source = rb._place_car(_field(ring), inputs)
+    truth = inputs.odom[index, 1:]
+    assert source == 'SLAM pose'
+    assert math.hypot(pose[0] - truth[0], pose[1] - truth[1]) < 0.10  # m
+    assert _yaw_gap(pose[2], truth[2]) < 0.05  # rad, 3 deg
+
+
+def test_the_search_alone_cannot_tell_that_course_apart():
+    # Why the SLAM pose is needed, and the test above is not passing by luck: both poses fit the scan.
+    ring = _plain_ring()
+    inputs = _inputs(map_walls=ring, world=ring)
+    field = _field(ring)
+    index = int(np.searchsorted(inputs.times, inputs.times[0] + 1.0))
+    bx, by = rb.map_localize.scan_points(inputs.scans[index], ANGLE_MIN, ANGLE_INC)
+    truth = inputs.odom[index, 1:]
+    assert rb.map_localize.scan_fit(field, bx, by, truth) > 0.95
+    assert rb.map_localize.scan_fit(field, bx, by, _twin(truth)) > 0.95
+
+
+def test_a_slam_pose_that_does_not_fit_is_not_used():
+    # A live pose can sit 2 m from the final map on old settings: then the search must decide. 3 m along a
+    # straight still fits 0.88 there, so fitting at all is not enough: it has to fit as well as the best.
+    inputs = _inputs(slam_pose='truth')
+    wrong = inputs.slam_pose.copy()
+    wrong[:, 1] += 3.0  # m, along the bottom straight
+    inputs = _inputs(slam_pose=wrong)
+    pose, index, source = rb._place_car(_field(COURSE), inputs)
+    truth = inputs.odom[index, 1:]
+    assert source == 'map search'
+    assert math.hypot(pose[0] - truth[0], pose[1] - truth[1]) < 0.10  # m
+
+
+def test_a_slam_pose_inside_a_wall_is_not_used():
+    inputs = _inputs(slam_pose='truth')
+    wrong = inputs.slam_pose.copy()
+    wrong[:, 2] += 3.0  # m, from the bottom straight into the solid inner block
+    inputs = _inputs(slam_pose=wrong)
+    _, _, source = rb._place_car(_field(COURSE), inputs)
+    assert source == 'map search'
+
+
+def test_with_no_slam_pose_the_search_places_the_car():
+    inputs = _inputs()
+    pose, index, source = rb._place_car(_field(COURSE), inputs)
+    truth = inputs.odom[index, 1:]
+    assert source == 'map search'
+    assert math.hypot(pose[0] - truth[0], pose[1] - truth[1]) < 0.10  # m
+
+
+def test_the_report_says_where_the_start_came_from(tmp_path):
+    result = _rebuild(tmp_path, _inputs(slam_pose='truth'))
+    assert json.loads((result.out_dir / 'rebuild.json').read_text())['start_from'] == 'SLAM pose'
 
 
 @pytest.fixture(scope='module')
@@ -303,6 +392,18 @@ def test_loader_prefers_the_gyro(tmp_path, monkeypatch):
     inputs = rb.load_inputs(_fake_run(tmp_path, monkeypatch, slam=_slam_arrays()))
     assert inputs.odom_source == '/odom/imu'
     assert (inputs.resolution, inputs.origin_x, inputs.origin_y) == (0.05, -1.0, -2.0)
+
+
+def test_loader_reads_slams_live_pose(tmp_path, monkeypatch):
+    slam = _slam_arrays()
+    slam['slam_pose'] = slam['odom'] + 1.0
+    inputs = rb.load_inputs(_fake_run(tmp_path, monkeypatch, slam=slam))
+    assert np.array_equal(inputs.slam_pose, slam['slam_pose'])
+
+
+def test_loader_without_a_live_pose_gives_none_rows(tmp_path, monkeypatch):
+    inputs = rb.load_inputs(_fake_run(tmp_path, monkeypatch, slam=_slam_arrays()))
+    assert inputs.slam_pose.shape == (0, 4)
 
 
 def test_loader_falls_back_to_wheels_without_a_gyro(tmp_path, monkeypatch):

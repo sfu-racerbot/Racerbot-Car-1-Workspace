@@ -21,7 +21,7 @@ Exit code: 0 a folder to race from; 1 a map refused, or no line; 2 nothing to wo
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field as dataclass_field
 import json
 from pathlib import Path
 import sys
@@ -40,6 +40,7 @@ DEFAULT_MAX_SPEED = 1.5  # m/s, the speed docs/writing-your-own-node.md's "low s
 FASTER_LINES = ((2.5, 'raceline_2p5.csv'), (4.0, 'raceline_4p0.csv'))
 SCAN_STRIDE = 2  # of the 40 Hz scans, the same rate slam_toolbox's throttle_scans takes
 SEE_THROUGH_STRIDE = 5  # of the tracked scans: see-through is the slow part, and varies slowly
+SAME_FIT_MARGIN = 0.03  # fits closer than this are a tie: a few beams of noise
 MIN_START_FIT = 0.8  # below this, a place found for the car on the map is not a place at all
 MIN_ODOM_ROWS = 10
 OFF_LINE_WARNING_M = 0.5
@@ -61,6 +62,8 @@ class RunInputs:
     angle_increment: float
     odom: np.ndarray       # (K, 4): t, x, y, yaw, on the same clock as times
     odom_source: str
+    # (P, 4): t, x, y, yaw of SLAM's live pose, on the same clock; empty if the run has none
+    slam_pose: np.ndarray = dataclass_field(default_factory=lambda: np.zeros((0, 4)))
 
 
 @dataclass
@@ -92,7 +95,8 @@ def load_inputs(run_dir) -> RunInputs:
                      times=run.scan_t, scans=run.scan, angle_min=run.angle_min,
                      angle_increment=run.angle_increment,
                      odom=slam['odom_imu'] if use_gyro else slam['odom'],
-                     odom_source='/odom/imu' if use_gyro else '/odom')
+                     odom_source='/odom/imu' if use_gyro else '/odom',
+                     slam_pose=np.asarray(slam.get('slam_pose', np.zeros((0, 4))), dtype=float).reshape(-1, 4))
 
 
 def load_config() -> dict:
@@ -115,16 +119,40 @@ def _write_map(out_dir: Path, inputs: RunInputs, max_speckle_cells: int) -> None
     occupancy_map.despeckle_map_file(str(out_dir / 'map.yaml'), max_cells=max_speckle_cells)
 
 
+def _slam_pose_at(inputs: RunInputs, t):
+    """SLAM's live pose at time t (the nearest end outside its rows: the fit test decides), or None."""
+    rows = inputs.slam_pose
+    if len(rows) < 2:
+        return None
+    yaw = np.unwrap(rows[:, 3])
+    return (float(np.interp(t, rows[:, 0], rows[:, 1])), float(np.interp(t, rows[:, 0], rows[:, 2])),
+            float(np.interp(t, rows[:, 0], yaw)))
+
+
 def _place_car(field, inputs: RunInputs):
-    """(pose, index of that scan) for the earliest scan the map can place, or None."""
+    """(pose, index of that scan, where it came from) for the earliest scan the map can place, or None.
+
+    SLAM's own pose, refined against the map, when it fits as well as the best place a search of the whole map
+    finds: that map was built in SLAM's frame, and on a course that looks alike in two places (the simulator's
+    oval looks the same turned round) the search can land on the twin, which fits just as well. A SLAM pose
+    that fits worse than the search's best is wrong, as a live pose can be on old settings.
+    """
     count = len(inputs.times)
     one_second_in = int(np.searchsorted(inputs.times, inputs.times[0] + 1.0))
     for index in (one_second_in, count // 4, count // 2, 3 * count // 4):
         index = min(index, count - 1)
         beams = map_localize.scan_points(inputs.scans[index], inputs.angle_min, inputs.angle_increment)
-        pose, fit = map_localize.find_start(field, *beams)
-        if fit >= MIN_START_FIT:
-            return pose, index
+        found, found_fit = map_localize.find_start(field, *beams)
+        guess = _slam_pose_at(inputs, inputs.times[index])
+        if guess is not None:
+            pose = map_localize.match_scan(field, *beams, guess)
+            fit = map_localize.scan_fit(field, *beams, pose)
+            # Against the search's best, not only MIN_START_FIT: inside a solid wall or 3 m along a straight a
+            # pose can still fit 0.88, where the right one fits about 1.0.
+            if fit >= MIN_START_FIT and fit >= found_fit - SAME_FIT_MARGIN:
+                return pose, index, 'SLAM pose'
+        if found_fit >= MIN_START_FIT:
+            return found, index, 'map search'
     return None
 
 
@@ -215,7 +243,7 @@ def rebuild(run_dir, out_root, max_speed: float = DEFAULT_MAX_SPEED, load=load_i
         reason = (f'the map has no place for this run\'s scans (fit under {MIN_START_FIT}): '
                   'it is doubled, or of somewhere else')
         return finish(map_localize.Verdict(False, reason), 0, False, reason)
-    start, first = placed
+    start, first, report['start_from'] = placed
     # Always ends on the last scan: that is the pose the car is parked at.
     picked = np.unique(np.r_[np.arange(first, len(inputs.times), SCAN_STRIDE), len(inputs.times) - 1])
     times, scans = inputs.times[picked], inputs.scans[picked]

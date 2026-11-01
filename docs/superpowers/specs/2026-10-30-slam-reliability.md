@@ -198,6 +198,33 @@ The rest is in [the plan](../plans/2026-10-30-slam-reliability.md): the lap coun
 
 **Why a rebuild step as well as better SLAM?** Because it turns "probably fine" into a measured verdict on every map, and it is the only thing that can salvage a run stopped early. It runs after the car has stopped, so it changes nothing in any node that can move the car.
 
+## 2026-10-31: the whole launch, on every recording
+
+`tools/run_analysis/replay_map_course.py` runs the real `map_course` launch on a recording's sensors with the car parked. Everything runs unmodified: the IMU stack, SLAM, `gap_follow` and the lap counter. The verdict comes from `rebuild_run.py`, not from the launch. Before is `main` with the flags actually used that evening; after is this branch with no flags at all.
+
+| Run (what drove) | Before: laps, map | After: laps, map |
+|---|---|---|
+| `184556` (`gap_follow`) | 2 of 3, NO-GO (see-through 27%) | **3 of 3, GO** |
+| `184826` (`gap_follow`, run without the IMU) | 0, ran out | **3 of 3, GO** |
+| `185036` (`gap_follow`) | 0, NO-GO | **3 of 3, GO** |
+| `180355` (`disparity_extender`, from its long hold) | 1 of 3, NO-GO | 3 of 3, map good, no line it would race |
+| `175728` (`gap_follow`, carried 12 m between holds) | 1 of 3, NO-GO | 0, NO-GO |
+| `174911` (26 Oct, another course) | 5 laps for 3, GO | 3 of 3, GO |
+
+**Found on the way: the lap counter has to use SLAM's odometry.** It compares SLAM's pose with odometry to tell a correction from driving. With SLAM on `odom_imu` and the counter on `odom`, a hard turn made the steering model's yaw differ from the gyro's by more than the 0.1 rad that counts as a correction, and each false correction swung the start point. `180355` passed its start 4 times within 0.41 m, the start was moved 75 m in all, and no lap closed. So `imu_lap_turns` now follows `gyro_odom`. The fixture `pure_pursuit/test/data/lap_poses_20261030-180355-replay.npz` pins both halves: 4 laps on `odom_imu`, 0 on `odom`.
+
+**`175728` cannot pass from any start that includes the carry:** nothing the car senses says it was carried, so SLAM cannot follow it. `180355`'s line was refused by the rebuild's fit and steering check, not by SLAM; its map is good.
+
+**The BNO, with the real sensor, parked:**
+
+| Case | Result |
+|---|---|
+| BNO missing (no bridge) | logs that it is missing, maps on the VESC gyro: 3 of 3, GO |
+| The real BNO stack running alongside, for its CPU load | 3 of 3, GO |
+| The real BNO, parked, against a recorded car that turns: alive and wrong | `vehicle_state` sees the gyros disagree and falls back to the steering model; 1 lap, **NO-GO**. The map check catches it |
+
+**Found by the simulator: the map check could start in the wrong place.** On the simulator's oval, which looks the same turned round, the whole-map search placed the car on the mirror-image pose, 4.5 m away with a perfect fit. The check then lost the car in the first turn that differed, and called a good map NO-GO (worst stretch 0.20). `rebuild_run.py` now starts from SLAM's own pose when that fits as well as the search's best, and from the search otherwise. A live pose that fits worse is refused: 3 m along a straight still fits 0.88. The simulator run is GO, and every real replay above has the same verdict as before.
+
 ## What this does not prove
 
 - **Only 2 runs at about 2.5 m/s mean.** Slower driving makes nodes denser, which changes chain length in metres. The dense-node replays approximate that and held up (0.82-0.91); a real slow run is still needed.
