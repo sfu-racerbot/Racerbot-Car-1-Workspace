@@ -129,6 +129,13 @@ def test_git_and_ps_probes_simulated():
     ]
 
 
+def test_dpkg_query_probe_simulated():
+    # oracle: an empty successful simulated package listing has length zero.
+    result = capture(str(FIXTURES / 'dpkg_probe_launch.py'), [])
+    assert node(result, '/n0')['executable'] == 'exe'
+    assert {'cmd': ['dpkg-query', '-W', 'ros-jazzy-*'], 'simulated': 'empty'} in result['probes']
+
+
 def test_capture_one_stdout_is_pure_json(tmp_path):
     command = [sys.executable, str(ROOT / 'tools/dev/launch_params.py'), 'capture-one',
                '--file', str(FIXTURES / 'demo_launch.py'), '--', f'marker:={tmp_path}/m']

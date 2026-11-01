@@ -155,7 +155,8 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
 
     def guarded_argv(args):
         argv = shlex.split(args) if isinstance(args, str) else [str(part) for part in args]
-        programs = {'pgrep': (1, 'no match'), 'git': (128, 'not a repository'), 'ps': (0, 'empty')}
+        programs = {'pgrep': (1, 'no match'), 'git': (128, 'not a repository'),
+                    'ps': (0, 'empty'), 'dpkg-query': (0, 'empty')}
         program = os.path.basename(argv[0]) if argv else ''
         if program not in programs:
             refuse(f'launch-time subprocess not allowed by the oracle: {argv}')
