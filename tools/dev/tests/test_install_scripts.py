@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -56,7 +57,8 @@ def test_car2_systemd_install_refuses_on_rb1():
     assert 'tools/systemd' in result.stderr
 
 
-def test_install_scripts_refuse_without_a_car(tmp_path):
+@pytest.mark.parametrize('script', (CAR1, CAR2, UDEV))
+def test_install_scripts_refuse_without_a_car(tmp_path, script):
     # Even on a Jetson, no serial is recognized in this isolated registry.
     (tmp_path / 'machines.yaml').write_text('{}\n')
     for car in ('rb1', 'rb2'):
@@ -64,11 +66,10 @@ def test_install_scripts_refuse_without_a_car(tmp_path):
         directory.mkdir()
         (directory / 'car.yaml').write_text(
             (ROOT / 'src/racerbot_car/cars' / car / 'car.yaml').read_text())
-    for script in (CAR1, CAR2, UDEV):
-        args = () if script == UDEV else ('testuser', '/tmp/test-workspace')
-        result = run_installer(script, None, *args, cars_dir=tmp_path)
-        assert result.returncode != 0, script
-        assert 'RACERBOT_CAR' in result.stderr, (script, result.stderr)
+    args = () if script == UDEV else ('testuser', '/tmp/test-workspace')
+    result = run_installer(script, None, *args, cars_dir=tmp_path)
+    assert result.returncode != 0, script
+    assert 'RACERBOT_CAR' in result.stderr, (script, result.stderr)
 
 
 def test_udev_dry_run_installs_hokuyo_only_on_a_serial_lidar_car():
