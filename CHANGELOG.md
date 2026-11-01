@@ -6,7 +6,42 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-29 (latest) — alongside abort, and the simulator interlock's clean-graph window
+## 2026-11-01 (latest): one workspace for both cars
+
+### racerbot_car (new)
+
+- **New package.** Each car's identity (Jetson serial to car id, `src/racerbot_car/cars/machines.yaml`), profile (`cars/<id>/car.yaml`: LiDAR, camera, dashboard site, full-lock steering), calibration overlays (`cars/<id>/calibration/`) and tuning overlays (`cars/<id>/tuning/`, each key with a `# why:`, checked by `racerbot_car.guards`). Launches load the shared config, then the running car's overlays. See `src/racerbot_car/README.md`.
+
+### Workspace
+
+- **Car 2's workspace merged in** (Racerbot-Car-2-Workspace `9c2c2ed`), keeping the best of both. Car 2's newer gap_follow, SLAM-on-gyro and recorder work now runs on both cars; every change to what each car runs is listed in `docs/superpowers/plans/unify-behaviour-changes.md`, with a simulator A/B of each car against its old code.
+- **Runs and maps per car:** `data/<id>/racerbot_runs`, `data/<id>/racerbot_auto`, `data/<id>/racerbot_sim`.
+- Sections below marked `(car 1)` or `(car 2)` were written in that car's repo before the merge; unmarked ones are shared history from before the two repos split.
+
+## 2026-10-31 — Automatic recorder: catch more of a run's start, report failures properly (car 2)
+
+Follows a check of the 2026-10-30 session's 19 automatic recordings. All were intact, but two bags began with the car already moving. **Tested on an isolated ROS domain against fake publishers, not yet on a real run.**
+
+- **`race_diagnostics` recording start** (behavior change): `auto_record` starts `ros2 bag record` itself, then `record_run.py` with `record_bag:=false` once the bag is live. **`start_delay_sec` 3.0 -> 1.5, `poll_period_sec` 0.5 -> 0.25.** New parameter `live_topics`, new terminal line `recording live: ...`. Measured with the same method, the bag now misses 2.95 to 6.9 s of a run (median about 4, 8 runs), against 5.45 to 7.0 s before (median about 6.6, 4 runs). ROS discovery causes the slow end, so the worst case barely moved and a fast press of LB can still be missed.
+- **New `auto_record.yaml` fields**: `bag_live_sec`, `bag_exit_code`, `recorder_failures` (`recorder_exit_code` stays 0 when a child dies), `superseded`, and `activity` (`started_late`, `moved`, `max_speed_mps`, `first_odom_speed_mps`, `lb_held_fraction`), from the new `run_activity.py`. `summarize_run` prints them under `Recording problems`.
+- **`data/racerbot_runs/auto_record.log`**: every start, stop, refusal and late start, kept with the runs.
+- **Shutdown**: `system_log` runs without the `ros2 run` wrapper, which swallowed SIGINT and made every recording wait 5 s and log an error. `race_diag_node` no longer dies with a traceback on rclpy's shutdown race. `record_run.py` is signalled only once it has finished starting.
+- **`snapshot_params`**: default `--delay` 15 -> 3 s, so short runs get their parameters.
+- **`tools/save_runs.sh`**: lists runs that never moved and stubs; new `--skip-idle`; refuses while `run_activity` is running.
+- **`recording.py`**: `DEFAULT_TOPICS` and `MAX_BAG_FILE_BYTES` moved here from `record_run.py`.
+- **`ros2 launch` hanging at exit**: seen in `threading._shutdown` with every child gone. `record_run.py` now exits on its own 18 s after shutdown begins. The cause inside launch was not found, so a stop that hits this can still report `recorder_killed: true` after 15 s. The bag is not affected.
+- **Test**: `test_auto_record_node.py` failed 4 of 4 runs on the old code, because fixed sleeps were racing the slow bag start. It now waits for the bag to be live.
+
+## 2026-10-30 — Port from car 1: gap_follow's launch boost only (car 2)
+
+Car 1's PR #10 (`git diff bf56121 ffbfac0`). Car 1's PR #9 is not included. **Never driven on car 2.**
+
+- **`gap_follow`**: new `launch_boost.py`. On the first driving tick after LB, once per node: straight to `max_speed` with no ramp, corner, corridor or opponent caps, no speed or traction hold, holding straight while its own path is clear. Deadman, TTC, emergency clearance, braking, curvature and understeer ceilings still apply. New parameters `enable_launch_boost` (shipped `true`), `launch_boost_max_sec`, `launch_boost_max_distance`, `launch_boost_end_steering`; launch argument `launch_boost:=false`. The mapping launches turn it off.
+- **`tools/f1tenth_sim`**: `gap_mirror.py` models it.
+- **Tests**: car 1's, plus five added on car 2 for what a mutation run showed nothing caught: the braking and curvature ceilings during a launch, the emergency escape, and two mirror parity scenes. Mid-race scenes turn the launch off in their setup; no assertion changed.
+- **Simulator, car 2's numbers** ([gap-follow.md](docs/gap-follow.md#launch-boost)): on car 2's room map the solo lap is 0.86 s slower, and two-car runs finish 5 to 6 of 8 against 8 of 8 with it off, no contact.
+
+## 2026-10-29 — alongside abort, and the simulator interlock's clean-graph window (car 1)
 
 ### gap_follow
 
@@ -20,7 +55,84 @@ for changes the team made.
 - The interlock ROS test's "no leak" watch is computed from the nodes' own defaults (hold + confirmation + 4 s, so 10 s today). Raising either default lengthens the watch instead of letting the test pass without checking anything.
 - Simulator ROS tests drive `/test_only/...` topics, and `test/conftest.py` fails fast without an isolated ROS domain (`ROS_DOMAIN_ID` non-zero, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`).
 
-## 2026-10-28 — gap_follow other-car layer on by default; follow hold, memory and outline
+## 2026-10-29 — Port from car 1 (to `car1/main` `8a88dcc`): Part B-2/3, SLAM observability and IMU (car 2)
+
+Car 1's PR #8 ([Racerbot-Car-1-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace)),
+ported on branch `port-car1-part-b23` (`git diff 4bea6f2 car1/main`, `git apply --3way`,
+five conflicts merged by hand). Car 2's differences are in `docs/car1-vs-car2.md`
+(new section "IMU feature thresholds"); `test_car2_hardware_config.py` gained three checks.
+**Nothing here was driven on car 2.**
+
+- **`race_diagnostics`**: `snapshot_params` keeps watching for the whole run, so nodes that start
+  late (or restart, `<name>.<n>.yaml`, or share a name across namespaces) are snapshotted.
+  New `system_log` (`<run>/system/tegrastats.log` and 1 Hz per-node `proc.jsonl`;
+  `system_log:=false` turns it off; a missing `tegrastats` only warns). `metadata/packages.txt`
+  (`ros-jazzy-*` versions, slam_toolbox first) and `metadata/submodules.txt`. Lap-quality parser
+  in `run_events.py`.
+- **`tools/run_analysis`**: `slam_report.py` (drift, corrections, laps, map consistency, scan drops
+  against CPU, `--compare`), `slam_replay.py --exact` with `slam_exact_feed.py`, `grip_replay.py`.
+- **`racerbot_sim`**: a simulated IMU per controlled car (`sim_imu.py`; `/imu/*` and `/car2/imu/*`),
+  injectable faults (`imu_fault`, `car2_imu_fault`), covered by the interlock.
+  `tools/racerbot_sim/run_gap_follow_validation.py` gained the IMU fall-back harness.
+- **`imu_bridge`**: `vehicle_state_launch.py hardware:=false` starts only `vehicle_state_node`,
+  on the simulator's IMU topics.
+- **`gap_follow`**: `fused_speed`, `imu_understeer`, `imu_traction` and `imu_impact_stop`, each with
+  its own launch flag, plus `imu`, `imu_all` and `imu_hardware`. All off by default. Every IMU
+  failure gives the feature-off command. Conservative safety inputs: with fused speed on, TTC
+  and the stale-odometry stop take the more cautious of wheel and fused speed.
+- **`racerbot_launch`**: `map_course` takes `imu_all`, `imu_lap_turns` and `imu_hardware`, runs
+  `summarize_run`, `imu_report` and `slam_report` after the launch (`analysis:=false` skips them),
+  and maps at `mapping_max_speed` **3.5** by default (was empty, i.e. gap_follow.yaml's 5.0).
+- **`pure_pursuit`** (`auto_map_race`): odometry-gap reconciliation for gyro lap turns; the minimum
+  lap time is `max(4 s, 0.5 × previous lap)` (was a fixed 15 s).
+- **Car 2 keeps:** `map_course imu:=false`, `vehicle_state_launch.py bno:=false`,
+  `steering_damping:=false` (a literal, not car 1's `imu` default); runs in `data/racerbot_runs/`
+  (`grip_replay.py` and the ported tests' run paths changed to match); car 2's four-state speed
+  filter (car 1's fused-speed fallback tests pass against it unchanged).
+- **Car 1's values, labelled as car 1's, features off:** impact threshold 33.73 m/s², traction slip
+  0.246 / 0.123 m/s, understeer bands 0.75 / 0.85, simulated IMU noise and mount offsets.
+- **Tests:** car 1's new map_course IMU tests now pass `imu:=true` explicitly (car 2's default is
+  false), and `test_imu_flags_both_launches.py` expects car 2's per-launch `imu` defaults.
+  `test_snapshot_params_node.py` finds the recorder's child with `pgrep -P`: car 2's Tegra kernel
+  has no `/proc/<pid>/task/<pid>/children` (`CONFIG_PROC_CHILDREN` not set).
+
+## 2026-10-29 — Port from car 1 (to `car1/main` `4bea6f2`): racing, Part A and B-1 (car 2)
+
+Car 1's PRs #3 to #7 ([Racerbot-Car-1-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace)),
+ported feature by feature on branch `port-car1-part-b1` (`git diff 0265263 car1/main`,
+applied in date order with `git apply --3way`, then merged by hand). Car 2's
+differences are in `docs/car1-vs-car2.md`; `test_car2_hardware_config.py` gained two checks.
+
+- **`gap_follow`**: the `max_speed:=` launch flag can raise the top speed up to 5.0 m/s.
+  Gyro **steering damping** and **adaptive grip** (`gap_logic.py`, the `steering_damping:=` and
+  `adaptive_grip:=` launch arguments). **Race defaults** (car 1, 2026-10-27): `max_speed`
+  3.5 -> **5.0**, `min_speed` 1.429, `corner_speed` 2.143, `corner_speed_wide` 2.714,
+  `narrow_corridor_speed` 3.571, `max_acceleration` 3.0 -> 5.0, `max_lateral_accel` 2.0 -> 2.5, `steering_damping_gain` 0.10,
+  `enable_corner_setup` false. **Opponent awareness on by default** (`opponent_awareness:='true'`):
+  follow hold, `FollowCapMemory` (`opponent_follow_memory_sec` 1.0), the 0.31 x 0.58 m outline,
+  the narrow-section pass refusal and the alongside abort. **Never driven on car 2.**
+- **Car 2 keeps:** `max_steering_angle` 0.349 and `arc_guard_max_correction` 0.1745; steering damping **off**
+  (`enable_steering_damping: false`, `steering_damping:=false`) until the BNO085 is mounted
+  and calibrated; `neural_racer`'s 0.349 wrapper (its `max_lateral_accel` stays 2.0, no longer paired).
+- **`racerbot_launch`**: `opponent_awareness` argument, default `false`, in `map_course`,
+  `auto_map_race_launch.py` and `autonomous_mapping_launch.py`. `slam_gyro.yaml` (3 m loop
+  search with `gyro_odom:=true`). `map_course` keeps `imu:=false`.
+- **`race_diagnostics`**: `auto_record`, started by every bringup (`record:=false` turns it off),
+  records each algorithm run into `data/racerbot_runs/` (car 1: `~/.ros/racerbot_runs/`).
+- **`pure_pursuit`**: `auto_map_race` closes a lap at its closest approach to the start
+  (`close_at_closest_approach`); four LB deadman deny-path tests for `auto_map_race_node`.
+- **`racerbot_sim`**: two controlled cars (`/car2`), `sim_race_launch.py` and the race referee
+  (results in `data/racerbot_sim/races/`), team A as car 2, the interlock's 3 s discovery hold
+  plus `interlock_clear_confirm_sec` 3 s starting blocked, `/test_only` drive chains and the
+  conftest isolation guard, gym's yaw-zeroing response disabled.
+- **`tools/`**: `eval_gap_multi.py` head-to-head score, `recognition.py`, gap_mirror parity,
+  car 1's course as a track; `run_analysis` `slam_replay`, `slam_metrics`, `slam_bag`,
+  `odom_tf_relay`, `weave.py`.
+- **Docs**: gap-follow.md (race defaults, steering damping, adaptive grip, "Several cars at
+  once"), ros-simulator.md, launchstart.md, run-diagnostics.md, glossary, git-setup.md
+  Addition 6, car 1's plans under `docs/superpowers/`.
+
+## 2026-10-28 — gap_follow other-car layer on by default; follow hold, memory and outline (car 1)
 
 The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s follow hold, a 1 s follow memory, the measured 0.31 × 0.58 m outline and a narrow-section refusal. Simulator-validated only: **not yet driven on the car.** The numbers, the rejected designs and the first-run order are in `docs/gap-follow.md#several-cars-at-once`.
 
@@ -42,7 +154,7 @@ The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s fol
 
 - The other-car layer has never run on the floor. Order: wheels off with both cars, then a slow two-car run at `max_speed:=1.0`, with a person holding LB on each controller. If a wall shows as `opponent mode=` with no other car moving, let go of LB, relaunch with `opponent_awareness:=false`, and report the run.
 
-## 2026-10-27 — gap_follow race defaults (not yet driven on the car)
+## 2026-10-27 — gap_follow race defaults (not yet driven on the car) (car 1)
 
 Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated only: **not yet driven on the car.** The numbers, and how to go back, are in `docs/gap-follow.md#race-defaults-2026-10-27`.
 
@@ -66,7 +178,7 @@ Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated
 
 - All of the above. Order: wheels off, then the floor at `max_speed:=1.0`. Check the IMU with `ros2 topic echo /imu/status --once` before the first run with steering damping on.
 
-## 2026-10-24 — Gyro odometry for SLAM; every mapping run recorded and explained
+## 2026-10-24 — Gyro odometry for SLAM; every mapping run recorded and explained (car 1)
 
 For the first IMU mapping test (A/B, `docs/launchstart.md#testing-the-imu-in-mapping-ab`).
 Built and checked off the car: **not yet driven on.**
@@ -138,7 +250,7 @@ Built and checked off the car: **not yet driven on.**
   9.71 m/s^2, now 0.00 / 0.00 / 9.76). Yaw not measured: forward-push check is
   step 1 of the A/B.
 
-## 2026-10-24 — imu_bridge: fused speed and measured steering; IMU in `map_course`
+## 2026-10-24 — imu_bridge: fused speed and measured steering; IMU in `map_course` (car 1)
 
 ### imu_bridge
 
@@ -202,7 +314,71 @@ Built and checked off the car: **not yet driven on.**
   BNO `rpy_deg: [90, 0, 90]` line from 2026-10-23, not to these edits. Not
   investigated further.
 
-## 2026-10-23 — Car 1: third port from car 2 (to `b3ad3b9`)
+## 2026-10-24 — Port from car 1 (to `car1/main` `0265263`); branch cleanup (car 2)
+
+Everything car 1 ([Racerbot-Car-1-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace))
+built since it took car 2's `38c35a0`, as a patch (`git diff 0cd347f car1/main`,
+`git apply --3way`; the repos share no history), with car 2's hardware kept.
+Car 1's own entries in its `CHANGELOG.md` (2026-10-23 and 2026-10-24) have the
+detail and its measurements. **Nothing below has been driven on car 2.**
+
+### New on car 2
+
+- **`imu_bridge`**: car 1's extension of PR #2's package (merged here the
+  same day, `6dec009`): `/imu/status`, the BNO restart watchdog, and `vehicle_state_node` (`/odom/fused`,
+  `/steering/measured`, gyro odometry `/odom/imu` + optional `odom_imu -> odom`).
+  Support code, publishes no drive topic.
+- **`neural_racer`** (new package, driving code, shadow mode by default) and
+  `tools/neural_racer/` (FIR training stack; its tests need `torch`, which the
+  car doesn't have). `docs/superpowers/specs/2026-10-23-neural-racer-plan.md`.
+- **`gap_follow_launch.py max_speed:=`** (`gap_follow/launch_speed.py`), and
+  `gap_follow` no longer claims the mux stops the car when `/drive` goes quiet.
+- **`map_course`**: `imu:=`, `fused_speed:=`, `gyro_odom:=`; `record_bag:=true`
+  by default. `slam_launch.py slam_odom_frame:=`.
+- **`race_diagnostics`**: more bagged topics (IMU, SLAM pose graph, `/rosout`,
+  `/drive_intent` ...), and `<run>/metadata/` (git state, IMU calibration
+  copies, `snapshot_params`).
+- `tools/run_analysis/imu_report.py`.
+- **Bringup**: the dead `ackermann_cmd_out` remap is gone from all three
+  `*_bringup_launch.py`, guarded by `racerbot_launch/test/test_drive_path_wiring.py`.
+  `racerbot_sim` follows.
+- `optimize_raceline.py --max-steering-angle` defaults to the planner's 0.30.
+- **`racerbot_doctor`**: car 1's generic checks only. The joystick layer now
+  checks `event*` as well as `js*` (`joy_node` reads `event*`; a user outside
+  `input` got a silent `/joy` on car 1), a new *Drive path (teleop)* section
+  follows `/joy` -> `/teleop` -> `/ackermann_cmd` -> `/commands/motor/speed`
+  with LB-held and non-zero-motor counts, and `/odom` silent before the first
+  servo command is `INFO`. Car 2's Ethernet LiDAR and RealSense checks are
+  unchanged. New test `test_lb_button_is_the_teleop_deadman` (car 1's live LB
+  test took the button index from `car.py` itself). 158 tests.
+- Docs: `docs/known-issues.md`, launchstart's two-car first run and IMU A/B,
+  and car 1's doc fixes (architecture, ros-simulator, racing-autonomy,
+  troubleshooting's `input` group entry, ...).
+
+### Kept as car 2's (`docs/car1-vs-car2.md`, new)
+
+- Ethernet LiDAR, RealSense, `rb2` dashboard, calibration, steering limits,
+  odometry gain, VESC udev rule, doctor LiDAR/camera ladders.
+- **IMU off by default**: car 2 has no BNO085 yet and no `~/imu-calibration`
+  (without it `imu_bridge_node` raises). `map_course imu:=false` and
+  `vehicle_state_launch.py bno:=false` here; car 1 ships both `true`.
+  `test_map_course_imu.py`'s default test now asserts `false`, and the tests
+  that turn on `fused_speed`/`gyro_odom` pass `imu:=true` explicitly.
+- **`neural_racer`'s wrapper `max_steering_angle` 0.349** (car 1: 0.33), as its
+  own `test_wrapper_values_match_gap_follow` demands; `test_steering_clipped`
+  now takes its expected cap from the config instead of a literal 0.33.
+- New guard test `racerbot_launch/test/test_car2_hardware_config.py` (12
+  tests, each seen to fail against car 1's version of the file it guards).
+
+### Repo housekeeping
+
+- Remote `car1` added. Every extra branch deleted, local and on GitHub, after
+  checking each one's commits were already in `main`; the five worktrees
+  under `.claude/worktrees/` and `.oc-worktrees/` removed. The one uncommitted
+  change found (`wd-migration`: `docs/sim-validation.md`'s dashboard log line)
+  is in this commit.
+
+## 2026-10-23 — Car 1: third port from car 2 (to `b3ad3b9`) (car 1)
 
 ### race_diagnostics
 
@@ -210,7 +386,7 @@ Built and checked off the car: **not yet driven on.**
   recorded runs can show what the gyro would do for odometry and SLAM. Nothing
   drives on it. Ported from car 2's `b3ad3b9`; no car 1 difference involved.
 
-## 2026-10-23 — gap_follow: `max_speed:=` for one run; car 1 + car 2 test plan
+## 2026-10-23 — gap_follow: `max_speed:=` for one run; car 1 + car 2 test plan (car 1)
 
 ### gap_follow
 
@@ -241,7 +417,7 @@ Built and checked off the car: **not yet driven on.**
   big tracks' "unfinished" runs were the 90 s limit at 0.8 m/s, not the car.
   **Open question:** gap_follow at walking pace in a 1.2 m corridor.
 
-## 2026-10-22 — Car 1: second port from car 2 (to `38c35a0`)
+## 2026-10-22 — Car 1: second port from car 2 (to `38c35a0`) (car 1)
 
 A per-file three-way merge of car 2's `38c35a0` onto car 1, against car 2's
 `7ec6ae6` (what the 2026-10-11 port took). The last three car 2 commits
@@ -463,7 +639,7 @@ the baseline. MPC is gated on spec 04 G0 (the osqp install decision and a
 Jetson benchmark) before it can be judged. Specs:
 `docs/superpowers/specs/2026-09-27-tracking-*.md`.
 
-## 2026-10-11 — Car 1: port car 2's workspace, dashboard as `rb1`
+## 2026-10-11 — Car 1: port car 2's workspace, dashboard as `rb1` (car 1)
 
 Every section below this one was written in **car 2's** workspace
 (sfu-racerbot/Racerbot-Car-2-Workspace) and arrived here in one port: a
