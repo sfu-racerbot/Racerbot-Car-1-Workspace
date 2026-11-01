@@ -532,6 +532,7 @@ Open a draft PR `unify/main` → `main` titled "Unified workspace, phase 2: car 
   - `test_rb2_calibration_matches_car2_repo` (oracle: the values recorded in the ledger from `9c2c2ed`)
   - the existing doctor static test (never opens a tty, camera or input node) still passes for both
 - [ ] **Steps 2–5:** fail → implement → pass → mutation proof (swap the two cars' specs; both profile tests fail) → commit.
+- [ ] **Step 6 (added 2026-11-01, moved from Task 5c): full-lock steering angles per car.** `car.yaml` gains `steering.full_lock_rad: {left, right}` with a citation: rb1 from its 2026-10-21 circles (`docs/hardware-reference.md` "Steering limits"), rb2 from its 2026-10-16 circles (today's `racerbot_sim/sim_bridge.py` `STEERING_MAX_LEFT/RIGHT`, 0.509 / -0.448 rad). `racerbot_sim`'s bridge reads them for the selected car: `gym_bridge_node` parameter `car` (empty = `current_car_id()`, refuse if unresolvable), passed by `sim_bringup_launch.py` (argument `car`, default from `launch_car_id()`) and `sim_race_launch.py`. `tools/f1tenth_sim` reads the same values where it models full lock. This changes car 1's ROS-simulator full lock (it modelled car 2's) — record it in `unify-behaviour-changes.md`; not binding while autonomy is capped at 0.33 rad. Tests: per-car full-lock value with its citation; capture shows `gym_bridge_node.car == 'rb1'`; break = launch passes no car → fails.
 
 ### Task 13: The two-car behaviour gate
 
