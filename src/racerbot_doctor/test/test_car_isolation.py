@@ -40,6 +40,9 @@ def test_doctor_rb1_never_mentions_ethernet_or_realsense(tmp_path, monkeypatch):
 
 def test_doctor_rb2_never_opens_tty_or_video(tmp_path, monkeypatch):
     spec = car.spec_for(load_profile('rb2'))
+    (tmp_path / 'sensors').mkdir()
+    (tmp_path / 'sensors/hokuyo').write_text('')
+    (tmp_path / 'video0').write_text('')
     touched = []
     real_lexists = os.path.lexists
     real_exists = os.path.exists

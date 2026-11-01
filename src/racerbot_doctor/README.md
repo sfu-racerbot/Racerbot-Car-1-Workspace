@@ -165,7 +165,7 @@ So a user outside the `input` group passes a `js0`-only check, yet `joy_node` ru
 
 | File | Job |
 |---|---|
-| `racerbot_doctor/system.py` | The only code that touches the OS: walks `/sys/bus/usb/devices`, `/proc`, `/dev`. It never opens a device node; access is checked with `os.access`. Every root path is a parameter so tests use a fake tree. |
+| `racerbot_doctor/system.py` | The only code that touches the OS: walks `/sys/bus/usb/devices`, `/proc`, `/dev`. It never opens a device node (a file representing hardware); access is checked with `os.access`. Every root path is a parameter so tests use a fake tree. |
 | `racerbot_doctor/live.py` | The only code that imports `rclpy`. Subscribes for a few seconds and counts messages. Creates no publishers. |
 | `racerbot_doctor/checks.py` | All the verdicts. Pure functions, no I/O. |
 | `racerbot_doctor/snapshot.py` | The plain data passed between them, and the layer ladder. |
@@ -187,6 +187,33 @@ python3 -m pytest src/racerbot_doctor/test/ -v
 ```
 
 **Working when:** `190 passed` on domain 79. On domain 72, 189 pass and `test_runs_on_the_isolated_test_domain` fails because it explicitly requires 79. Unsourced, `test_live.py` fails to collect because `rclpy` is unavailable; do not add `--continue-on-collection-errors`.
+
+### Dual-car regression verification (2026-11-01)
+
+The Task 12b checks ran with `RB_WS=$PWD rb env ROS_DOMAIN_ID=72 python3 -m pytest`, using `-q -p no:cacheprovider`. Each mutation below was applied alone, tested, reverted and tested again. The separate domain assertion passed on domain 79.
+
+| Mutation | Selected tests | Failed under mutation | Passed after revert |
+|---|---|---|---|
+| A: return rb1 specifications for every profile | rb2 specification and rb2 checks | 15 (2 still passed) | 17 |
+| B: swap the cars' specifications | Specification tests | 5 (LB test still passed) | 6 |
+| C: rb1 also requests ping/TCP | rb1 isolation | 1 | 1 |
+| D: rb2 stats the Hokuyo link | rb2 isolation | 1 | 1 |
+| E: replace the Ethernet ladder with an INFO-only report | rb2 LiDAR checks | 9 | 9 |
+| F: replace the RealSense ladder with an INFO-only report | rb2 camera checks | 6 | 6 |
+| G: IP parser returns a fabricated address | IP parsing | 2 | 2 |
+| H: carrier always reports down | Carrier filesystem fixture | 1 | 1 |
+| I: invert the automatic TCP probe gate | Driver up/down TCP gating | 2 | 2 |
+| J: corrupt gathered VESC target and probe results | Remaining rb2 gather tests | 8 | 8 |
+| K: change the LB index from 4 to 5 | Teleop [deadman](../../docs/glossary.md#deadman) config oracle | 1 | 1 |
+| L: CLI always returns 2 | CLI behaviour and rb2 probe request | 14 | 14 |
+| M: omit the camera subscription | rb2 live topic/rate check | 1 | 1 |
+| N: absent camera reports WARN | No-camera profile | 1 | 1 |
+
+Comparison with `refs/car2/main` found 28 car-2-only test names, all retained: 14 in `test_rb2_checks.py`, 13 in `test_rb2_network.py` and the LB test in `test_car_specs.py`. Shared car 1 tests remain in their original files.
+
+The rb2 fixture keeps the recorded IP output and carrier files; camera mutations select the RealSense by USB ID.
+
+The unsourced full suite stopped at the same single `test_live.py` import error before and after this change. Explicitly excluding that ROS-dependent file ran all 183 non-live cases successfully. The car 1 hardware guard retained its two baseline failures at `test_car1_hardware_config.py:108` and `:119`, with 15 passes.
 
 The plan this was built from: [docs/superpowers/plans/2026-10-01-racerbot-doctor.md](../../docs/superpowers/plans/2026-10-01-racerbot-doctor.md).
 
