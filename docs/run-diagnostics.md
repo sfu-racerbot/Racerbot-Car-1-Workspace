@@ -7,7 +7,7 @@
 How to capture everything needed to work out what a run did — and how to
 hand that to a person or an AI agent so they can act on it.
 
-This exists because of a debugging session on **2026-07-27** (TODO(verify): which car) in which four
+This exists because of a debugging session on **2026-07-27** (car 2) in which four
 separate faults stacked on top of each other, each one hiding the next.
 Every recommendation below is here because its absence cost real time or a
 real collision that night. The postmortem is at the end.
@@ -45,7 +45,7 @@ one for a run that is not an algorithm (manual driving, say).
 - **Cannot move the car.** It creates no publisher and no subscription: it
   only reads the list of nodes and topics, the way `ros2 node list` does.
 
-**Why it exists:** on 2026-10-26 the races against team A (TODO(verify): which car) were run with
+**Why it exists:** on 2026-10-26 the races against team A (car 1) were run with
 plain `gap_follow_launch.py`, and nothing recorded them. All that was left
 was the node's one-line-a-second log, which cannot show what the car saw or
 how smoothly it steered.
@@ -155,7 +155,7 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    launch with its own recorder (`map_course`) time to start it.
 
    In one measurement, the recorder appeared about 1 s after the algorithm
-   (TODO(verify): which car). If it arrives later, the recording stops and is
+   (car 1). If it arrives later, the recording stops and is
    labelled `superseded: true`.
 3. **Another recorder** is any node named `race_diag_node` or
    `rosbag2_recorder*`. The recording `auto_record` starts is
@@ -171,7 +171,7 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
 
 **Why the bag is started separately.** Starting a recording starts `ros2 bag record`
 first and on its own, and `record_run.py` with `record_bag:=false` only once the bag
-is live (or after 5 s). Measured on a Jetson on 2026-10-31 (TODO(verify): which car):
+is live (or after 5 s). Measured on a Jetson on 2026-10-31 (car 2):
 
 | How the bag is started | Start of recording to topics subscribed |
 |---|---|
@@ -185,7 +185,7 @@ the bag began about 9 to 10 s after the launch command. Two runs
 their first `/odom`.
 
 **How much of a run's start the bag misses now.** This is from the algorithm's first
-message to the bag's first message, measured on a Jetson on 2026-10-31 with two small test topics (TODO(verify): which car):
+message to the bag's first message, measured on a Jetson on 2026-10-31 with two small test topics (car 2):
 
 | Recorder | Missed | Median | Runs |
 |---|---|---|---|
@@ -442,7 +442,7 @@ the log line reports every one as `value/limit`:
 |---|---|---|
 | departed the start | `departure_distance` | never leaves the start area |
 | distance travelled | `minimum_lap_distance` | loop shorter than the minimum can never close |
-| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session (TODO(verify): which car), and silently unreported by `summarize_run` before that day's regex fix |
+| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session (car 2), and silently unreported by `summarize_run` before that day's regex fix |
 | elapsed time | `minimum_lap_duration_sec` (4.0 s), then also `minimum_lap_duration_fraction` (0.5) of the previous lap | The first lap needs 4 s. Later laps need the larger of 4 s and half the previous lap's time, so the gate follows the course length. The former fixed 15 s blocked short, fast laps; the 300° turning gate still applies. |
 | back near the start | `closure_distance` | passes the start but too wide |
 | heading matches start | `closure_heading_deg` | comes back the "wrong way round" |
@@ -1077,7 +1077,7 @@ Run directory: ~/racerbot-ws/data/<id>/racerbot_runs/<dir>
 
 ## Postmortem: 2026-07-27
 
-TODO(verify): which car was used in this session.
+Car 2 was used in this session.
 
 Four faults, each hiding the next. In the order they had to be peeled:
 
