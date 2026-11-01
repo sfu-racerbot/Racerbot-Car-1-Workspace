@@ -1,4 +1,11 @@
-"""Data commit limits, exercised against disposable repositories."""
+"""Data commit limits, exercised against disposable repositories.
+
+Step 3 mutation checks: the rejection, staged-blob, boundary, push refusal and
+hook setup tests respectively caught a 200 MiB limit, working-tree sizes, >=,
+a disabled push check and a missing hooksPath. The other tests caught a 40 MiB
+hook limit, incorrect car/dev-box output, rejecting all staged data and an
+LFS mention. All passed after reverting the mutations.
+"""
 import os
 from pathlib import Path
 import shutil
