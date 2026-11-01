@@ -107,6 +107,7 @@ def normalize(obj, ws_root, sandbox=None, *, matrix_dir=None):
         replacements.append((os.path.realpath(matrix_dir), '<MATRIX>'))
     for path, replacement in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
         obj = obj.replace(path, replacement)
+    obj = re.sub(r'(?<![0-9])[0-9]{8}-[0-9]{6}(?![0-9])', '<TIMESTAMP>', obj)
     tmp = tempfile.gettempdir().rstrip('/')
     return re.sub(r'(?<!>)' + re.escape(tmp) + r'(?=/|$)', '<TMP>', obj)
 

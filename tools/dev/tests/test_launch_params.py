@@ -19,6 +19,13 @@ from launch_params import CaptureError, capture, diff_captures, flatten_params, 
 FIXTURES = Path(__file__).parent / 'fixtures/launch_params'
 
 
+def test_normalize_replaces_run_timestamps():
+    # Oracle: YYYYMMDD-HHMMSS run names are variable; longer numbers are not.
+    assert normalize('/x/racerbot_runs/20261031-203927/bag', '/workspace') == (
+        '/x/racerbot_runs/<TIMESTAMP>/bag')
+    assert normalize('120261031-203927', '/workspace') == '120261031-203927'
+
+
 @pytest.fixture
 def demo(tmp_path):
     return capture(str(FIXTURES / 'demo_launch.py'), [f'marker:={tmp_path}/spawned'])
