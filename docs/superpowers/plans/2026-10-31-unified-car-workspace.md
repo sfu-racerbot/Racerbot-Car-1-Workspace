@@ -160,6 +160,11 @@
   - **Classification:** each hunk is car hardware (→ overlay or profile-driven code), a feature to keep, or superseded (with the commit that supersedes it).
   - **Presence check:** after the merge, a script confirms that every "keep" hunk's added lines from **both** ledgers exist in the merged file (whitespace-normalised). A miss fails Task 11.
   - **Grouping:** both ledgers are grouped by blamed commit (`ledger_by_commit.py`). The reverse ledger's biggest groups are car 1's port and hardware commits (`f03f784`, `0cd347f`, `9fe90a4`, `e0dd8fd`), car 1's IMU work `881c409`, `auto_record` `b21860f`, and the late feature fixes.
+  - **Merge base per file (Task 11):**
+    - **Synthetic base where one exists:** the newest blob both repos' histories contain (`~/racerbot-merge/synth_base.py`, report `synth_report.tsv`). That's the real sync point. 44 files merge cleanly from it, including `opponent_tracking.py` and the `map_course` script. 44 conflict, among them `gap_follow_node.py` (7), `record_run.py` (4) and `map_course_launch.py` (3), and those are hand-resolved.
+    - **No synthetic base (59 files):** these are mostly `package.xml`/`setup.py`, docs and tests. They're merged by hand from both ledgers.
+    - **`ffbfac0` is never used** as the base for a file that has a synthetic base.
+    - **Gate:** `~/racerbot-merge/presence_check.py <merged tree>` must report 0 missing keep-hunks and 0 `review` hunks.
 
 ## Review Focus
 
