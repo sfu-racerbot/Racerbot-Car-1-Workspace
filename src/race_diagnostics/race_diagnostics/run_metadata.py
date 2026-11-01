@@ -18,10 +18,14 @@ metadata as text, not raised.
 
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+
+import yaml
 
 GIT_TIMEOUT_S = 20.0
 
@@ -143,11 +147,32 @@ def write_run_metadata(run_dir, repos, files):
     (meta / 'files' / 'MANIFEST.txt').write_text(
         ''.join(f'{src} -> {dst}\n' for src, dst in copied.items()))
     from racerbot_car.identity import current_car_id
+    from racerbot_car import layers
     try:
         car_id = current_car_id()
     except (RuntimeError, OSError, ValueError) as exc:
-        car_id = f'unresolved: {exc}'
-    (meta / 'car_id.txt').write_text(car_id + '\n')
+        car_id = None
+        error = f'unresolved: {exc}'
+    else:
+        error = None
+    (meta / 'car_id.txt').write_text((car_id or error) + '\n')
+    overlays = []
+    errors = []
+    if car_id:
+        try:
+            root = layers.repo_root()
+            for path in layers.car_overlays(car_id):
+                try:
+                    overlays.append({'path': os.path.relpath(path, root),
+                                     'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+                except (OSError, ValueError) as exc:
+                    errors.append(f'{path}: {exc}')
+        except (OSError, ValueError, RuntimeError) as exc:
+            errors.append(f'overlays: {exc}')
+    data = {'car_id': car_id, 'overlays': overlays}
+    if errors:
+        data['errors'] = errors
+    (meta / 'car.yaml').write_text(yaml.safe_dump(data, sort_keys=False))
     return meta
 
 

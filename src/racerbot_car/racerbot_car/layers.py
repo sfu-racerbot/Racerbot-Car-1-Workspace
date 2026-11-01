@@ -68,6 +68,13 @@ def overlay_files(config_name: str, car_id: str | None = None,
     return [str(path.resolve()) for path in candidates if path.is_file()]
 
 
+def car_overlays(car_id: str) -> list[Path]:
+    """Return all existing calibration and tuning YAML files for a car."""
+    directory = paths.cars_dir() / car_id
+    return sorted(path.resolve() for kind in ('calibration', 'tuning')
+                  for path in (directory / kind).glob('*.yaml') if path.is_file())
+
+
 def layered(shared_path: str, config_name: str, car_id: str | None = None,
             cars_dir: Path | None = None) -> list[str]:
     car_id = car_id if car_id is not None else identity.current_car_id()

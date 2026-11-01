@@ -7,7 +7,7 @@ import argparse
 import sys
 import traceback
 
-from racerbot_car import identity, paths
+from racerbot_car import guards, identity, layers, paths
 from racerbot_car.profile import ProfileError, load_profile
 
 from . import car
@@ -46,6 +46,13 @@ def main(argv=None, *, gather_fn=None, sample_fn=None, out=None):
         return 2
 
     try:
+        tuning = [path for path in layers.car_overlays(car_id) if path.parent.name == 'tuning']
+        serial = identity.read_serial(identity.SERIAL_PATH) or 'none'
+        out.write(f'Car {car_id} (serial {serial}), tuning overrides:'
+                  + ('\n' if tuning else ' none\n'))
+        for path in tuning:
+            for block, key, value, why in guards.tuning_overrides(path):
+                out.write(f'  {path.name}: {block}.{key} = {value}  # {why}\n')
         if gather_fn is None:
             from .system import gather as gather_fn
         if sample_fn is None:
