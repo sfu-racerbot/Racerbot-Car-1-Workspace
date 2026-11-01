@@ -25,6 +25,7 @@ Everything here except the data paths, the IMU file location and the simulator f
 - **Data paths.** Runs and maps go under `data/rb1/` instead of `data/` (Phase 2).
 - **IMU calibration** is read from `src/racerbot_car/cars/rb1/imu/car.yaml` (Phase 2, Task 9), byte-identical to car 1's old `tools/imu_calibration/config/car.yaml`.
 - **Simulator full lock.** Both simulators model car 1's own full lock (left +0.401 rad measured, right -0.463 rad computed) instead of car 2's (+0.509 / -0.448 rad). Autonomy is capped at 0.33 rad on car 1, so no controller reaches either. Details under Task 12e below.
+- **Dashboard tuning saves** go to the file that already holds the key: each live-tuning entry lists the shared config, then this car's `calibration/` overlay (decision 13, Task 15c, web-dashboards `836a004`).
 
 ## What changes on rb2 (car 2)
 
@@ -35,6 +36,7 @@ Car 2's driving code is the merged code, so its launch parameters change only in
 - **system_log** starts as the installed `system_log` executable instead of `python3 -m race_diagnostics.system_log`, with the same arguments (car 1's `db3e9e9`, which also makes its child lookup portable to the Jetson).
 - **Car 1's work car 2 did not have** reaches car 2 as code: the race-winning gap_follow defaults (`65b2ed0`; the captured values were already car 2's), the cap on speed when an alongside pass is refused (`3933bf6`) and the follow memory fix (`a43c72a`), and analysis of mapping runs after shutdown (`e85c4fc`). The launch captures show no gap_follow parameter change on car 2.
 - **Simulator full lock.** The bridge is told which car it models; for car 2 the values are its own (+0.509 / -0.448 rad), as before.
+- **Dashboard tuning saves** go to the file that already holds the key: each live-tuning entry lists the shared config, then this car's `calibration/` overlay (decision 13, Task 15c, web-dashboards `836a004`).
 
 ## Simulator A/B
 
@@ -210,6 +212,12 @@ Decision 15: the dashboard's run-delete roots are this car's own data/<car>/ (ca
 
 - `rb1 ~ /web_dashboard_node map_roots ["~/.ros/racerbot_auto", "~/.ros/racerbot_sim/auto"] -> ["~/racerbot-ws/data/rb1/racerbot_auto", "~/racerbot-ws/data/rb1/racerbot_sim/auto"]` (dashboard, sim-auto-map-dashboard)
 
+#### rb1: d13-dashboard-save
+
+Decision 13, Task 15c: the dashboard's live-tuning save lists the shared config, then this car's calibration overlay, and writes each value into the last file that already holds the key (web-dashboards 836a004).
+
+- `rb1 ~ /web_dashboard_node tuning_config_files ["pure_pursuit/config/pure_pursuit.yaml", "gap_follow/config/gap_follow.yaml"] -> ["pure_pursuit/config/pure_pursuit.yaml|racerbot_car/cars/rb1/calibration/pure_pursuit.yaml", "gap_follow/config/gap_follow.yaml|racerbot_car/cars/rb1/calibration/gap_follow.yaml"]` (dashboard, sim-auto-map-dashboard)
+
 #### rb1: d16-dashboard-test
 
 Decision 16: dashboard_test_launch starts no second dashboard unless dashboard:=true (car 2's way).
@@ -255,6 +263,12 @@ Car 1's db3e9e9 for car 2: the recorder runs the installed system_log executable
 Decision 15: the dashboard's map/run roots are this car's own data/<car>/.
 
 - `rb2 ~ /web_dashboard_node map_roots ["~/racerbot-ws/data/racerbot_auto", "~/racerbot-ws/data/racerbot_sim/auto"] -> ["~/racerbot-ws/data/rb2/racerbot_auto", "~/racerbot-ws/data/rb2/racerbot_sim/auto"]` (dashboard, sim-auto-map-dashboard)
+
+#### rb2: d13-dashboard-save
+
+Decision 13, Task 15c: the dashboard's live-tuning save lists the shared config, then this car's calibration overlay, and writes each value into the last file that already holds the key (web-dashboards 836a004).
+
+- `rb2 ~ /web_dashboard_node tuning_config_files ["pure_pursuit/config/pure_pursuit.yaml", "gap_follow/config/gap_follow.yaml"] -> ["pure_pursuit/config/pure_pursuit.yaml|racerbot_car/cars/rb2/calibration/pure_pursuit.yaml", "gap_follow/config/gap_follow.yaml|racerbot_car/cars/rb2/calibration/gap_follow.yaml"]` (dashboard, sim-auto-map-dashboard)
 
 #### rb2: p2-referee-order
 
