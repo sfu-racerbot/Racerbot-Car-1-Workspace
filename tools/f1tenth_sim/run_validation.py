@@ -31,22 +31,7 @@ from sim_fidelity.bootstrap import bootstrap  # noqa: E402
 
 ROOT = bootstrap()
 
-try:
-    import gymnasium as gym
-    import numpy as np
-    import f1tenth_gym  # noqa: F401 - registers the Gymnasium environment
-    from f1tenth_gym.envs.dynamic_models import DynamicModel
-    from f1tenth_gym.envs.env_config import (
-        EnvConfig,
-        ObservationConfig,
-        SimulationConfig,
-    )
-    from f1tenth_gym.envs.integrators import IntegratorType
-    from f1tenth_gym.envs.observation import ObservationType
-except ImportError as exc:
-    raise SystemExit(
-        f"F1TENTH Gym is not set up ({exc}). Run tools/f1tenth_sim/setup.sh first."
-    ) from exc
+import numpy as np
 
 from gap_follow import gap_logic
 from gap_mirror import GapController, node_params
@@ -97,18 +82,22 @@ OPPONENT_RESERVE_DISTANCE = 0.5
 # module-level default keeps probe scripts that import this file honest.
 PROFILE = PROFILES[DEFAULT_PROFILE]
 _CAR_ID = None
+_COMPONENTS = None
 
 
 def select_profile(name: str, car_id=None) -> None:
     """Switch the active fidelity profile, rebuilding what depends on it."""
-    global PROFILE, COMPONENTS, LIDAR, CALIBRATION, _CAR_ID
+    global PROFILE, CALIBRATION, _CAR_ID, _COMPONENTS
     global PURE_PURSUIT_PARAMS, CONTROL_DT, WHEELBASE, CAR_WIDTH, CAR_LENGTH
     global STEERING_LIMIT, LIDAR_OFFSET_X, MAX_STEERING_RATE
     global PURE_MAX_LATERAL_ACCEL, PURE_MAX_ACCELERATION, PURE_MAX_BRAKING_DECEL, PURE_MAX_SPEED
     from sim_fidelity.calibration import selected_car
-    _CAR_ID = selected_car(car_id)
-    CALIBRATION = calibration_for_car(_CAR_ID)
-    PURE_PURSUIT_PARAMS = _pure_pursuit_params(_CAR_ID)
+    selected = selected_car(car_id)
+    calibration = calibration_for_car(selected)
+    params = _pure_pursuit_params(selected)
+    _CAR_ID = selected
+    CALIBRATION = calibration
+    PURE_PURSUIT_PARAMS = params
     CONTROL_DT = 1.0 / float(PURE_PURSUIT_PARAMS['control_rate_hz'])
     WHEELBASE = CALIBRATION.wheelbase
     CAR_WIDTH = CALIBRATION.width
@@ -121,13 +110,28 @@ def select_profile(name: str, car_id=None) -> None:
     PURE_MAX_BRAKING_DECEL = float(PURE_PURSUIT_PARAMS['max_braking_decel'])
     PURE_MAX_SPEED = float(PURE_PURSUIT_PARAMS['max_speed'])
     PROFILE = PROFILES[name]
-    COMPONENTS = env_components(PROFILE, CALIBRATION)
-    LIDAR = COMPONENTS["lidar_config"]
+    _COMPONENTS = None
 
 
 def _ensure_config(car_id=None):
-    if car_id is not None or _CAR_ID is None:
-        select_profile(PROFILE.name, car_id)
+    from sim_fidelity.calibration import selected_car
+    selected = selected_car(car_id)
+    # Defaulted library calls are fresh reads, including edits to the same
+    # profile. Nested simulation calls pass their selected car explicitly.
+    if car_id is None or selected != _CAR_ID:
+        select_profile(PROFILE.name, selected)
+
+
+def _components():
+    """Gym-dependent pieces are built only when a simulation needs them."""
+    global _COMPONENTS
+    if _COMPONENTS is None:
+        _COMPONENTS = env_components(PROFILE, CALIBRATION)
+    return _COMPONENTS
+
+
+def _lidar():
+    return _components()['lidar_config']
 
 
 def __getattr__(name):
@@ -137,19 +141,35 @@ def __getattr__(name):
                 'PURE_MAX_LATERAL_ACCEL', 'PURE_MAX_ACCELERATION',
                 'PURE_MAX_BRAKING_DECEL', 'PURE_MAX_SPEED'}:
         _ensure_config()
+        if name == 'COMPONENTS':
+            return _components()
+        if name == 'LIDAR':
+            return _lidar()
         return globals()[name]
     raise AttributeError(name)
 
 
 def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityPlant:
     """Build the environment and wrap it in this car's fidelity layer."""
-    _ensure_config(car_id)
+    select_profile(PROFILE.name, car_id)
+    try:
+        import gymnasium as gym
+        import f1tenth_gym  # noqa: F401 - registers the environment
+        from f1tenth_gym.envs.dynamic_models import DynamicModel
+        from f1tenth_gym.envs.env_config import EnvConfig, ObservationConfig, SimulationConfig
+        from f1tenth_gym.envs.integrators import IntegratorType
+        from f1tenth_gym.envs.observation import ObservationType
+    except ImportError as exc:
+        raise SystemExit(
+            f"F1TENTH Gym is not set up ({exc}). Run tools/f1tenth_sim/setup.sh first."
+        ) from exc
+    components = _components()
     config = EnvConfig(
         seed=seed,
         map_name=track,
-        params=COMPONENTS["params"],
+        params=components["params"],
         num_agents=num_agents,
-        control_config=COMPONENTS["control_config"],
+        control_config=components["control_config"],
         simulation_config=SimulationConfig(
             timestep=CONTROL_DT,
             integrator_timestep=INTEGRATOR_DT,
@@ -158,8 +178,8 @@ def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityP
             max_laps=1,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
-        lidar_config=COMPONENTS["lidar_config"],
-        collision_check=COMPONENTS["collision_check"],
+        lidar_config=components["lidar_config"],
+        collision_check=components["collision_check"],
         render_enabled=False,
     )
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
@@ -181,18 +201,19 @@ def plan_initial_pose(plan, shipped_line) -> np.ndarray:
     return np.array([[start[0], start[1], yaw]], dtype=float)
 
 
-def cone_indices(half_angle_rad: float) -> tuple[int, int]:
-    _ensure_config()
-    lo = int((-half_angle_rad - LIDAR.angle_min) / LIDAR.angle_increment)
-    hi = int((half_angle_rad - LIDAR.angle_min) / LIDAR.angle_increment)
-    return max(0, lo), min(LIDAR.num_beams - 1, hi)
+def cone_indices(half_angle_rad: float, car_id=None) -> tuple[int, int]:
+    _ensure_config(car_id)
+    lidar = _lidar()
+    lo = int((-half_angle_rad - lidar.angle_min) / lidar.angle_increment)
+    hi = int((half_angle_rad - lidar.angle_min) / lidar.angle_increment)
+    return max(0, lo), min(lidar.num_beams - 1, hi)
 
 
-def closest_valid(scan: np.ndarray, half_angle_rad: float) -> float:
-    lo, hi = cone_indices(half_angle_rad)
+def closest_valid(scan: np.ndarray, half_angle_rad: float, car_id=None) -> float:
+    lo, hi = cone_indices(half_angle_rad, car_id)
     values = np.asarray(scan[lo : hi + 1], dtype=float)
     values = values[
-        np.isfinite(values) & (values > 0.0) & (values >= LIDAR.range_min)
+        np.isfinite(values) & (values > 0.0) & (values >= _lidar().range_min)
     ]
     return float(values.min()) if values.size else math.inf
 
@@ -215,16 +236,17 @@ def track_centerline(track):
             table[:, 3].astype(float), table[:, 2].astype(float))
 
 
-def optimized_raceline(track) -> np.ndarray:
+def optimized_raceline(track, car_id=None) -> np.ndarray:
     """Minimum-curvature line from the track's centerline and track widths.
 
     Uses the same optimizer and the same car dimensions and margin that
     optimize_raceline defaults to, so what is measured here is what the tool
     would actually produce for this track.
     """
-    _ensure_config()
+    select_profile(PROFILE.name, car_id)
     key = getattr(track, "spec", None)
     key = getattr(key, "name", None) or id(track)
+    key = (_CAR_ID, CALIBRATION, str(Path(track.filepath).resolve()), key)
     if key in _OPTIMIZED_CACHE:
         return _OPTIMIZED_CACHE[key]
 
@@ -251,9 +273,9 @@ class PathPlan:
     speed: np.ndarray
 
     @classmethod
-    def from_track(cls, track, v_max: float = 4.0, a_lat_max: float = 2.5):
+    def from_track(cls, track, v_max: float = 4.0, a_lat_max: float = 2.5, car_id=None):
         if RACELINE_SOURCE == "optimized":
-            xy = optimized_raceline(track)
+            xy = optimized_raceline(track, car_id)
         elif RACELINE_SOURCE == "centerline":
             xy = track_centerline(track)[0]
         else:
@@ -290,15 +312,20 @@ class CommandShaper:
     """Deterministic equivalent of pure_pursuit_node's final command stage."""
 
     def __init__(self, car_id=None):
-        _ensure_config(car_id)
+        select_profile(PROFILE.name, car_id)
+        self.params = dict(PURE_PURSUIT_PARAMS)
+        self.wheelbase = WHEELBASE
+        self.control_dt = CONTROL_DT
         self.previous_steering = 0.0
         self.previous_speed = 0.0
 
     def command(self, desired_steering: float, desired_speed: float,
                 hard_speed_cap: Optional[float] = None,
                 measured_speed: Optional[float] = None) -> tuple[float, float]:
+        params = self.params
+        max_speed = float(params['max_speed'])
         if hard_speed_cap is None:
-            hard_speed_cap = PURE_MAX_SPEED
+            hard_speed_cap = max_speed
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
             self.previous_steering = desired_steering
             self.previous_speed = 0.0
@@ -307,27 +334,27 @@ class CommandShaper:
         steering = racing_math.slew_rate_limit(
             desired_steering,
             self.previous_steering,
-            CONTROL_DT,
-            MAX_STEERING_RATE,
+            self.control_dt,
+            float(params['max_steering_rate']),
         )
-        desired_curvature = math.tan(desired_steering) / WHEELBASE
-        commanded_curvature = math.tan(steering) / WHEELBASE
+        desired_curvature = math.tan(desired_steering) / self.wheelbase
+        commanded_curvature = math.tan(steering) / self.wheelbase
         online_curvature = max(abs(desired_curvature), abs(commanded_curvature))
         curve_speed = racing_math.curvature_speed_limit(
-            online_curvature, PURE_MAX_LATERAL_ACCEL, PURE_MAX_SPEED)
+            online_curvature, float(params['max_lateral_accel']), max_speed)
         speed_target = min(desired_speed, curve_speed, hard_speed_cap)
         # Mirrors the node: ramp from the car's measured speed when it is
         # higher than the last command, so a one-tick ceiling does not force a
         # slow climb back from a speed the car was never actually at.
         ramp_basis = self.previous_speed
         if measured_speed is not None:
-            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), PURE_MAX_SPEED))
+            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), max_speed))
         speed = racing_math.slew_rate_limit(
             speed_target,
             ramp_basis,
-            CONTROL_DT,
-            PURE_MAX_ACCELERATION,
-            PURE_MAX_BRAKING_DECEL,
+            self.control_dt,
+            float(params['max_acceleration']),
+            float(params['max_braking_decel']),
         )
         speed = min(speed, curve_speed, hard_speed_cap)
         self.previous_steering = steering
@@ -370,7 +397,7 @@ class PathFollower:
         use_measured_lookahead: bool = True,
         car_id=None,
     ):
-        _ensure_config(car_id)
+        select_profile(PROFILE.name, car_id)
         self.VEHICLE_LIMITS = tracking_laws.VehicleLimits(
             wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
             max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
@@ -538,7 +565,7 @@ CENTERING_SIDE_HALF_SPAN = math.radians(60.0) / 2.0
 CENTERING_ZERO_SIDE_DISTANCE = 5.0
 
 
-def corridor_offset(scan: np.ndarray) -> Optional[float]:
+def corridor_offset(scan: np.ndarray, car_id=None) -> Optional[float]:
     """How far off the middle of the corridor the car is, in meters.
 
     Positive means it sits left of centre. Returns None where the car is not
@@ -546,10 +573,11 @@ def corridor_offset(scan: np.ndarray) -> Optional[float]:
     "the middle" is not defined there and averaging a made-up number in would
     hide the cases that matter.
     """
-    _ensure_config()
+    _ensure_config(car_id)
+    lidar = _lidar()
     clean, valid = gap_logic.sanitize_ranges(scan, max_range=10.0, range_min=0.05)
-    angles = LIDAR.angle_min + np.arange(
-        clean.size, dtype=float) * LIDAR.angle_increment
+    angles = lidar.angle_min + np.arange(
+        clean.size, dtype=float) * lidar.angle_increment
     left = gap_logic.side_wall_distance(
         clean, valid, angles, math.pi / 2.0, CENTERING_SIDE_HALF_SPAN)
     right = gap_logic.side_wall_distance(
@@ -573,14 +601,14 @@ def gap_controller(car_id=None) -> GapController:
     _ensure_config(car_id)
     params = node_params(car_id=_CAR_ID)
     params["enable_centering"] = ENABLE_CENTERING
-    return GapController(params, LIDAR)
+    return GapController(params, _lidar())
 
 
-def nearest_valid_range(scan: np.ndarray) -> float:
+def nearest_valid_range(scan: np.ndarray, car_id=None) -> float:
     """Closest valid return in the forward 180 degrees (the gap window)."""
-    _ensure_config()
-    clean, valid = gap_logic.sanitize_ranges(scan, max_range=10.0, range_min=LIDAR.range_min)
-    lo, hi = cone_indices(math.pi / 2.0)
+    _ensure_config(car_id)
+    clean, valid = gap_logic.sanitize_ranges(scan, max_range=10.0, range_min=_lidar().range_min)
+    lo, hi = cone_indices(math.pi / 2.0, _CAR_ID)
     return gap_logic.closest_valid(clean[lo:hi + 1], valid[lo:hi + 1])[1]
 
 
@@ -607,7 +635,8 @@ def result_base(
 
 def run_gap_solo(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
     select_profile(PROFILE.name, car_id)
-    plant = make_plant(track, 1, seed)
+    car_id = _CAR_ID
+    plant = make_plant(track, 1, seed, car_id)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(initial_pose(line, 0).reshape(1, 3))
     reference = np.column_stack((line.xs, line.ys))
@@ -620,7 +649,7 @@ def run_gap_solo(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
     # only says how far it is from the reference raceline, which is a
     # different question when the reference is not the middle either.
     corridor_offsets = []
-    controller = gap_controller()
+    controller = gap_controller(car_id)
     started = time.monotonic()
     max_steps = math.ceil(timeout_s / CONTROL_DT)
 
@@ -632,9 +661,9 @@ def run_gap_solo(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
                                                  horizontal_accel=0.0, lb_pressed=True,
                                                  yaw_rate=float(state[5]),
                                                  fused_speed=float(plant.truth(0)[3]))
-            min_scan = min(min_scan, nearest_valid_range(ego["scan"]))
+            min_scan = min(min_scan, nearest_valid_range(ego["scan"], car_id))
             stop_steps += int(controller.stopped)
-            offset = corridor_offset(ego["scan"])
+            offset = corridor_offset(ego["scan"], car_id)
             if offset is not None:
                 corridor_offsets.append(offset)
 
@@ -690,9 +719,12 @@ def apply_fallback_safety(
     dynamic_angles: Optional[np.ndarray] = None,
     overtake_active: bool = False,
     expected_scan: Optional[np.ndarray] = None,
+    car_id=None,
 ) -> tuple[float, float, str]:
+    _ensure_config(car_id)
+    car_id = _CAR_ID
     # The emergency tier is unconditional, including during an overtake.
-    if closest_valid(scan, math.radians(30.0)) < 0.4:
+    if closest_valid(scan, math.radians(30.0), car_id) < 0.4:
         return steering, 0.0, "stop"
 
     # A committed pass has already selected a route around the tracked car.
@@ -709,13 +741,13 @@ def apply_fallback_safety(
             return steering, speed, "none"
         # The mapped track edge only -- never the opponent, which is by
         # definition the nearest thing ahead during a pass.
-        pass_clearance = closest_valid(expected_scan, math.radians(30.0))
+        pass_clearance = closest_valid(expected_scan, math.radians(30.0), car_id)
         pass_speed = racing_math.braking_speed_limit(
             pass_clearance, 0.4, PURE_MAX_BRAKING_DECEL, 4.0)
         return steering, min(speed, pass_speed), "none"
 
     if dynamic_ranges is None or dynamic_angles is None:
-        trigger_distance = closest_valid(scan, math.radians(30.0))
+        trigger_distance = closest_valid(scan, math.radians(30.0), car_id)
         trigger = trigger_distance < 0.7
     else:
         in_cone = np.abs(dynamic_angles) <= math.radians(30.0)
@@ -725,7 +757,7 @@ def apply_fallback_safety(
     if not trigger:
         return steering, speed, "none"
 
-    lo, hi = cone_indices(math.radians(30.0))
+    lo, hi = cone_indices(math.radians(30.0), car_id)
     window = np.nan_to_num(
         np.asarray(scan[lo : hi + 1], dtype=float),
         nan=0.0,
@@ -738,7 +770,7 @@ def apply_fallback_safety(
         return steering, 0.0, "stop"
 
     target_index = lo + (gap_start + gap_end) // 2
-    steering = LIDAR.angle_min + target_index * LIDAR.angle_increment
+    steering = _lidar().angle_min + target_index * _lidar().angle_increment
     steering = float(np.clip(steering, -STEERING_LIMIT, STEERING_LIMIT))
     return steering, 1.0, "avoid"
 
@@ -747,17 +779,18 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   law_name: str = "pure_pursuit",
                   law_params: Optional[dict] = None, car_id=None) -> dict:
     select_profile(PROFILE.name, car_id)
-    plant = make_plant(track, 1, seed)
+    car_id = _CAR_ID
+    plant = make_plant(track, 1, seed, car_id)
     line = plant.env.unwrapped.track.raceline
-    plan = PathPlan.from_track(plant.env.unwrapped.track)
+    plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
     # Start on the line the car is actually going to follow. Spawning it on
     # the shipped raceline while it tracks a different one would begin the lap
     # with most of a corridor's worth of cross-track error already on the
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
-    follower = PathFollower(plan, law_name=law_name, law_params=law_params)
-    command_shaper = CommandShaper()
+    follower = PathFollower(plan, law_name=law_name, law_params=law_params, car_id=car_id)
+    command_shaper = CommandShaper(car_id)
     max_cross_track = 0.0
     cross_track_sum = 0.0
     cross_track_sq: list[float] = []
@@ -791,10 +824,10 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             cross_track_sum += float(truth_error)
             cross_track_sq.append(float(truth_error))
             min_scan = min(
-                min_scan, closest_valid(ego["scan"], math.radians(30.0))
+                min_scan, closest_valid(ego["scan"], math.radians(30.0), car_id)
             )
             steering, speed, safety = apply_fallback_safety(
-                ego["scan"], steering, speed
+                ego["scan"], steering, speed, car_id=car_id
             )
             avoid_steps += int(safety == "avoid")
             stop_steps += int(safety == "stop")
@@ -870,7 +903,9 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
 
 def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
     select_profile(PROFILE.name, car_id)
-    plant = make_plant(track, 2, seed)
+    car_id = _CAR_ID
+    plant = make_plant(track, 2, seed, car_id)
+    lidar = _lidar()
     line = plant.env.unwrapped.track.raceline
     opponent_start_index = max(1, int(6.0 / 0.2))
     poses = np.vstack(
@@ -878,12 +913,12 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
     )
     obs, _ = plant.reset(poses)
 
-    plan = PathPlan.from_track(plant.env.unwrapped.track)
-    ego_follower = PathFollower(plan)
-    ego_command_shaper = CommandShaper()
+    plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
+    ego_follower = PathFollower(plan, car_id=car_id)
+    ego_command_shaper = CommandShaper(car_id)
     # The scripted opponent is not the ROS pure-pursuit node under test;
     # retain its established fixed 2 m/s lookahead so only ego changes here.
-    opponent_follower = PathFollower(plan, use_measured_lookahead=False)
+    opponent_follower = PathFollower(plan, use_measured_lookahead=False, car_id=car_id)
     cumulative = racing_math.compute_cumulative_arc_length(plan.seg_len)
     total_length = float(plan.seg_len.sum())
     tracker = OpponentProgress()
@@ -948,7 +983,7 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
             # than about the controller under test. It still does not steer
             # or race; it only declines to rear-end a stationary object.
             opponent_speed = min(2.0, gap_logic.braking_speed_limit(
-                closest_valid(opponent["scan"], math.radians(30.0)),
+                closest_valid(opponent["scan"], math.radians(30.0), car_id),
                 OPPONENT_RESERVE_DISTANCE,
                 GAP_MAX_BRAKING_DECEL,
                 2.0,
@@ -958,17 +993,17 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
             expected = plant.expected_scan(0)
             measured_ds = scan[::downsample]
             expected_ds = expected[::downsample]
-            angle_increment_ds = LIDAR.angle_increment * downsample
+            angle_increment_ds = lidar.angle_increment * downsample
             detection = racing_math.detect_dynamic_cluster(
                 measured_ds,
                 expected_ds,
-                LIDAR.angle_min,
+                lidar.angle_min,
                 angle_increment_ds,
                 margin=0.4,
                 min_width=0.15,
                 max_width=0.70,
                 max_engagement_range=5.0,
-                range_min=LIDAR.range_min,
+                range_min=lidar.range_min,
                 cluster_gap_threshold=0.3,
             )
             if detection is not None and abs(detection[3]) > math.radians(30.0):
@@ -1019,10 +1054,10 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
                     # pick_pass_side names the more open side but never asks
                     # whether it is open enough. Mirrors the node.
                     if racing_math.overtake_side_has_room(
-                            scan, LIDAR.angle_min, LIDAR.angle_increment,
+                            scan, lidar.angle_min, lidar.angle_increment,
                             side, OVERTAKE_MIN_SIDE_CLEARANCE,
-                            math.radians(30.0), LIDAR.range_min,
-                            LIDAR.range_max):
+                            math.radians(30.0), lidar.range_min,
+                            lidar.range_max):
                         overtake_active = True
                         overtake_side = side
                         overtake_starts += 1
@@ -1063,11 +1098,11 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
                 )
 
             dynamic_mask = racing_math.dynamic_beam_mask(
-                measured_ds, expected_ds, margin=0.4, range_min=LIDAR.range_min
+                measured_ds, expected_ds, margin=0.4, range_min=lidar.range_min
             )
             dynamic_ranges = measured_ds[dynamic_mask]
             dynamic_angles = (
-                LIDAR.angle_min
+                lidar.angle_min
                 + np.nonzero(dynamic_mask)[0] * angle_increment_ds
             )
             steering, speed, safety = apply_fallback_safety(
@@ -1078,6 +1113,7 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
                 dynamic_angles=dynamic_angles,
                 overtake_active=overtake_active,
                 expected_scan=expected,
+                car_id=car_id,
             )
             avoid_steps += int(safety == "avoid")
             stop_steps += int(safety == "stop")
@@ -1123,7 +1159,7 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> di
                     # below 0.4 m, so this says whether it stopped for the
                     # opponent or for a wall it had steered towards.
                     "contact_forward_scan_m": round(
-                        closest_valid(scan, math.radians(30.0)), 3),
+                        closest_valid(scan, math.radians(30.0), car_id), 3),
                 }
                 break
         else:
@@ -1333,7 +1369,7 @@ def main(argv=None) -> int:
         "seed": args.seed,
         "control_rate_hz": 1.0 / CONTROL_DT,
         "fidelity_profile": PROFILE.name,
-        "lidar_beams": LIDAR.num_beams,
+        "lidar_beams": _lidar().num_beams,
         "surface_friction": CALIBRATION.surface_friction,
         "grip_limit_mps2": round(CALIBRATION.friction_accel_limit, 3),
         # Parameters still inherited from gym rather than justified for this
