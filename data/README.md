@@ -1,14 +1,16 @@
 # data/ — recorded runs
 
-Recorded runs are kept in git so they survive the Jetson's disk and can be
-looked at from any clone. **Each car writes into `data/<car>/`: `data/rb1/`
-for car 1, `data/rb2/` for car 2.** The workspace defaults to `~/racerbot-ws`;
-set `RACERBOT_WS` to use another workspace. The car is resolved by
-`racerbot_car` from its serial or `RACERBOT_CAR` (see
-[car identity](../src/racerbot_car/README.md)). An unresolved car is an error.
+> **Who this is for:** anyone recording or saving runs on either car or a development machine.
+> **Read first:** [run diagnostics](../docs/run-diagnostics.md).
+> **You will be able to:** find and save the running car's recordings and maps.
 
-Car 1's existing data has moved into `rb1/`, and car 2's into `rb2/` (when the two cars' repos were merged, 2026-11-01). Before 2026-10-31, the tools
-wrote to `~/.ros/`, which git never sees; older runs are still there.
+Recorded runs are kept in git so they survive the Jetson's disk and can be looked at from any clone. **Each car writes into `data/<car>/`: `data/rb1/` for car 1, `data/rb2/` for car 2.**
+
+The [workspace](../docs/glossary.md) defaults to `~/racerbot-ws`; set `RACERBOT_WS` to use another workspace. The car is resolved by `racerbot_car` from its serial or `RACERBOT_CAR` (see [car identity](../src/racerbot_car/README.md)). An unresolved car is an error.
+
+Car 1's existing data moved into `rb1/` and car 2's into `rb2/` when the repos were merged on 2026-11-01. Car 2 began saving into its repo on 2026-10-25 and car 1 on 2026-10-31.
+
+Older runs may still be under `~/.ros/racerbot_{runs,auto,sim}/`, which git never sees.
 
 | Folder | Written by | What's in it |
 |---|---|---|
@@ -27,9 +29,9 @@ Folder names are the run's start time, `YYYYMMDD-HHMMSS`. Any tool still takes
 ## Saving runs to GitHub
 
 Run `tools/dev/setup_clone.sh` once per clone to install the commit hook. The
-hook rejects staged files over 95 MiB, and `tools/save_runs.sh` refuses more
-than 1.5 GiB of staged files to keep pushes below GitHub's limit. Data stays in
-plain git; do not use Git LFS.
+hook rejects staged files over 95 MiB. `tools/save_runs.sh` checks for files over 100,000,000 bytes (about 95.4 MiB), so with the hook installed the effective per-file limit is 95 MiB.
+
+The script also refuses more than 1.5 GiB of staged files by default; `SAVE_RUNS_PUSH_LIMIT_BYTES` changes that limit. Data stays in plain git; there is no Git LFS.
 
 After a session on the car, with every recorder stopped:
 
@@ -48,8 +50,13 @@ Before committing it lists any new run where the car never moved, and any stub
 another recorder replaced at once. They are committed unless you pass
 `--skip-idle`, which leaves them uncommitted on disk. Nothing is deleted.
 `<car>/racerbot_runs/auto_record.log` is the recorder's log of what it decided,
-and is committed too. On a development machine, set `RACERBOT_CAR=rb1` or
-`RACERBOT_CAR=rb2` before running the script; it refuses an unresolved car.
+and is committed too.
+
+On a development machine or for the simulator, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2` to choose the profile. Without a serial or that setting, it fails with `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator`.
+
+On a Jetson, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or set it to the matching car.
+
+A mismatch makes launches refuse with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial gives the exact line to add to `machines.yaml`.
 
 ## Things to know
 
@@ -61,9 +68,9 @@ and is committed too. On a development machine, set `RACERBOT_CAR=rb1` or
   `ros2 bag play <run>/bag` and the analysis tools read them as one bag.
   The largest non-bag file so far is a 30 MB pose graph. `tools/save_runs.sh`
   checks every file before committing.
-- **Car 1's dashboard cannot list or delete runs in `data/`.** Delete a run
-  with `git rm -r` followed by its path, then commit. Car 2's dashboard has
-  different delete-panel settings; the per-car move does not change them.
+- **Dashboard saved maps:** car 1's configured roots do not list the maps in `data/rb1/`. Car 2's saved-runs panel lists maps under `data/rb2/racerbot_auto/` and `data/rb2/racerbot_sim/auto/` and can delete eligible runs. A deletion appears in `git status`; the next `tools/save_runs.sh` commits it.
+
+  Recordings under `data/rb2/racerbot_runs/` are not in that panel. To delete a tracked recording, use `git rm -r` followed by its path and commit; the files remain in git history.
 - Every file added here stays in git history for good, and every clone
   downloads it, even if it is later deleted. A simulator run is around 30 MB,
   mostly its pose graph.

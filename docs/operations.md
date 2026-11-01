@@ -24,6 +24,14 @@ This is the "how do I do X" doc. For *why* things are wired this way, see [archi
 
 ## Every session, before anything else
 
+On a development machine or for the simulator, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2`. Without a serial or a selection, launch reports `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator`.
+
+On either Jetson, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching that serial.
+
+A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial prints the exact line to add to `machines.yaml`.
+
+The car's physical values are in `src/racerbot_car/cars/<id>/` (`car.yaml`, `calibration/*.yaml` and `imu/`). Shared configs contain the algorithm tuning used by both cars. In paths below, replace `<id>` with `rb1` or `rb2` for the running car.
+
 Run these two lines in **every** new terminal, in this order, before any `ros2` or `colcon` command:
 
 ```bash
@@ -43,7 +51,7 @@ source ~/racerbot-ws/install/setup.bash
 ros2 run racerbot_doctor doctor
 ```
 
-**Working when:** the last line reads `0 FAIL`. It's read-only and never moves the car, so it's safe to run any time. Run it again after starting `bringup_launch.py` to also check message rates, VESC faults and battery voltage. Details: [src/racerbot_doctor/README.md](../src/racerbot_doctor/README.md).
+**Working when:** the last line reads `0 FAIL`. Its first line names the car, serial and any tuning overrides. It's read-only and never moves the car, so it's safe to run any time. Run it again after starting `bringup_launch.py` to also check message rates, VESC faults and battery voltage. Details: [src/racerbot_doctor/README.md](../src/racerbot_doctor/README.md).
 
 ### Safety checklist, every time before powering the drive motor
 
@@ -183,7 +191,9 @@ Same result as above, except `gap_follow` drives the lap instead of a human — 
 
 ### Mapping in one command: 3 laps, then stop
 
-With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 does the steps above by itself: SLAM, `gap_follow`, three closed laps, then it saves the map, pose graph and racing line to `~/racerbot-ws/data/racerbot_auto/<timestamp>/`, shuts everything down and prints the commands to race on that map (`race_launch.py run_dir:=...`, which seeds the localizer where the car stopped at the end of mapping, so no RViz is needed). The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
+With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 runs SLAM and `gap_follow` for three closed laps. It saves the map, pose graph and racing line to `~/racerbot-ws/data/<id>/racerbot_auto/<timestamp>/`, then shuts down and prints the race commands.
+
+These seed the localizer where mapping stopped, so no RViz is needed. The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
 
 ## Localizing against a saved map
 
@@ -295,7 +305,7 @@ SLAM stays online as the localization source, so there's no RViz pose seed to gi
 
 **Working when:** you see the lap counter advancing in the terminal (see [Reading the terminal while it maps](#reading-the-terminal-while-it-maps) below), then a handover summary, then the car starts racing the line it just recorded.
 
-Generated artifacts are written to `~/racerbot-ws/data/racerbot_auto/<YYYYMMDD-HHMMSS>/`:
+Generated artifacts are written to `~/racerbot-ws/data/<id>/racerbot_auto/<YYYYMMDD-HHMMSS>/`:
 
 - `raceline_raw.csv` and `raceline_profiled.csv`
 - `map.yaml` and `map.pgm`
@@ -387,7 +397,7 @@ That is the whole verdict on the racing line. Two numbers matter:
 
 Usual causes, in order:
 
-1. A course with a corner tighter than this car's 1.22 m turning circle.
+1. A course with a corner tighter than the selected car's turning radius. See its profile and [hardware-reference.md](hardware-reference.md) for the steering limits.
 2. A smeared map.
 
 See [racing-autonomy.md](racing-autonomy.md#what-a-recorded-lap-actually-looks-like).
@@ -439,7 +449,7 @@ Requires a saved map and working localization for this track — both sections a
 
    ```bash
    ros2 launch pure_pursuit waypoint_recorder_launch.py \
-       output_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
+       output_file:=$HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
    ```
 
 4. Hold LB and drive one clean lap by hand, finishing roughly back where you started.
@@ -505,7 +515,7 @@ It **refuses to write the file** if the resulting line needs more steering than 
 
    ```bash
    ros2 launch racerbot_launch race_launch.py \
-       waypoints_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_profiled.csv
+       waypoints_file:=$HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_profiled.csv
    ```
 
 4. Give it a **2D Pose Estimate** seed in RViz, same as any other time you start localization.
@@ -536,9 +546,9 @@ Power down the VESC and battery **last**, after the ROS nodes have stopped. Doin
 
 Group membership (`dialout`, `input`) only applies to sessions started *after* the group was added. Open a fresh terminal, or run `newgrp dialout && newgrp input` in the current one.
 
-**Servo position shows `0.4` and nothing seems to be happening**
+**Servo position shows a nonzero value and nothing seems to be happening**
 
-That's neutral — dead center — not zero-as-in-broken. See the formula in [hardware-reference.md](hardware-reference.md#vesc-motor--steering-controller).
+Neutral is `0.366` on car 1 and `0.5904` on car 2, from each car's `calibration/vesc.yaml`. A nonzero neutral is expected. See [hardware-reference.md](hardware-reference.md#vesc-motor--steering-controller).
 
 **You published to `/drive` and nothing happened**
 
@@ -548,4 +558,6 @@ This is the safety model working as designed. If you follow [Running autonomy](#
 
 **The dashboard's camera panel says "camera offline" even though the camera and stream nodes are definitely running**
 
-The page reaches the camera through the site and the car's `rb1-cam-origin` tunnel route, so check that hop: `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1` on the car lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).
+The page reaches the camera through the car's tunnel route. On car 1, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1` checks `rb1-cam-origin`.
+
+On car 2, `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb2` checks `rb2-cam-origin`. Each lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).
