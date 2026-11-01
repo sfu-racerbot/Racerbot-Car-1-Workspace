@@ -278,10 +278,11 @@ def test_classify_applies_the_brief_decision_rule(coherence, peak, model, share,
 
 # ---------------------------------------------------------------- recorded_params
 
-def test_recorded_params_reads_the_run_snapshot_and_its_key(tmp_path):
+def test_recorded_params_reads_the_run_snapshot_and_its_key(tmp_path, monkeypatch):
     # oracle: the snapshot written here, under the key race_diagnostics uses:
     # '/gap_follow_node' (a ros2 param dump). The value changed here must come
     # back, not the tree's value, and the result must run through the mirror.
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     snapshot = dict(gap_mirror.node_params())
     snapshot['steering_gain'] = 0.7
     snap_dir = tmp_path / 'metadata' / 'params'
@@ -293,9 +294,22 @@ def test_recorded_params_reads_the_run_snapshot_and_its_key(tmp_path):
     assert gap_mirror.REQUIRED_PARAMS <= set(got)
 
 
-def test_recorded_params_falls_back_to_the_tree_with_a_warning(tmp_path):
+def test_recorded_params_preserves_snapshot_calibration(tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    snapshot = dict(gap_mirror.node_params(car_id='rb1'))
+    assert snapshot['max_steering_angle'] != 0.123
+    snapshot['max_steering_angle'] = 0.123
+    snap_dir = tmp_path / 'metadata' / 'params'
+    snap_dir.mkdir(parents=True)
+    (snap_dir / 'gap_follow_node.yaml').write_text(
+        yaml.safe_dump({'/gap_follow_node': {'ros__parameters': snapshot}}))
+    assert weave.recorded_params(tmp_path)['max_steering_angle'] == 0.123
+
+
+def test_recorded_params_falls_back_to_the_tree_with_a_warning(tmp_path, monkeypatch):
     # oracle: a run with no snapshot replays with the tree's gap_follow.yaml, and
     # says so.
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     with pytest.warns(UserWarning, match='no gap_follow snapshot'):
         got = weave.recorded_params(tmp_path)
     assert got == gap_mirror.node_params()
@@ -345,7 +359,7 @@ def test_diagnose_says_unclear_with_every_key_when_the_car_never_drove(tmp_path)
         assert math.isnan(out[key]), key
 
 
-def test_diagnose_finds_the_loop_in_a_run_built_from_the_loop_model(tmp_path):
+def test_diagnose_finds_the_loop_in_a_run_built_from_the_loop_model(tmp_path, monkeypatch):
     # oracle: a run built to be a loop, with every expected value in closed form.
     # The heading loop has lag tau = 0.1 s, the car's turning gain is 0.9, the
     # controller's steering_gain and speed schedule come from the shipped config,
@@ -354,6 +368,7 @@ def test_diagnose_finds_the_loop_in_a_run_built_from_the_loop_model(tmp_path):
     # frequency. The gyro is the car's yaw for it, 0.9 * v * tan(steer(t - 0.1)) / L.
     # A straight corridor has no aim-point jumps. So the diagnosis must say 'loop',
     # with the lag, frequency, damping and phase all as built.
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     p = gap_mirror.node_params()
     tau, speed, car_gain, wheelbase, amp = 0.1, 1.5, 0.9, 0.36, 0.2
     loop_gain = car_gain * p['steering_gain'] * min(1.0, p['steering_gain_speed_ref'] / speed)
