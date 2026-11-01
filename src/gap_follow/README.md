@@ -18,7 +18,7 @@ Reactive "follow-the-gap" autonomy: no map, no localization, no memory of the tr
 
 ## New in October 2026: swept clearance, arc guard, corner setup
 
-Three additions change how this node drives through corridors: a speed limit from how far the *body* can drive along its arc, a check that the steered arc is clear, and a move to the outside wall before a turn. In the simulator they took the indoor layouts from 24 wall contacts in 60 runs to none, and lapped about 20% faster. **They have not been driven on the real car yet.**
+Three additions change how this node drives through corridors: a speed limit from how far the *body* can drive along its arc, a check that the steered arc is clear, and a move to the outside wall before a turn. In the simulator they took the indoor layouts from 24 wall contacts in 60 runs to none, and lapped about 20% faster. Car 2 drove the initial rework on 2026-10-19; the subsequent changes require the validation order below.
 
 What each does, how to turn each off, the results, and the order to bring them up on the car (wheels off first): **[docs/gap-follow.md](../../docs/gap-follow.md)**. The step-by-step algorithm below describes the pipeline they sit in.
 
@@ -115,7 +115,7 @@ This exists so the car never steers toward a "gap" that's actually behind or bes
 
 ### 3. Check footprint clearance and instantaneous TTC
 
-The collision model is a rectangle around `base_link` (rear axle). This car measures 0.30m over the tires and 0.36m between the axles (tape-measured 2026-08-24, see [hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)); the configured rectangle is deliberately inflated to 0.31m × 0.58m. `vehicle_boundary_distances()` ray-casts from the measured LiDAR origin (+0.26m forward, 0.10m behind the front axle) to that padded rectangle. Subtracting this per-beam distance from the scan produces clearance from the body rather than from the sensor.
+The collision model is a rectangle around `base_link` (rear axle). Car 2 measured 0.30 m over the tyres and 0.36 m between the axles on 2026-08-24; car 1 assumes those dimensions ([hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)). The configured rectangle is padded to 0.31 m × 0.58 m. `vehicle_boundary_distances()` ray-casts from the LiDAR origin (+0.26 m forward, 0.10 m behind the front axle) to that rectangle. Subtracting this per-beam distance from the scan produces clearance from the body rather than from the sensor.
 
 Collision detection has three layers. The all-direction contact floor stops at `emergency_stop_clearance` (0.0m from the body, cut from 0.02m on 2026-08-25). A separate odometry-independent fallback covers `forward_stop_clearance` (0.20m, cut from 0.25m on 2026-08-25) within the narrow `forward_stop_fov_deg` cone (60°, or ±30°); close side walls outside that cone do not trigger it. The speed-aware layer then evaluates every approaching beam:
 
@@ -274,10 +274,10 @@ forward cone closed and the clearance stop deadlocked it. The bearing law
 is also what the standard F1TENTH follow-the-gap reference uses.
 
 $\delta$ is then clipped to `max_steering_angle`. **This default changed
-from `0.4189 rad` (~24°) to `0.26 rad` (~15°)**, matching `pure_pursuit`,
-and the shipped config went to `0.349 rad` (20°) after the 2026-10-16 steering
-calibration (`docs/hardware-reference.md`).
-`0.4189` was never physically achievable symmetrically: this car's servo
+from `0.4189 rad` (~24°) to `0.26 rad` (~15°)**, matching `pure_pursuit`.
+Car 2's profile now uses `0.349 rad` after its 2026-10-16 calibration; car 1's
+uses `0.33 rad` after its 2026-10-21 circles (`docs/hardware-reference.md`).
+`0.4189` was never physically achievable symmetrically under car 2's old servo
 calibration reaches `+0.313 rad` one way and only `-0.263 rad` the other, so
 anything past `0.26` was a command the servo saturated on one side and not
 the other — see
@@ -471,13 +471,13 @@ apex, only change the car's pace approaching one.
 | `corner_speed_wide` | `1.4` m/s (shipped YAML: `2.714`) | Ceiling `corner_speed` may rise to on a sensed-wide corner |
 | `enable_corner_setup` | `true` (shipped YAML: `false`, since 2026-10-27) | On the approach to a turn in a corridor, move toward the outside wall so the car turns in late. See [docs/gap-follow.md](../../docs/gap-follow.md#corner-setup) |
 | `enable_cornering_anticipation` / `anticipation_near_depth` | `false` / `2.5` m | Extra speed cap from near/far gap-bearing disagreement (see below) — ships off, measured to over-brake in open rooms |
-| `max_steering_angle` | `0.349` rad (20°) | Hard command clamp. Both sides reach ~25° since the 2026-10-16 calibration; 20° leaves margin for gain error |
+| `max_steering_angle` | car 1: `0.33` rad; car 2: `0.349` rad | Hard command clamp from each car's calibration profile. Car 1's 2026-10-21 circles reached about 0.39–0.40 rad; car 2's 2026-10-16 calibration reached about 25° on both sides. Each limit leaves margin |
 | `steering_gain` | `1.0` | Steering per radian of gap bearing, before the `max_steering_angle` clip. `1.0` points the wheels at the gap. Raise only if the car is slow to leave a wall; too high weaves |
 | `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.5` (car 1 since 2026-10-26, from its run `20261026-194514`; car 2 since 2026-10-29; `2.0` from 2026-10-19; not yet run on the floor at 2.5), see [validation](../../docs/gap-follow.md#validation) |
 | `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
 | `max_acceleration` | `3.0` m/s² (shipped YAML: `5.0`, since 2026-10-27) | Cap on how fast a speed *command* may rise; braking is never limited |
 | `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew. Shipped YAML: `2.0` (simulator-validated only) |
-| `enable_steering_damping` | `false` (shipped YAML on car 2: `false` until its BNO085 is mounted and calibrated, [car1-vs-car2.md](../../docs/car1-vs-car2.md#imu); car 1 ships `true`) | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn on with `gap_follow_launch.py steering_damping:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
+| `enable_steering_damping` | `false` (shipped YAML: `true` on both cars) | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn off with `gap_follow_launch.py steering_damping:=false`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
 | `steering_damping_gain` | `0.0` s (shipped YAML: `0.10`, since 2026-10-27) | Gain for the term above, in seconds. Refused at startup if negative or not finite |
 | `imu_topic` / `imu_status_topic` / `imu_timeout_sec` | `/imu/data` / `/imu/status` / `0.1` s | The gyro samples, their verdict, and how old a sample may be before the term turns off. `imu_timeout_sec` is refused at startup unless positive |
 | `enable_adaptive_grip` | `false` | Raises or cuts the lateral limit behind the corner speed caps, from the gyro's grip ratio, starting at `max_lateral_accel`. Used only while the gyro is trusted; otherwise the limit is `max_lateral_accel`. Turn on with `gap_follow_launch.py adaptive_grip:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#adaptive-grip-imu) |
@@ -506,13 +506,17 @@ apex, only change the car's pace approaching one.
 ### Turning circle vs. course width — a hard geometric limit
 
 `max_steering_angle` is bounded by what the steering can physically reach
-both ways. Since the 2026-10-16 circle calibration (`servo = -0.78*delta +
+both ways. On car 2, since the 2026-10-16 circle calibration (`servo = -0.78*delta +
 0.5904`, clip 0.15–0.95, `docs/hardware-reference.md`) that is about 25° each
 side; the config uses 0.349 rad (20°) for margin, a **minimum turn radius of
 0.99 m** on the 0.36 m wheelbase. (Before, the unmeasured `-1.2135` gain and
 0.85 clip left ±0.26 rad, 1.35 m.) Raising it past what both sides reach makes
 the car silently under-steer one way; `racerbot_launch`'s
 `test_steering_limits_fit_servo.py` refuses a limit the servo clips.
+
+Car 1's 2026-10-21 circles gave `servo = -0.83*delta + 0.366`, clipped to
+0.05–0.75. Its 0.33 rad limit gives a 1.05 m minimum radius with the assumed
+0.36 m wheelbase. Car 1's limit still needs wheels-off, then low-speed validation.
 
 On a 1.0 m course that is the binding constraint on what the car can drive:
 
