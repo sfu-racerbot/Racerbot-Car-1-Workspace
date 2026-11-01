@@ -1,0 +1,33 @@
+# Run summary: /home/racerbotcar-2/racerbot-ws/data/racerbot_runs/20261030-184556
+
+## How far it got
+  [reached] at least one mapping lap closed
+  [ NOT   ] SLAM configured and activated
+  [ NOT   ] racing profile generated
+  [ NOT   ] profile accepted by pure_pursuit
+  [ NOT   ] pure pursuit took drive control
+
+## Localization health
+  worst pose lag: 0.49s  [MARGINAL]
+  pose-lag alerts: 1
+  frozen-pose samples: 0
+  map->base_link losses: 0
+  topics ever seen: drive, joy, map, odom, pose, scan
+
+## Watchdog stops (count by reason)
+  deadman_released       10
+  waiting_for_joy        5
+
+## Unclassified stops
+  0 STOP line(s) matched no known watchdog state in run_events.py's CRITICAL_PATTERNS. 0 is expected; nonzero means that pattern is missing a state and needs updating.
+
+## Lap closure
+  last sample was held open by 'start_distance': 14.17 vs limit 1.96
+
+## Missing artifacts
+  MISSING launch.log -- launch terminal output (reconstructed from ~/.ros/log/ if missing; `| tee` gives the authoritative copy)
+  MISSING probe.log -- human-readable probe output
+  MISSING map.pgm -- saved occupancy map
+  MISSING raceline_profiled.csv -- generated racing line
+  no launch.log (no `| tee`) -- reconstructed 300 line(s) from 9 per-node log file(s) under ~/.ros/log/ instead: auto_map_race_node, auto_record, gap_follow_node, imu_bridge_node, rosbag2_recorder, snapshot_params, unknown, vehicle_state_node
+

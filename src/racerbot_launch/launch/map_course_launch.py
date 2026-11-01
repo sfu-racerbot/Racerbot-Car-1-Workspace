@@ -46,7 +46,8 @@ without starting the real sensor readers. Direct launches default to
 ``imu_hardware:=auto``, detecting the running simulator; true/false select
 real/simulated inputs explicitly.
 
-``gyro_odom:=true`` (default false) gives slam_toolbox gyro odometry: its
+``gyro_odom:=true`` (on car 2 the default whenever ``imu`` is on; car 1's
+default is false, docs/car1-vs-car2.md#imu) gives slam_toolbox gyro odometry: its
 odom_frame becomes odom_imu, and vehicle_state publishes odom_imu -> odom
 so that odom_imu -> base_link is vesc_to_odom's odometry with the gyro's
 heading. vesc_to_odom keeps odom -> base_link, so nothing else changes:
@@ -133,13 +134,15 @@ def slam_profile_for(gyro_odom):
 def _wiring(context, imu_probe=None):
     imu = _flag('imu', LaunchConfiguration('imu').perform(context))
     all_imu = _flag('imu_all', LaunchConfiguration('imu_all').perform(context))
-    lap_turns = _flag('imu_lap_turns', LaunchConfiguration('imu_lap_turns').perform(context))
+    # gyro_odom first: imu_lap_turns' default is gyro_odom's value, so a refusal should name the flag
+    # that was written.
     gyro_odom = LaunchConfiguration('gyro_odom').perform(context)
     gyro = _flag('gyro_odom', gyro_odom)
+    lap_turns = _flag('imu_lap_turns', LaunchConfiguration('imu_lap_turns').perform(context))
     fused = _flag('fused_speed', LaunchConfiguration('fused_speed').perform(context))
     if not imu:
-        for name, enabled in (('imu_all', all_imu), ('imu_lap_turns', lap_turns),
-                              ('gyro_odom', gyro), ('fused_speed', fused)):
+        for name, enabled in (('imu_all', all_imu), ('gyro_odom', gyro),
+                              ('imu_lap_turns', lap_turns), ('fused_speed', fused)):
             if enabled:
                 raise RuntimeError(f'{name}:=true needs imu:=true; pass imu:=true or {name}:=false')
     if lap_turns and not gyro:
@@ -208,19 +211,27 @@ def generate_launch_description(imu_probe=None):
                         'otherwise real hardware. true/false explicitly select real/simulated inputs.'),
         DeclareLaunchArgument(
             'imu_all', default_value='false',
-            description='Enable gyro_odom, fused_speed and imu_lap_turns unless explicitly set.'),
+            description='Enable fused_speed as well, unless explicitly set.'),
         DeclareLaunchArgument(
-            'gyro_odom', default_value=LaunchConfiguration('imu_all', default='false'),
-            description='true: slam_toolbox maps on gyro odometry (odom_imu) instead of '
-                        "vesc_to_odom's steering-model odometry, and loads slam_gyro.yaml. "
-                        'Needs imu:=true.'),
+            # Follows imu on both cars (car 1 followed imu_all until the 2026-11 merge, which took
+            # car 2's SLAM work for both): SLAM's fix is slam_gyro.yaml, which only this loads,
+            # and steering odometry maps badly
+            # (docs/superpowers/specs/2026-10-30-slam-reliability.md).
+            'gyro_odom', default_value=LaunchConfiguration('imu'),
+            description='true (the default with imu:=true): slam_toolbox maps on gyro odometry '
+                        "(odom_imu) instead of vesc_to_odom's steering-model odometry, and "
+                        'loads slam_gyro.yaml. Needs imu:=true.'),
         DeclareLaunchArgument(
             'fused_speed', default_value=LaunchConfiguration('imu_all', default='false'),
             description='true: gap_follow reads /odom/fused (IMU-fused speed) '
                         'instead of /odom. Needs imu:=true.'),
         DeclareLaunchArgument(
-            'imu_lap_turns', default_value=LaunchConfiguration('imu_all', default='false'),
-            description='true: count lap turns in odom_imu. Needs gyro_odom:=true.'),
+            # Follows gyro_odom: the lap counter compares SLAM's pose with odometry, so it
+            # must be the odometry SLAM was given. In steering odometry a hard turn reads as a SLAM
+            # correction, and run 20261030-180355 passed its start 4 times without closing a lap.
+            'imu_lap_turns', default_value=LaunchConfiguration('gyro_odom'),
+            description='true (the default with gyro_odom): the lap counter uses odom_imu, the '
+                        'odometry SLAM maps on. Needs gyro_odom:=true.'),
         DeclareLaunchArgument(
             'supervisor_config',
             default_value=os.path.join(

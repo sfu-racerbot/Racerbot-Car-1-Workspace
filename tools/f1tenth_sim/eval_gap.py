@@ -70,7 +70,7 @@ from imu_bridge.vehicle_state import steering_from_yaw_rate  # noqa: E402
 from recognition import false_movers, moving_track_ids  # noqa: E402
 from racerbot_sim import tracks as sim_tracks  # noqa: E402
 from run_analysis import weave  # noqa: E402
-from sim_fidelity import calibration_for_car, PROFILES  # noqa: E402
+from sim_fidelity import calibration_for_car, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
 from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
@@ -145,9 +145,10 @@ def track_map_yaml(track_spec: str):
     return Path(path).parent / f"{Path(path).name}_map.yaml"
 
 
-def make_plant(track_spec: str, seed: int, car_id=None) -> FidelityPlant:
+def make_plant(track_spec: str, seed: int, calibration=None, car_id=None) -> FidelityPlant:
     """Build a fidelity plant for a gym circuit name or an indoor layout."""
-    calibration = calibration_for_car(car_id)
+    # The selected car's own calibration unless one (e.g. with a floor profile) is given.
+    calibration = calibration if calibration is not None else calibration_for_car(car_id)
     components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     map_name = track_path(track_spec)
     config = EnvConfig(
@@ -181,10 +182,10 @@ def _reverse_laps(plant) -> float:
 
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
-              reverse: bool = False, car_id=None) -> dict:
+              reverse: bool = False, calibration=None, car_id=None) -> dict:
     """One lap of ``track``. ``reverse`` starts facing backwards, so the
     indoor layouts (all counter-clockwise) get exercised with right turns."""
-    plant = make_plant(track, seed, car_id)
+    plant = make_plant(track, seed, calibration=calibration, car_id=car_id)
     line = plant.env.unwrapped.track.raceline
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
@@ -432,8 +433,8 @@ def parse_set(values, car_id=None):
 
 
 def _job(job):
-    track, seed, params, timeout, reverse, car_id = job
-    return run_track(track, params, seed, timeout, reverse, car_id)
+    track, seed, params, timeout, reverse, car_id, calibration = job
+    return run_track(track, params, seed, timeout, reverse, calibration=calibration, car_id=car_id)
 
 
 def main(argv=None) -> int:
@@ -455,6 +456,10 @@ def main(argv=None) -> int:
     parser.add_argument("--output", help="write JSON results here")
     parser.add_argument("--reverse", action="store_true",
                         help="drive each track the other way round")
+    parser.add_argument("--friction", type=float,
+                        help="floor friction for this run (default: the calibration's)")
+    parser.add_argument("--floor", choices=sorted(FLOORS),
+                        help="a measured floor profile (default: the plain calibration)")
     args = parser.parse_args(argv)
     car_id = car_from_args(parser, args)
 
@@ -462,7 +467,8 @@ def main(argv=None) -> int:
     params = parse_set(args.set, car_id)
     for track in selected:
         track_path(track)  # build the layouts before any worker process forks
-    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id)
+    calibration = with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id)))
+    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id, calibration)
             for track in selected for k in range(args.seeds)]
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:

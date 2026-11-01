@@ -1,4 +1,7 @@
-"""Car 1's whole IMU side: BNO085 I2C bridge, imu_bridge, vehicle_state.
+"""The whole IMU side: BNO085 I2C bridge, imu_bridge, vehicle_state.
+
+Written on car 1. Car 2's BNO085 is wired the same way, on the Jetson's I2C
+bus (docs/car1-vs-car2.md#imu).
 
 Support code: nothing here can move the car. Publishes /imu/* (imu_bridge),
 /odom/fused and /steering/measured (vehicle_state). Run on top of bringup,
@@ -107,7 +110,7 @@ def generate_launch_description():
             description='true starts the real IMU stack; false uses simulated IMU topics.'),
         DeclareLaunchArgument(
             'bno', default_value='true',
-            description='Use the BNO085 (front axle, Jetson I2C). false = VESC IMU only.'),
+            description='Use the BNO085 (Jetson I2C). false = VESC IMU only.'),
         DeclareLaunchArgument(
             'racer_imu_root', default_value='~/racerbot-ws/tools/imu_calibration',
             description='Where racer_imu code and the I2C bridge live.'),

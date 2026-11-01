@@ -1,0 +1,6 @@
+neural_racer_node:
+  ros__parameters:
+    # Safety wrapper: gap_follow.yaml's steering limit for this car. Car 2's 0.349
+    # (car 1: 0.33). The policy itself never asks for more than
+    # observation.STEER_LIMIT (0.33, car 1's, what it was trained on).
+    max_steering_angle: 0.349

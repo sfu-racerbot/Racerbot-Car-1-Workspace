@@ -44,9 +44,18 @@ def empty_floor() -> str:
     global _FLOOR
     if _FLOOR is None:
         from racerbot_sim import tracks
+        import os
+        import shutil
         directory = ROOT / ".sim" / "fit_sim_floor"
         line = tracks.rounded_rectangle_centerline(27.0, 27.0, 25.0, spacing=0.5)
-        _FLOOR = str(tracks.write_track(directory, "floor", line, 48.0, resolution=0.1).with_suffix(""))
+        # Written beside the floor and renamed into place: worker processes each build it,
+        # and one reading a half-written image crashed sweeps (PIL UnidentifiedImageError).
+        scratch = directory / f".tmp-{os.getpid()}"
+        built = tracks.write_track(scratch, "floor", line, 48.0, resolution=0.1)
+        for item in scratch.iterdir():
+            os.replace(item, directory / item.name)
+        shutil.rmtree(scratch, ignore_errors=True)
+        _FLOOR = str((directory / built.name).with_suffix(""))
     return _FLOOR
 
 
@@ -109,7 +118,10 @@ def fit(run, motion, t0: float, t1: float, grid: dict, base=None, car_id=None) -
     Returns [(score dict, {field: value}), ...] sorted by speed + yaw-rate RMS.
     """
     base = base or calibration_for_car(car_id)
-    ticks, commands = resample_commands(run.drive, t0, t1)
+    # /drive for an autonomous run, /ackermann_cmd for a manual one: either
+    # way the commands the car was given (runlog.Run.commands).
+    recorded, _ = run.commands()
+    ticks, commands = resample_commands(recorded, t0, t1)
     results = []
     names = sorted(grid)
     for values in itertools.product(*(grid[n] for n in names)):

@@ -1,0 +1,11 @@
+gap_follow_node:
+  ros__parameters:
+    # 0.349 rad = 20 deg (was 0.26). Both sides reach ~25 deg since the
+    # 2026-10-16 steering calibration (docs/hardware-reference.md); 20 leaves
+    # 5 deg for the gain's error below 19 deg, where nothing was measured.
+    # Must fit inside vesc.yaml's servo clip (test_steering_limits_fit_servo.py).
+    max_steering_angle: 0.349
+    # Authority bound, checked at startup: at most half of max_steering_angle.
+    # Car 2: 0.1745 = half of its 0.349 (car 1 uses 0.165, half of its 0.33);
+    # gap_follow_node refuses to start if this exceeds half.
+    arc_guard_max_correction: 0.1745

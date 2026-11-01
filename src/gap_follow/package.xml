@@ -4,7 +4,7 @@
   <name>gap_follow</name>
   <version>0.1.0</version>
   <description>Reactive follow-the-gap baseline autonomous driving algorithm for the race car</description>
-  <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>
+  <maintainer email="bryanmaubc@gmail.com">SFU Racerbot</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>

@@ -23,7 +23,9 @@ from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E4
 
 
 def _one(job):
-    return eval_gap.run_track(*job)
+    track, seed, params, timeout, reverse, car_id, calibration = job
+    return eval_gap.run_track(track, params, seed, timeout, reverse, calibration=calibration,
+                              car_id=car_id)
 
 
 def main(argv=None) -> int:
@@ -39,11 +41,17 @@ def main(argv=None) -> int:
     ap.add_argument("--output")
     ap.add_argument("--reverse", action="store_true",
                     help="drive each track the other way round (right turns)")
+    ap.add_argument("--friction", type=float,
+                    help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(eval_gap.FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     args = ap.parse_args(argv)
     car_id = car_from_args(ap, args)
     tracks = eval_gap.select_tracks(args.track)
     params = eval_gap.parse_set(args.set, car_id)
-    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse, car_id)
+    calibration = eval_gap.with_friction(
+        args.friction, eval_gap.with_floor(args.floor, eval_gap.calibration_for_car(car_id)))
+    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse, car_id, calibration)
             for t in tracks for k in range(args.seeds)]
     for track in tracks:
         eval_gap.track_path(track)  # build layouts once, before forking

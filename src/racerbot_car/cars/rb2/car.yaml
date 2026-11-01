@@ -1,5 +1,6 @@
-# Car 2's hardware. Calibration overlays (servo map, erpm gains, steering limits)
-# are added under calibration/ by a later task; until then every launch refuses on rb2.
+# Car 2's hardware. Everything car-specific that isn't a ROS parameter.
+# Calibration overlays (servo map, erpm gains, steering limits) live next to this
+# file under calibration/, taken from car 2's own configs at the 2026-11 merge.
 name: car 2
 lidar:
   kind: ethernet              # Hokuyo UST-10LX

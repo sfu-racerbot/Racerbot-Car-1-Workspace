@@ -4,7 +4,7 @@
   <name>drive_intent</name>
   <version>0.1.0</version>
   <description>Shared schema and trajectory prediction for /drive_intent: what a driving algorithm is trying to do, and why</description>
-  <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>
+  <maintainer email="bryanmaubc@gmail.com">SFU Racerbot</maintainer>
   <license>MIT</license>
 
   <!-- Deliberately no rclpy dependency. This package is pure data shaping

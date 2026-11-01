@@ -1,0 +1,157 @@
+# RealSense D435i: color + depth over ROS2
+
+> **Who this is for:** anyone setting up or using the Intel RealSense D435i on this car.
+> **Read first:** nothing, though [operations.md](operations.md) covers the normal bringup this sits alongside.
+> **You'll be able to:** get color and depth streams over ROS2, and know which IMU limitation to expect on this hardware.
+
+Publishes the Intel RealSense D435i's color and depth streams as ROS2
+topics, low-res/low-fps so it doesn't compete with the LiDAR/SLAM/
+localization/pure_pursuit stack already running on this Jetson. This is a
+**pure sensor publisher** — it never touches `/drive`, `/ackermann_cmd`, or
+any `/commands/motor|servo/*` topic, so it's support/tooling code per
+[adding-your-own-code.md](adding-your-own-code.md): no LB-deadman check, safe
+to launch alongside anything else (bringup, teleop, `gap_follow`,
+`pure_pursuit`, SLAM) at any time.
+
+```bash
+ros2 launch racerbot_launch realsense_camera_launch.py
+```
+
+That one launch starts both `realsense2_camera` (color/depth topics) and the
+color-topic MJPEG bridge on port `9090`; no second stream launch is needed.
+
+## What's wired up, and what isn't
+
+| Stream | Status |
+|---|---|
+| Color (`/camera/camera/color/image_raw`) | Working — verified at 424×240@15fps |
+| Depth (`/camera/camera/depth/image_rect_raw`) | Working — verified at 424×240@15fps |
+| Browser livestream / dashboard camera panel | Working — see [Seeing the feed in a browser](#seeing-the-feed-in-a-browser--the-dashboards-camera-panel) |
+| IMU (accel/gyro) | **Not working** — see [Known limitation: no IMU](#known-limitation-no-imu-on-this-backend) below |
+| Pointcloud | Off by default — not needed yet, costs CPU. Turn on via `pointcloud.enable` if a future use case needs it |
+
+## How it's installed
+
+Unlike this workspace's other vendored/submoduled drivers (`f1tenth_system`,
+`particle_filter`, `range_libc`), `librealsense2` did **not** need a
+from-source build here. `ros-jazzy-librealsense2` is a prebuilt `arm64`
+package on the ROS apt repo (distinct from Intel's own apt repo, which has no
+`arm64` build) — `rosdep install` pulls it in automatically as a dependency
+of the `realsense-ros` submodule below. This was confirmed live on this car:
+no kernel patching, no `librealsense` source clone needed.
+
+`realsense-ros` itself is a real git submodule (`src/realsense-ros`, branch
+`ros2-master` — see [git-setup.md](git-setup.md)), the same pattern as
+`particle_filter`/`range_libc`/`transport_drivers`. Unlike those three, its
+`ros2-master` branch natively supports Jazzy already, so there's no
+"waiting on an upstream `jazzy` branch" concern here.
+
+`src/racerbot_launch/launch/realsense_camera_launch.py` wraps
+`realsense2_camera`'s own shipped `rs_launch.py` (same pattern
+`race_launch.py` uses for `particle_filter`/`pure_pursuit`), passing this
+car's tuning as launch arguments — color+depth at `424x240x15`, pointcloud
+off — plus a placeholder `base_link`→`camera_link` static transform. It also
+includes `usb_cam_stream`'s `usb_cam_stream_launch.py` with car 2's
+`config/web_dashboard_rb2.yaml` on top (its `image_topic` points at the
+RealSense), so ROS images and the browser stream start and stop together.
+
+## Seeing the feed in a browser — the dashboard's camera panel
+
+[web_dashboard](web-dashboard.md)'s bottom-right camera inset auto-connects
+to the MJPEG stream on port `9090` that `realsense_camera_launch.py` now starts
+(through the site: the page asks https://dashboard.sfuracerbot.ca for it, and
+the site reaches the car's port 9090 through the tunnel). The dashboard itself
+already runs at boot (`racerbot-dashboard.service`); open it on the site, then click
+its camera inset for the full-window recording view. **Both launch commands,
+step by step, are in [web-dashboard.md](web-dashboard.md#start-it).**
+
+Under the hood, `realsense_camera_launch.py` runs `usb_cam_stream`'s node
+in its `image_topic` mode — subscribing to
+`/camera/camera/color/image_raw` and re-serving it as MJPEG — rather than
+opening the camera's V4L2 device directly, because `realsense2_camera_node`
+holds that device exclusively (a second `cv2.VideoCapture` on it just
+fails). Full detail:
+[usb-camera-livestream.md](../src/web_dashboards/car/docs/usb-camera-livestream.md#image_topic-mode-streaming-a-ros-image-topic-instead).
+The stream is also directly viewable at `http://<car-ip>:9090/` without
+the dashboard.
+
+Two things about this mode are worth knowing. It serves the same
+[two tiers](../src/web_dashboards/car/docs/usb-camera-livestream.md#two-streams-not-one) as the webcam
+mode — a small `/stream` for the dashboard inset and
+`/stream?tier=full` for the recording view — but `passthrough` does
+nothing here: frames arrive from the topic already decoded, so there is no
+camera JPEG to pass through and every frame is encoded from scratch. And
+the subscription deliberately uses sensor QoS with a queue depth of 1. The
+default depth of 10 meant up to ten already-stale frames sat queued ahead
+of the current one, which on a 30fps camera is a third of a second of pure
+latency spent on frames nobody would ever see.
+
+## Known limitation: no IMU on this backend
+
+`librealsense2` logs `No HID info provided, IMU is disabled` on startup, and
+no `/camera/camera/accel`/`gyro`/`imu` topic is published, despite
+`enable_gyro`/`enable_accel` being set in the launch file.
+
+This was investigated on this car and is **not a udev/permissions problem**
+— the D435i's own HID node (`idVendor 8086`) already has correct `plugdev`
+group permissions out of the box. The actual cause is that
+`ros-jazzy-librealsense2` is built against the **RSUSB (libuvc) backend**
+(the only option for `arm64` without a from-source build + kernel metadata
+patches), and that backend has documented, known IMU/motion-module gaps on
+Jetson — this isn't specific to a misconfiguration here.
+
+**Follow-up, not done**: Intel's "V4L native" backend (kernel-patched,
+Intel's documented recommendation for full capability) would need building
+`librealsense2` from source with `./scripts/patch-realsense-ubuntu-L4T.sh`
+against this car's kernel (`6.8.12-1021-tegra`, L4T R39.2) — Intel's patch
+script is only verified up through JetPack 6.0/7.0-beta as of this writing,
+so this isn't guaranteed to work and wasn't attempted. If IMU data becomes
+genuinely needed (e.g. for visual-inertial work), that's the next thing to
+try, on a non-race-critical afternoon.
+
+## Verified performance impact
+
+Launched standalone on this car: `free -h` showed ~1.9GB/7.5GB RAM in use,
+`tegrastats` showed single-digit percent CPU per core and no thermal
+pressure, at the 424×240@15fps config above. Plenty of headroom left for the
+rest of the stack.
+
+## Follow-up: camera mount offset
+
+`realsense_camera_launch.py`'s `static_transform_publisher` currently
+publishes `base_link`→`camera_link` at `0,0,0` — a placeholder, not yet
+measured (the LiDAR's own offset, `laser_offset_x` in
+[web_dashboard_rb2.yaml](../src/racerbot_launch/config/web_dashboard_rb2.yaml),
+was measured on 2026-08-24). Update
+the `--x`/`--y`/`--z` arguments in that launch file once the camera's
+physical mount position relative to `base_link` is measured — see
+[hardware-reference.md](hardware-reference.md).
+
+## Parameter reference
+
+All set as launch arguments in
+`src/racerbot_launch/launch/realsense_camera_launch.py` (not a separate
+YAML — `rs_launch.py` accepts these directly, and this workspace's
+`race_launch.py` already uses the same launch-argument pattern rather than a
+config file for a wrapped driver package):
+
+| Argument | Value | Meaning |
+|---|---|---|
+| `enable_color` / `enable_depth` | `true` | Stream enable flags |
+| `rgb_camera.color_profile` / `depth_module.depth_profile` | `424,240,15` | Resolution/fps — kept low for the Jetson's sake |
+| `enable_gyro` / `enable_accel` | `true` | Requested, but non-functional — see limitation above |
+| `unite_imu_method` | `2` (linear_interpolation) | Would combine accel+gyro into one `/camera/camera/imu` topic, if IMU worked |
+| `pointcloud.enable` | `false` | Off by default — not needed yet |
+| `base_frame_id` | `camera_link` | Root frame of the camera's own TF tree, matched by the static transform above |
+
+## File map
+
+```
+src/realsense-ros/                                  # git submodule, ros2-master
+src/racerbot_launch/
+├── launch/realsense_camera_launch.py                # driver + static TF + MJPEG bridge
+├── config/web_dashboard_rb2.yaml                     # usb_cam_stream_node: image_topic = the color feed
+├── package.xml                                       # exec_depend on realsense2_camera
+src/web_dashboards/car/ros/usb_cam_stream/            # submodule: the MJPEG stream node (generic)
+└── launch/usb_cam_stream_launch.py                   # car_config:= the rb2 YAML above
+```

@@ -136,7 +136,9 @@ Closure is now gated on **accumulated yaw** (`minimum_lap_turn_deg`, 300). By th
 
 **2. Localisation corrections were recorded as driving.**
 
-A map-frame pose that moves more than `max_pose_jump_m` (0.12 m, i.e. 4.8 m/s at 40 Hz) between control ticks is SLAM correcting itself, not the car moving.
+A map-frame pose that moves more than `max_pose_jump_m` (0.12 m) between control ticks, **beyond what odometry says the car did in that tick**, is SLAM correcting itself, not the car moving.
+
+> **Fixed 2026-10-30.** This used to compare the raw step with 0.12 m, reasoning "that is 4.8 m/s at 40 Hz". But the transform only updates at 50 Hz, so a tick spanning two updates reaches 0.12 m at 3 m/s. Above that, plain driving was absorbed as corrections, which dragged the stored start along with the car: run `20261030-185036` moved it 13 m and never closed a lap in 5 revolutions. Without odometry the raw step still decides.
 
 `LapRecorder` now applies that correction to the *already recorded* points instead — which is what a correction means. The whole map moved, including the part already driven.
 

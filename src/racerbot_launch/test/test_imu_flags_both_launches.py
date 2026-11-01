@@ -43,8 +43,10 @@ def test_shared_imu_flags_and_override_rule(overrides, expected):
     assert set(arguments[1]) & relevant == SHARED | GAP_ONLY
     defaults = [{name: ''.join(s.perform(LaunchContext()) for s in args[name].default_value)
                  for name in SHARED} for args in arguments]
-    assert defaults[0] == defaults[1] == {
-        'imu': 'true', 'imu_all': 'false', 'fused_speed': 'false', 'imu_hardware': 'auto'}
+    # Both true, as on car 1 (docs/car1-vs-car2.md#imu, guarded by test_car2_hardware_config.py).
+    shared = {'imu_all': 'false', 'fused_speed': 'false', 'imu_hardware': 'auto'}
+    assert defaults[0] == dict(shared, imu='true')
+    assert defaults[1] == dict(shared, imu='true')
     for ld in descriptions:
         ctx = LaunchContext()
         ctx.launch_configurations.update(overrides)

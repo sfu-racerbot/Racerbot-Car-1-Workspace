@@ -368,6 +368,8 @@ count to 1081 measured marginally *faster* than 819. See
 
 ## Calibration and its provenance
 
+**Floor profiles.** `--floor sfu_course_2026_10_30` swaps in values measured on one floor on 2026-10-30: a progressive grip curve, the steering trim, the speed loop and braking, odometry and LiDAR. It is fitted on six runs and checked on six others, and it laps within 1% of the real car on a held-out run. See [docs/sim-calibration.md](../../docs/sim-calibration.md). Without `--floor` nothing below changes.
+
 `python3 sim_fidelity/calibration.py` prints every constant with where it came
 from, least trustworthy first:
 
@@ -378,7 +380,7 @@ from, least trustworthy first:
 - `ESTIMATED` — physics-based estimate, not this car
 - `STOCK` — F1TENTH Gym default, describing a different vehicle
 
-**6 of 32 values are still `STOCK`**: mass, yaw inertia, CoG height, CoG
+**6 of 43 values are still `STOCK`**: mass, yaw inertia, CoG height, CoG
 position, and both cornering stiffnesses. Each is one line to fix once
 measured; see audit [R1](../../docs/sim-fidelity-audit.md#r1-measure-the-car-highest-value-single-action).
 

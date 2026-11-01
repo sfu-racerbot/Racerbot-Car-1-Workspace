@@ -1,0 +1,310 @@
+# Breaks for the simulator calibration tests (car_measure, scan_map, the floor profile,
+# validate_calibration). Each must make its test fail:
+#   python3 tools/dev/mutation_check.py tools/dev/breaks/sim_calibration.yaml
+- name: lag sign flipped
+  file: tools/run_analysis/car_measure.py
+  old: error = np.interp(np.asarray(t) - lag, cmd_t, cmd)
+  new: error = np.interp(np.asarray(t) + lag, cmd_t, cmd)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: lag returns constant
+  file: tools/run_analysis/car_measure.py
+  old: |2-
+                best = (float(lag), rms)
+        return best
+  new: |2-
+                best = (float(lag), rms)
+        return (0.1375, 0.0)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: bicycle uses tan not arctan
+  file: tools/run_analysis/car_measure.py
+  old: return np.arctan(wheelbase * np.asarray(yaw_rate)
+  new: return np.tan(wheelbase * np.asarray(yaw_rate)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: linkage mean not median
+  file: tools/run_analysis/car_measure.py
+  old: rows.append((float(np.median(cmd[chosen])), float(np.median(actual[chosen]))
+  new: rows.append((float(np.median(cmd[chosen])), float(np.mean(actual[chosen]))
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: servo delay off by one
+  file: tools/run_analysis/car_measure.py
+  old: delayed = np.r_[np.full(delay, cmd[0]), cmd][:len(cmd)]
+  new: delayed = np.r_[np.full(delay + 1, cmd[0]), cmd][:len(cmd)]
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: servo slew clamp deleted
+  file: tools/run_analysis/car_measure.py
+  old: angle += min(max(gain * (target - angle), -rate), rate) * dt
+  new: angle += gain * (target - angle) * dt
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: speed loop accel cap deleted
+  file: tools/run_analysis/car_measure.py
+  old: a = min(accel_gain * diff, accel_max) if diff
+  new: a = accel_gain * diff if diff
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: speed loop allows reverse
+  file: tools/run_analysis/car_measure.py
+  old: v = max(0.0, v + a * dt)
+  new: v = v + a * dt
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: speed loop ignores delay
+  file: tools/run_analysis/car_measure.py
+  old: diff = cmd[max(0, i - delay)] - v
+  new: diff = cmd[i] - v
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: hard stop keeps dips
+  file: tools/run_analysis/car_measure.py
+  old: 'if wheel[j] <= stopped and cmd[i:j + 1].max() < stopped:'
+  new: 'if wheel[j] <= stopped:'
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: hard stop no min speed
+  file: tools/run_analysis/car_measure.py
+  old: 'if wheel[i] > min_speed and cmd[i] < stopped <= cmd[i - 1]:'
+  new: 'if cmd[i] < stopped <= cmd[i - 1]:'
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: stop distance drops delay
+  file: tools/run_analysis/car_measure.py
+  old: |2
+        distance = v0 * delay
+  new: |2
+        distance = 0.0
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: speed ratio returns 1.033
+  file: tools/run_analysis/car_measure.py
+  old: return float(np.sum(wheel[keep] * true_v[keep]) / np.sum(true_v[keep] ** 2))
+  new: return 1.033
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: speed ratio keeps slow samples
+  file: tools/run_analysis/car_measure.py
+  old: |2
+        keep = true_v > min_speed
+  new: |2
+        keep = true_v >= 0.0
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: noise is variance
+  file: tools/run_analysis/car_measure.py
+  old: std = np.nanstd(filled, axis=0)
+  new: std = np.nanvar(filled, axis=0)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: self hits <=
+  file: tools/run_analysis/car_measure.py
+  old: if np.isfinite(r) and r < max_range]
+  new: if np.isfinite(r) and r <= max_range + 0.02]
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: lone needs one jump
+  file: tools/run_analysis/car_measure.py
+  old: lone = (steps[:, :-1] > isolated) & (steps[:, 1:] > isolated)
+  new: lone = (steps[:, :-1] > isolated) | (steps[:, 1:] > isolated)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: cast skips first hit
+  file: tools/run_analysis/car_measure.py
+  old: first = hit.argmax(axis=0)
+  new: first = np.minimum(hit.argmax(axis=0) + 10, len(steps) - 1)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: accumulate counts passes per step
+  file: tools/run_analysis/scan_map.py
+  old: |2
+        keys = np.unique(beam.astype(np.int64) * (height * width) + row[inside] * width + col[inside])
+  new: |2
+        keys = beam.astype(np.int64) * (height * width) + row[inside] * width + col[inside]
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: accumulate passes beyond the end
+  file: tools/run_analysis/scan_map.py
+  old: mask = d < (r - END_MARGIN)
+  new: mask = d < (r + 0.5)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: accumulate keeps near returns
+  file: tools/run_analysis/scan_map.py
+  old: keep = np.isfinite(ranges) & (ranges > MIN_RANGE) & (ranges < MAX_RANGE)
+  new: keep = np.isfinite(ranges)
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: open walls ignores share
+  file: tools/run_analysis/scan_map.py
+  old: |2-
+        return (hits >= min_hits) & (share >= min_share)
+
+
+    def wall_bias
+  new: |2-
+        return hits >= min_hits
+
+
+    def wall_bias
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: rebuild peels without the closed check
+  file: tools/run_analysis/scan_map.py
+  old: '            if _keeps_walls_closed(out, int(rows[i]), int(cols[i])):'
+  new: '            if True:'
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: rebuild drops unseen cells
+  file: tools/run_analysis/scan_map.py
+  old: '    out = np.asarray(occupied, bool) | strong'
+  new: '    out = strong.copy()'
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: closed check accepts ends
+  file: tools/run_analysis/scan_map.py
+  old: return runs == 1 and sum(map(bool, ring)) >= 3
+  new: return runs == 1
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: wall bias sign
+  file: tools/run_analysis/scan_map.py
+  old: diffs.append(np.asarray(ranges) - cast_scan(
+  new: diffs.append(-np.asarray(ranges) + cast_scan(
+  test: tools/run_analysis/tests/test_car_measure.py
+- name: grip passes asked through
+  file: tools/f1tenth_sim/sim_fidelity/grip.py
+  old: |2
+            allowed = self.deliver(demanded)
+  new: |2
+            allowed = demanded
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: grip loses the sign
+  file: tools/f1tenth_sim/sim_fidelity/grip.py
+  old: return math.copysign(math.atan(self.wheelbase * allowed / (speed * speed)), steering)
+  new: return math.atan(self.wheelbase * allowed / (speed * speed))
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: grip acts at a crawl
+  file: tools/f1tenth_sim/sim_fidelity/grip.py
+  old: |2-
+            if speed < KINEMATIC_SPEED:
+                return steering
+            demanded
+  new: '        demanded'
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: grip accepts unsorted
+  file: tools/f1tenth_sim/sim_fidelity/grip.py
+  old: 'if len(asked) < 2 or asked != sorted(asked) or delivered != sorted(delivered):'
+  new: 'if len(asked) < 2:'
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: grip holds 0 past table
+  file: tools/f1tenth_sim/sim_fidelity/grip.py
+  old: return float(np.interp(asked, self._asked, self._delivered))
+  new: return float(np.interp(asked, self._asked, self._delivered, right=0.0))
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: odom scale ignored
+  file: tools/f1tenth_sim/sim_fidelity/sensing.py
+  old: |2
+            reading = self.scale * float(speed)
+  new: |2
+            reading = float(speed)
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: self hits skipped
+  file: tools/f1tenth_sim/sim_fidelity/sensing.py
+  old: |2
+                    values[beam] = distance
+  new: |2
+                    pass
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: range noise flat
+  file: tools/f1tenth_sim/sim_fidelity/sensing.py
+  old: values += self.rng.normal(0.0, 1.0, values.shape) * self.noise_per_metre * values
+  new: values += self.rng.normal(0.0, 1.0, values.shape) * self.noise_per_metre
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: plant ignores linkage
+  file: tools/f1tenth_sim/sim_fidelity/plant.py
+  old: |2
+                    steering = float(np.interp(steering, *self._linkage))
+  new: |2
+                    pass
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: plant ignores command scale
+  file: tools/f1tenth_sim/sim_fidelity/plant.py
+  old: |2
+                    ) * self.calibration.speed_command_scale
+  new: |2
+                    )
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: contact walls not flipped
+  file: tools/f1tenth_sim/sim_fidelity/plant.py
+  old: |2
+            else:
+                walls = walls[::-1]
+  new: |2
+            else:
+                walls = walls
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: contact walls never loaded
+  file: tools/f1tenth_sim/sim_fidelity/plant.py
+  old: |2-
+            if not contact.exists():
+                return None
+  new: |2-
+            if True:
+                return None
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: floor trim zero
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: (0.0, 0.0105), (0.436, 0.423)
+  new: (0.0, 0.0), (0.436, 0.423)
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: floor grip above asked
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: (2.25, 2.25), (2.75, 2.737)
+  new: (2.25, 2.4), (2.75, 2.737)
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: floor grip scale 10% off
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: (3.25, 3.013)
+  new: (3.25, 2.72)
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: floor odom scale off
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: odom_speed_scale=1.033,
+  new: odom_speed_scale=1.0,
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: held-out run moved to fit
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: 'SFU_COURSE_HELD_OUT_RUNS = ("20261030-184826", '
+  new: 'SFU_COURSE_HELD_OUT_RUNS = ("20261030-185036", '
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: plain calibration gets a curve
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: |2
+        grip_curve: tuple | None = None
+  new: |2
+        grip_curve: tuple | None = ((0.0, 0.0), (9.0, 9.0))
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: with_floor accepts unknown
+  file: tools/f1tenth_sim/sim_fidelity/calibration.py
+  old: |2-
+        if name not in FLOORS:
+            raise
+  new: |2-
+        if False:
+            raise
+  test: tools/f1tenth_sim/tests/test_floor_profile.py
+- name: flicker counts across passes
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: changes += int(np.sum(fallback[start + 1:end] != fallback[start:end - 1]))
+  new: changes = int(np.sum(fallback[inside][1:] != fallback[inside][:-1]))
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: flicker share over all samples
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: share=float(fallback[inside].mean())
+  new: share=float(fallback.mean())
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: grip rows signed
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: |2
+        asked, achieved = np.abs(asked), np.abs(achieved)
+  new: ''
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: grip error over all bins
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: '    shared = sorted(set(a) & set(b))'
+  new: '    shared = sorted(set(a) | set(b))'
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: sector bias sign
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: '    d = b[k] - a[k]'
+  new: '    d = a[k] - b[k]'
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: laps keep the standing lap
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: flying = laps[skip_laps:] if len(laps) > skip_laps else []
+  new: flying = laps
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py
+- name: old code paths not applied
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: |2
+        params.update(OLD_CODE)
+  new: ''
+  test: tools/f1tenth_sim/tests/test_validate_calibration.py

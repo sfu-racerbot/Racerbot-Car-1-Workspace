@@ -233,7 +233,7 @@ def test_from_grid_message_despeckles_only_when_asked():
 
 
 def test_the_real_saved_map_loses_only_phantoms_in_clear_track():
-    """Regression against this car's actual map, if it is still on disk.
+    """Regression against a real saved map (car 2's, recorded 2026-07-27).
 
     12 blobs in observed-clear track go; the 34 small ones against walls
     and the map edge stay, because unobserved space behind them is the

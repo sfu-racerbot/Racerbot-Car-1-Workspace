@@ -67,7 +67,7 @@ from recognition import (  # noqa: E402
     recognition_counts,
     recognition_delays,
 )
-from sim_fidelity import calibration_for_car, PROFILES  # noqa: E402
+from sim_fidelity import calibration_for_car, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
 from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
@@ -83,8 +83,9 @@ _TRUE_WORDS = ("1", "true", "yes", "on")
 _FALSE_WORDS = ("0", "false", "no", "off")
 
 
-def make_plant(track: str, seed: int, cars: int, car_id=None) -> FidelityPlant:
-    calibration = calibration_for_car(car_id)
+def make_plant(track: str, seed: int, cars: int, calibration=None, car_id=None) -> FidelityPlant:
+    # The selected car's own calibration unless one (e.g. with a floor profile) is given.
+    calibration = calibration if calibration is not None else calibration_for_car(car_id)
     components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     config = EnvConfig(
         seed=seed, map_name=eval_gap.track_path(track), params=components["params"],
@@ -256,7 +257,7 @@ def is_recognised(moving_body, leader_base, tolerance: float = RECOGNITION_TOLER
 
 def run_multi(track: str, params_list: list, seed: int, duration_s: float,
               spacing: float = 3.0, laps_required: float = 2.0, reverse: bool = False,
-              slots=None, car_id=None) -> dict:
+              slots=None, calibration=None, car_id=None) -> dict:
     """One run of every car. The result's ``cars`` entries carry each car's
     stats, ``progress_m`` (its position along the centreline every tick, see
     _Progress.position), ``speed_mps`` (ground-truth speed magnitude in m/s)
@@ -269,7 +270,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     slots = tuple(range(cars)) if slots is None else tuple(slots)
     if sorted(slots) != list(range(cars)):
         raise ValueError(f"slots must be a line-up of 0..{cars - 1}, got {slots}")
-    plant = make_plant(track, seed, cars, car_id)
+    plant = make_plant(track, seed, cars, calibration=calibration, car_id=car_id)
     line = plant.env.unwrapped.track.raceline
     poses = start_poses(line, cars, spacing, reverse, slots)
     obs, _ = plant.reset(poses)
@@ -794,6 +795,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reverse", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--output", help="write the per-run results as JSON")
+    ap.add_argument("--friction", type=float,
+                    help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     ap.add_argument("--set", action="append", default=[], help="override a parameter for every car")
     ap.add_argument("--car-set", action="append", default=[], metavar="N:name=value",
                     help="override a parameter for car N only (0-based), applied after --set; repeatable")
@@ -809,7 +814,9 @@ def main(argv=None) -> int:
     for t in tracks:
         eval_gap.track_path(t)
     orders = [None, (1, 0)] if args.swap_starts else [None]
-    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order, car_id)
+    calibration = with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id)))
+    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order,
+             calibration, car_id)
             for t in tracks for k in range(args.seeds) for order in orders]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(_job, jobs))

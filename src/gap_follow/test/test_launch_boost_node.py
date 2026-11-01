@@ -14,6 +14,7 @@ scene with a layer off. Needs ROS sourced:
     export ROS_DOMAIN_ID=79 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
     python3 -m pytest src/gap_follow/test/test_launch_boost_node.py -v
 """
+import math
 import os
 import sys
 
@@ -287,3 +288,58 @@ def test_a_car_cutting_into_our_path_hands_back_to_gap_steering(made):
     assert drive.steering_angle == pytest.approx(
         -node.max_steering_rate * DT, abs=1e-9)   # rad: steering round it, to the right
     assert drive.speed < node.max_speed
+
+
+# --- The ceilings the launch keeps (added on car 2, 2026-10-30) -----------------
+# "Braking and curvature always apply" is the launch's safety claim, and a
+# mutation run showed nothing above would notice either ceiling being dropped:
+# the tests above end the launch at the ceiling, or never reach one.
+
+def test_the_braking_ceiling_caps_the_launch_command(made):
+    node, published = made
+    # A wall 2.5 m ahead of the LiDAR, inside swept_clearance_max_length, with
+    # the car at rest: the launch starts, and may only ask for the braking root.
+    wall = 2.5
+    dead_end = _raycast(_corridor(1.0, 1.0, length=wall) + [((wall, -1.0), (wall, 1.0))])
+    drive = _tick(node, published, dead_end, speed=0.0)
+    # oracle: closed form, gap_logic.braking_speed_limit's docstring, recomputed
+    # here. The body's front is (car_length + wheelbase) / 2 from base_link.
+    front = (node.car_length + node.wheelbase) / 2.0
+    room = wall + node.laser_offset_x - front - node.forward_stop_clearance
+    a_t = node.max_braking_decel * node.braking_latency_sec
+    root = -a_t + math.sqrt(a_t ** 2 + 2.0 * node.max_braking_decel * room)
+    assert node.launch_boost.active
+    assert root < node.max_speed - 1.0
+    assert drive.speed == pytest.approx(root, abs=1e-3)  # m/s
+
+
+def test_the_curvature_ceiling_caps_the_launch_command():
+    # A wall across the road 1.2 m ahead, open on the left: the straight path is
+    # blocked, so gap steering turns hard. Anticipation is off and the slew is
+    # out of the way, so the curvature cap alone is what binds.
+    node, published = _make('-p', 'enable_cornering_anticipation:=false')
+    try:
+        node.max_steering_rate = 100.0
+        drive = _tick(node, published,
+                      _raycast(_corridor(3.0, 1.0) + [((1.2, -1.0), (1.2, 0.6))]))
+        assert node.launch_boost.active
+        # oracle: closed form, v = sqrt(a_lat * L / tan(steering)): about 1.62
+        # m/s at car 1's 0.33 rad, 1.57 at car 2's 0.349, and 2.5 m/s^2 (gap_follow.yaml).
+        assert drive.steering_angle == pytest.approx(node.max_steering_angle, abs=1e-9)  # rad
+        assert drive.speed == pytest.approx(math.sqrt(
+            node.max_lateral_accel * node.wheelbase
+            / math.tan(node.max_steering_angle)), abs=1e-3)  # m/s
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_an_emergency_escape_ends_the_launch(made):
+    node, published = made
+    _tick(node, published, OPEN_ROAD)
+    # A thin obstacle touching the padded body dead ahead, room to either side:
+    # the directional emergency tier escapes rather than stopping outright.
+    drive = _tick(node, published,
+                  _raycast(_corridor(1.0, 1.0) + [((0.205, -0.01), (0.205, 0.01))]))
+    assert node.launch_boost.end_reason == 'emergency_escape'
+    assert drive.speed <= node.escape_creep_speed

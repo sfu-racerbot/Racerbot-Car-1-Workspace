@@ -32,7 +32,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='racerbotcar-1',
+    maintainer='SFU Racerbot',
     maintainer_email='bryanmaubc@gmail.com',
     description='Guided odometry and steering calibration wizard (no ROS publishers).',
     license='MIT',

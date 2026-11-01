@@ -60,8 +60,8 @@ def despeckle_grid(grid, max_cells: int = DEFAULT_SPECKLE_MAX_CELLS,
     It matters because this is deletion from an obstacle map, and the
     conservative direction is to keep obstacles. A real cone or chair leg
     is small too -- but it occludes, so it keeps its shadow and this
-    filter leaves it alone. Measured on this car's saved map
-    (~/.ros/racerbot_auto/20260727-200103), 46 of 56 occupied blobs were 4
+    filter leaves it alone. Measured on car 2's saved map
+    (data/rb2/racerbot_auto/20260727-200103), 46 of 56 occupied blobs were 4
     cells or smaller, and of those only 12 had no unknown cell anywhere in
     their halo. Those 12 are the phantom obstacles sitting in otherwise
     clear track; the other 34 sit against walls and the map edge, where

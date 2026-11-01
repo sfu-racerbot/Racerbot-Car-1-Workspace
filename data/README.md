@@ -7,7 +7,7 @@ set `RACERBOT_WS` to use another workspace. The car is resolved by
 `racerbot_car` from its serial or `RACERBOT_CAR` (see
 [car identity](../src/racerbot_car/README.md)). An unresolved car is an error.
 
-Car 1's existing data has moved into `rb1/`. Before 2026-10-31, the tools
+Car 1's existing data has moved into `rb1/`, and car 2's into `rb2/` (when the two cars' repos were merged, 2026-11-01). Before 2026-10-31, the tools
 wrote to `~/.ros/`, which git never sees; older runs are still there.
 
 | Folder | Written by | What's in it |

@@ -22,7 +22,7 @@ def generate_launch_description():
         default_value=default_output_file,
         description='Where to write the recorded (x,y) waypoints CSV, e.g.: '
                      'ros2 launch pure_pursuit waypoint_recorder_launch.py '
-                     'output_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv'
+                     'output_file:=$HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv'
     )
 
     recorder_node = Node(

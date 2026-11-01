@@ -47,9 +47,19 @@ EXPECTED = [
      "output_directory: ''"),
     ('src/race_diagnostics/launch/auto_record_launch.py',
      "'record_output_directory', default_value=str(data_dir('racerbot_runs', car_id))"),
+    # racerbot_sim's race referee (sim_race_launch.py) -- from car 2's version of this test.
+    ('src/racerbot_sim/racerbot_sim/race_referee_node.py',
+     "data_dir('racerbot_sim') / 'races'"),
+    # The run folder each bringup's record argument describes -- from car 2's version.
+    ('src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py',
+     "'data/<car>/racerbot_runs/<time>/"),
+    ('src/f1tenth_system/f1tenth_stack/launch/no_lidar_bringup_launch.py',
+     "'data/<car>/racerbot_runs/<time>/"),
+    ('src/f1tenth_system/f1tenth_stack/launch/sick_bringup_launch.py',
+     "'data/<car>/racerbot_runs/<time>/"),
 ]
 
-OLD_PATH = re.compile(r'\.ros/racerbot_(runs|auto|sim/auto)\b')
+OLD_PATH = re.compile(r'\.ros/racerbot_(runs|auto|sim/auto|sim/races)\b')
 
 
 @pytest.mark.parametrize('relpath,needle', EXPECTED)

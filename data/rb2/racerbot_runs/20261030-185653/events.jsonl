@@ -1,0 +1,24 @@
+{"t": 1793411817.3786213, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1793411817.9230955, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793411817.9234707, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1793411818.3142154, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1793411818.3472755, "category": "first_message", "message": "first odom: linear.x=+1.35m/s", "topic": "odom"}
+{"t": 1793411818.38075, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.89m/s | drive=NEVER cmd=0.00m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.89, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793411819.8019054, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1793411820.3791406, "category": "tf_up", "message": "map->base_link available; SLAM is localizing"}
+{"t": 1793411820.5593677, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793411839.3793406, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=OK | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": true, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793411843.3791966, "category": "tf_lost", "message": "map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1793411832.383592 but the earliest data is at time 179"}
+{"t": 1793411860.3792574, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793411902.3794243, "category": "tf_up", "message": "map->base_link available; SLAM is localizing"}
+{"t": 1793411902.3796546, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=OK | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": true, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793411914.3796005, "category": "tf_lost", "message": "map->base_link lost: Lookup would require extrapolation into the past.  Requested time 1793411903.543539 but the earliest data is at time 179"}
+{"t": 1793411923.3795426, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793412524.3792355, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793412576.8047976, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793412577.3497708, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793412577.379214, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +1.66m/s | drive=ok cmd=2.87m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 1.66, "cmd_speed": 2.87, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793412577.4509046, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793412577.6450706, "category": "deadman", "message": "LB released", "held": false}
+{"t": 1793412597.3793178, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793412627.8214822, "category": "closing", "message": "worst pose lag this run: 0.00s"}

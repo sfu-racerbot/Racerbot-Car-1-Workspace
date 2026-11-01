@@ -149,8 +149,13 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityPlant:
-    """Build the environment and wrap it in this car's fidelity layer."""
+def make_plant(track: str, num_agents: int, seed: int, calibration=None,
+               car_id=None) -> FidelityPlant:
+    """Build the environment and wrap it in this car's fidelity layer.
+
+    ``calibration`` None is the selected car's calibration; a given one (a floor
+    profile, a friction) replaces it for this plant only.
+    """
     select_profile(PROFILE.name, car_id)
     try:
         import gymnasium as gym
@@ -163,7 +168,7 @@ def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityP
         raise SystemExit(
             f"F1TENTH Gym is not set up ({exc}). Run tools/f1tenth_sim/setup.sh first."
         ) from exc
-    components = _components()
+    components = _components() if calibration is None else env_components(PROFILE, calibration)
     config = EnvConfig(
         seed=seed,
         map_name=track,
@@ -184,7 +189,7 @@ def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityP
     )
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
     return FidelityPlant(
-        env, PROFILE, num_agents, seed, CONTROL_DT, CALIBRATION
+        env, PROFILE, num_agents, seed, CONTROL_DT, CALIBRATION if calibration is None else calibration
     )
 
 
@@ -311,21 +316,29 @@ class PathPlan:
 class CommandShaper:
     """Deterministic equivalent of pure_pursuit_node's final command stage."""
 
-    def __init__(self, car_id=None):
+    def __init__(self, car_id=None, max_speed: Optional[float] = None,
+                 max_lateral_accel: Optional[float] = None):
         select_profile(PROFILE.name, car_id)
         self.params = dict(PURE_PURSUIT_PARAMS)
         self.wheelbase = WHEELBASE
         self.control_dt = CONTROL_DT
+        # None: pure_pursuit.yaml's limits for the selected car. pure_course.py plans above
+        # them, and the shaper must then let the car reach its plan.
+        if max_speed is None:
+            max_speed = float(self.params['max_speed'])
+        if max_lateral_accel is None:
+            max_lateral_accel = float(self.params['max_lateral_accel'])
         self.previous_steering = 0.0
         self.previous_speed = 0.0
+        self.max_speed = max_speed
+        self.max_lateral_accel = max_lateral_accel
 
     def command(self, desired_steering: float, desired_speed: float,
                 hard_speed_cap: Optional[float] = None,
                 measured_speed: Optional[float] = None) -> tuple[float, float]:
         params = self.params
-        max_speed = float(params['max_speed'])
         if hard_speed_cap is None:
-            hard_speed_cap = max_speed
+            hard_speed_cap = self.max_speed
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
             self.previous_steering = desired_steering
             self.previous_speed = 0.0
@@ -341,14 +354,14 @@ class CommandShaper:
         commanded_curvature = math.tan(steering) / self.wheelbase
         online_curvature = max(abs(desired_curvature), abs(commanded_curvature))
         curve_speed = racing_math.curvature_speed_limit(
-            online_curvature, float(params['max_lateral_accel']), max_speed)
+            online_curvature, self.max_lateral_accel, self.max_speed)
         speed_target = min(desired_speed, curve_speed, hard_speed_cap)
         # Mirrors the node: ramp from the car's measured speed when it is
         # higher than the last command, so a one-tick ceiling does not force a
         # slow climb back from a speed the car was never actually at.
         ramp_basis = self.previous_speed
         if measured_speed is not None:
-            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), max_speed))
+            ramp_basis = max(ramp_basis, min(abs(float(measured_speed)), self.max_speed))
         speed = racing_math.slew_rate_limit(
             speed_target,
             ramp_basis,
@@ -636,7 +649,7 @@ def result_base(
 def run_gap_solo(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    plant = make_plant(track, 1, seed, car_id)
+    plant = make_plant(track, 1, seed, car_id=car_id)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(initial_pose(line, 0).reshape(1, 3))
     reference = np.column_stack((line.xs, line.ys))
@@ -777,12 +790,19 @@ def apply_fallback_safety(
 
 def run_pure_solo(track: str, seed: int, timeout_s: float,
                   law_name: str = "pure_pursuit",
-                  law_params: Optional[dict] = None, car_id=None) -> dict:
+                  law_params: Optional[dict] = None, car_id=None,
+                  calibration=None, plan: Optional["PathPlan"] = None,
+                  max_speed: Optional[float] = None,
+                  max_lateral_accel: Optional[float] = None) -> dict:
+    """One solo lap of pure pursuit. The optional arguments default to the selected
+    car's own: its calibration, the track's own line planned at the PathPlan defaults,
+    and pure_pursuit.yaml's speed and lateral limits."""
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    plant = make_plant(track, 1, seed, car_id)
+    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id)
     line = plant.env.unwrapped.track.raceline
-    plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
+    if plan is None:
+        plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
     # Start on the line the car is actually going to follow. Spawning it on
     # the shipped raceline while it tracks a different one would begin the lap
     # with most of a corridor's worth of cross-track error already on the
@@ -790,7 +810,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # the car had turned a wheel.
     obs, _ = plant.reset(plan_initial_pose(plan, line))
     follower = PathFollower(plan, law_name=law_name, law_params=law_params, car_id=car_id)
-    command_shaper = CommandShaper(car_id)
+    command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
     max_cross_track = 0.0
     cross_track_sum = 0.0
     cross_track_sq: list[float] = []
@@ -836,7 +856,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                 speed = 0.0
                 stop_steps += 1
 
-            hard_speed_cap = 1.0 if safety == "avoid" else PURE_MAX_SPEED
+            hard_speed_cap = 1.0 if safety == "avoid" else command_shaper.max_speed
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
@@ -904,7 +924,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
 def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    plant = make_plant(track, 2, seed, car_id)
+    plant = make_plant(track, 2, seed, car_id=car_id)
     lidar = _lidar()
     line = plant.env.unwrapped.track.raceline
     opponent_start_index = max(1, int(6.0 / 0.2))

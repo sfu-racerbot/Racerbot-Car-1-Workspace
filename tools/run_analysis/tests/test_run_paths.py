@@ -77,3 +77,32 @@ def test_slam_cli_refuses_without_car(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(slam_replay, 'PROC_ROOT', proc)
     assert slam_replay.main(['source']) == 2
     assert 'RACERBOT_CAR' in capsys.readouterr().err
+
+
+def test_run_summary_searches_every_cars_runs(tmp_path):
+    # oracle: the data layout (data/README.md): each car's runs are data/<car>/racerbot_runs.
+    import run_summary
+    for car in ('rb2', 'rb1'):
+        (tmp_path / 'data' / car / 'racerbot_runs').mkdir(parents=True)
+    (tmp_path / 'data' / 'rb1' / 'racerbot_auto').mkdir()
+    (tmp_path / 'data' / 'README.md').write_text('')
+    assert run_summary.car_run_roots(tmp_path) == [tmp_path / 'data' / 'rb1' / 'racerbot_runs',
+                                                   tmp_path / 'data' / 'rb2' / 'racerbot_runs']
+
+
+def test_run_summary_finds_no_runs_in_the_pre_merge_layout(tmp_path):
+    # The pre-merge layout, runs straight under data/ with no car folder: since the 2026-11
+    # merge nothing is saved there.
+    import run_summary
+    (tmp_path / 'data' / 'racerbot_runs' / '20261030-185036').mkdir(parents=True)
+    assert run_summary.car_run_roots(tmp_path) == []
+    assert run_summary.car_run_roots(tmp_path / 'no-checkout') == []
+
+
+def test_run_summary_default_roots_hold_car_2s_committed_runs():
+    # oracle: a recorded run in the tree, car 2's 2026-10-30 course run (data/rb2/racerbot_runs/).
+    import run_summary
+    runs = run_summary.ROOT / 'data' / 'rb2' / 'racerbot_runs'
+    assert (runs / '20261030-185036').is_dir()
+    assert runs in run_summary.run_roots()
+    assert run_summary.find_runs('20261030-185036', run_summary.run_roots()) == [runs / '20261030-185036']

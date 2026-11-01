@@ -5,7 +5,7 @@
   <exec_depend>racerbot_car</exec_depend>
   <version>0.1.0</version>
   <description>Guided Web wizard for VESC odometry and steering calibration. Publishes no ROS topics.</description>
-  <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>
+  <maintainer email="bryanmaubc@gmail.com">SFU Racerbot</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>

@@ -15,6 +15,7 @@ import yaml
 from neural_racer.safety_wrapper import WrapperConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'racerbot_car'))
+from racerbot_car.guards import CALIBRATION_KEYS  # noqa: E402
 from racerbot_car.identity import known_car_ids  # noqa: E402
 from racerbot_car.layers import effective_config  # noqa: E402
 from racerbot_car.paths import cars_dir  # noqa: E402
@@ -62,7 +63,26 @@ def test_wrapper_values_match_gap_follow(car):
 
 @pytest.mark.parametrize('car', CARS)
 def test_yaml_matches_wrapper_defaults(car):
+    # Per-car calibration keys (racerbot_car.guards.CALIBRATION_KEYS, team lead's decision 13:
+    # physical characteristics are per car) differ between cars by definition, so no code
+    # default can equal every car's; test_wrapper_calibration_defaults_are_the_strictest_cars
+    # pins those. Every other key is shared and must equal the code default for every car.
     p = effective_config('neural_racer.yaml', 'neural_racer_node', car_id=car)
     d = WrapperConfig()
-    assert {k: p[k] for k in vars(d) if k != 'max_speed'} == \
-        {k: v for k, v in vars(d).items() if k != 'max_speed'}
+    shared = [k for k in vars(d) if k != 'max_speed' and k not in _CALIBRATION]
+    assert shared, 'no shared keys left to compare: the test lost its subject'
+    assert {k: p[k] for k in shared} == {k: getattr(d, k) for k in shared}
+
+
+_CALIBRATION = set(CALIBRATION_KEYS['neural_racer.yaml']['neural_racer_node'])
+
+
+def test_wrapper_calibration_defaults_are_the_strictest_cars():
+    # A node whose car overlay did not load must clamp no wider than any car allows: each
+    # calibration default is the smallest calibrated value (oracle: the cars' own overlays).
+    assert _CALIBRATION == {'max_steering_angle'}, 'a new calibration key needs its rule here'
+    assert len(CARS) >= 2
+    values = [effective_config('neural_racer.yaml', 'neural_racer_node', car_id=car)['max_steering_angle']
+              for car in CARS]
+    assert WrapperConfig().max_steering_angle == min(values)
+    assert WrapperConfig().max_steering_angle == pytest.approx(0.33, abs=1e-12)   # rad, car 1's

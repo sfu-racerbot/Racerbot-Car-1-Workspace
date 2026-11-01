@@ -17,7 +17,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='racerbotcar-1',
+    maintainer='SFU Racerbot',
     maintainer_email='bryanmaubc@gmail.com',
     description='Shared schema and trajectory prediction for /drive_intent: '
                 'what a driving algorithm is trying to do, and why',

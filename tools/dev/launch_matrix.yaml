@@ -59,4 +59,10 @@ entries:
   - {id: sick-bringup, package: f1tenth_stack, launch: sick_bringup_launch.py, args: []}
   - {id: wiimote-driver, package: racerbot_wiimote_driver, launch: wiimote_driver_launch.py, args: []}
   - {id: wiimote-teleop, package: racerbot_wiimote_driver, launch: wiimote_teleop_launch.py, args: []}
-excluded: []
+excluded:
+  - path: src/racerbot_launch/launch/realsense_camera_launch.py
+    reason: >-
+      car 2's camera: generating it looks up the realsense2_camera package, which needs
+      librealsense and is built only on car 2 (the dev box and car 1 never build realsense-ros),
+      so it cannot be captured here. Included from another launch (dashboard_test on rb2, and
+      camera_launch.py once it exists) it is recorded as a missing include instead.

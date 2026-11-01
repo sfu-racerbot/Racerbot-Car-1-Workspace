@@ -1,0 +1,25 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-10-30T18:43:16-07:00'
+algorithms:
+  /drive:
+  - /ftg_node
+nodes:
+- /_ros2cli_daemon_0_65a0d657e48549f8b8d764170d6def7a
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /ftg_node
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+stopped: '2026-10-30T18:43:56-07:00'
+stop_reason: no algorithm publishing for 3.5 s
+duration_sec: 40.5
+recorder_exit_code: 0
+recorder_killed: false
+bag_bytes: 8822707

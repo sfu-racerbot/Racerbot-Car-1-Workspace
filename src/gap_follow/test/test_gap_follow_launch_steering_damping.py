@@ -153,3 +153,10 @@ def test_false_turns_opponent_awareness_off():
 def test_the_node_step_refuses_a_bad_opponent_awareness_value():
     with pytest.raises(RuntimeError, match='opponent_awareness'):
         _launch(opponent_awareness='maybe')
+
+
+def test_imu_false_keeps_damping_off_and_starts_no_imu_stack():
+    # The way to run without an IMU at all: imu:=false alone, with damping following it.
+    nodes, includes, ctx = _launch(imu='false', steering_damping='false')
+    assert _node_params(_gap_node(nodes), ctx)['enable_steering_damping'] is False
+    assert includes == []
