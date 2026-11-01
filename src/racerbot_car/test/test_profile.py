@@ -104,3 +104,34 @@ def test_all_profiles_sorted(tmp_path, rb1_data):
     write_profile(tmp_path, rb1_data, 'rb2')
     write_profile(tmp_path, rb1_data, 'rb1')
     assert [p.id for p in profile.all_profiles(tmp_path)] == ['rb1', 'rb2']
+
+
+@pytest.mark.parametrize('key', ['name', 'camera', 'dashboard_site', 'distinctive_usb_ids'])
+def test_other_required_fields_rejected(tmp_path, rb1_data, key):
+    del rb1_data[key]
+    write_profile(tmp_path, rb1_data)
+    with pytest.raises(profile.ProfileError, match='car.yaml.*' + key):
+        profile.load_profile('rb1', tmp_path)
+
+
+@pytest.mark.parametrize(('section', 'value', 'key'), [
+    ('lidar', 'serial', 'lidar'),
+    ('lidar', {'kind': 'serial', 'usb_id': '15d1:0000'}, 'lidar.port'),
+    ('lidar', {'kind': 'serial', 'port': 3, 'usb_id': '15d1:0000'}, 'lidar.port'),
+    ('lidar', {'kind': 'ethernet', 'ip': 'x', 'port': True, 'iface': 'x', 'host_ip': 'x'}, 'lidar.port'),
+    ('camera', {'kind': 'unknown'}, 'camera.kind'),
+    ('camera', {'kind': 'none', 'device': '/dev/video0'}, 'camera.device'),
+    ('camera', {'kind': 'uvc'}, 'camera.device'),
+    ('camera', {'kind': 'realsense', 'usb_id': 'BAD', 'topic': '/image'}, 'camera.usb_id'),
+    ('camera', {'kind': 'realsense', 'usb_id': '8086:0b3a', 'topic': 3}, 'camera.topic'),
+    ('hostnames', {'ssh': 3}, 'hostnames.ssh'),
+    ('distinctive_usb_ids', ['invalid'], 'distinctive_usb_ids'),
+    ('distinctive_usb_ids', '15d1:0000', 'distinctive_usb_ids'),
+    ('name', 3, 'name'),
+    ('dashboard_site', 3, 'dashboard_site'),
+])
+def test_field_types_and_camera_refusals(tmp_path, rb1_data, section, value, key):
+    rb1_data[section] = value
+    write_profile(tmp_path, rb1_data)
+    with pytest.raises(profile.ProfileError, match='car.yaml.*' + key):
+        profile.load_profile('rb1', tmp_path)
