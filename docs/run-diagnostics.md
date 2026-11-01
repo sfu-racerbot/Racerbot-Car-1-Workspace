@@ -7,7 +7,7 @@
 How to capture everything needed to work out what a run did — and how to
 hand that to a person or an AI agent so they can act on it.
 
-This exists because of a debugging session on **2026-07-27** in which four
+This exists because of a debugging session on **2026-07-27** (TODO(verify): which car) in which four
 separate faults stacked on top of each other, each one hiding the next.
 Every recommendation below is here because its absence cost real time or a
 real collision that night. The postmortem is at the end.
@@ -18,7 +18,9 @@ real collision that night. The postmortem is at the end.
 
 **Since 2026-10-26, every run of an algorithm is recorded for you.** Start
 bringup the usual way, start any algorithm on top, and a run directory
-appears under `~/racerbot-ws/data/racerbot_runs/` while it runs. You do not need the
+appears under `~/racerbot-ws/data/<id>/racerbot_runs/` while it runs (`<id>` is `rb1` or `rb2`).
+
+Replace `<id>` in commands with the car ID, without angle brackets. You do not need the
 recorder terminal from the [TL;DR](#tldr) below any more, unless you want
 one for a run that is not an algorithm (manual driving, say).
 
@@ -43,7 +45,7 @@ one for a run that is not an algorithm (manual driving, say).
 - **Cannot move the car.** It creates no publisher and no subscription: it
   only reads the list of nodes and topics, the way `ros2 node list` does.
 
-**Why it exists:** on 2026-10-26 the races against team A were run with
+**Why it exists:** on 2026-10-26 the races against team A (TODO(verify): which car) were run with
 plain `gap_follow_launch.py`, and nothing recorded them. All that was left
 was the node's one-line-a-second log, which cannot show what the car saw or
 how smoothly it steered.
@@ -68,7 +70,7 @@ ros2 launch gap_follow gap_follow_launch.py
 ```
 
 **Working when:** within about 2 seconds, Terminal 1 prints
-`recording /gap_follow_node on /drive -> /home/.../racerbot-ws/data/racerbot_runs/<time>`.
+`recording /gap_follow_node on /drive -> /home/.../racerbot-ws/data/<id>/racerbot_runs/<time>`.
 
 **Then wait for the second line before you press LB:**
 `recording live: /drive /joy /odom /scan are in the bag, <n> s after the algorithm appeared`.
@@ -84,7 +86,7 @@ prints `saved run ... (<seconds> s, bag <size> MB)` and the command to
 analyse it:
 
 ```bash
-python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<time>
+python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/<id>/racerbot_runs/<time>
 ```
 
 **If it says** `another recorder is on the graph (...): not recording it`:
@@ -97,7 +99,7 @@ that is correct. Something else (a `record_run.py` you started, or the one
 of it [LiDAR](glossary.md#lidar) scans. Nothing deletes old runs. It refuses to start a recording
 with less than 2 GB free, and says so in Terminal 1 and in `auto_record.log`.
 
-**To see what it decided,** read `data/racerbot_runs/auto_record.log`. It keeps one
+**To see what it decided,** read `data/<id>/racerbot_runs/auto_record.log`. It keeps one
 line for every start, stop, refusal and late start, across sessions. This is the
 place to look when a run you expected is not there. The same lines are in
 `~/.ros/log/python3_<pid>_*.log`, which is hard to find and is not saved with the runs.
@@ -150,10 +152,11 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    bringup. `rosbag2_player` is there because it is a bag being played back.
 2. An algorithm that has been up for `start_delay_sec` (1.5 s) starts a
    recording, unless another recorder is on the graph. The delay gives a
-   launch that brings its own recorder (`map_course`) time to get it up:
-   measured on the car, `map_course`'s recorder appears about 1 s after its
-   algorithm. If one still arrives later, the recording stops and is labelled
-   `superseded: true`.
+   launch with its own recorder (`map_course`) time to start it.
+
+   In one measurement, the recorder appeared about 1 s after the algorithm
+   (TODO(verify): which car). If it arrives later, the recording stops and is
+   labelled `superseded: true`.
 3. **Another recorder** is any node named `race_diag_node` or
    `rosbag2_recorder*`. The recording `auto_record` starts is
    `record_run.py` run with `name_prefix:=auto_`, so its own nodes are
@@ -168,7 +171,7 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
 
 **Why the bag is started separately.** Starting a recording starts `ros2 bag record`
 first and on its own, and `record_run.py` with `record_bag:=false` only once the bag
-is live (or after 5 s). Measured on the Jetson on 2026-10-31:
+is live (or after 5 s). Measured on a Jetson on 2026-10-31 (TODO(verify): which car):
 
 | How the bag is started | Start of recording to topics subscribed |
 |---|---|
@@ -176,12 +179,13 @@ is live (or after 5 s). Measured on the Jetson on 2026-10-31:
 | Beside `record_run.py`, both at once | Slower than alone: the two compete for the CPU |
 | Alone | 1.4 to 2.6 s in that timing run; up to about 4 s in the test suite |
 
-On 2026-10-30, with the 3 s delay and the first row, the bag began about 9 to 10 s after
-the launch command, and two runs (`20261030-183134`, `-184149`) were already moving at
-2.3 and 3.5 m/s at their first `/odom`.
+On car 2 on 2026-10-30, with the 3 s delay and the first row,
+the bag began about 9 to 10 s after the launch command. Two runs
+(`20261030-183134`, `-184149`) were already moving at 2.3 and 3.5 m/s at
+their first `/odom`.
 
 **How much of a run's start the bag misses now.** This is from the algorithm's first
-message to the bag's first message, measured on the Jetson on 2026-10-31 with two small test topics:
+message to the bag's first message, measured on a Jetson on 2026-10-31 with two small test topics (TODO(verify): which car):
 
 | Recorder | Missed | Median | Runs |
 |---|---|---|---|
@@ -216,7 +220,7 @@ commented there. They are `trigger_topics`, `ignore_publishers`,
 `record_bag`, `live_topics`, `topics` (empty means the same topic list as `record_run.py`),
 `min_free_gb` and `stop_timeout_sec`.
 
-Recordings go to `~/racerbot-ws/data/racerbot_runs`. Pass
+Recordings go to `~/racerbot-ws/data/<id>/racerbot_runs`. Pass
 `record_output_directory:=<dir>` to bringup to send them elsewhere.
 
 **Tests.** These files cover it:
@@ -258,10 +262,10 @@ ros2 launch race_diagnostics record_run.py
 # --- Terminal 2: the driving stack. Note the `| tee` (optional, see below). ---
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch racerbot_launch auto_map_race_launch.py \
-  2>&1 | tee ~/racerbot-ws/data/racerbot_runs/<the-dir-it-printed>/launch.log
+  2>&1 | tee ~/racerbot-ws/data/<id>/racerbot_runs/<the-dir-it-printed>/launch.log
 
 # --- Terminal 3 (optional): live high-signal view of terminal 2 ---
-ros2 run race_diagnostics filter_log ~/racerbot-ws/data/racerbot_runs/<dir>/launch.log
+ros2 run race_diagnostics filter_log ~/racerbot-ws/data/<id>/racerbot_runs/<dir>/launch.log
 ```
 
 > **`auto_map_race_launch.py` already starts this for you.** It runs the probe by default (`diagnostics:=true`), so a one-command map-and-race run leaves a machine-readable record without a second terminal. The rosbag stays off there unless you pass `record_bag:=true`. Everything below still applies to any other workflow.
@@ -269,7 +273,7 @@ ros2 run race_diagnostics filter_log ~/racerbot-ws/data/racerbot_runs/<dir>/laun
 Afterwards:
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<dir>
 ```
 
 **`| tee` is no longer strictly required, but is still the simplest option.**
@@ -297,7 +301,9 @@ months, and nothing prunes them.)*
 
 ## What gets captured, and why each piece earns its place
 
-One timestamped directory per run under `~/racerbot-ws/data/racerbot_runs/`. That folder is inside the git repo on purpose, so runs can be committed and pushed. After a session, run `tools/save_runs.sh` to do both ([data/README.md](../data/README.md)).
+One timestamped directory per run under `~/racerbot-ws/data/<id>/racerbot_runs/`, where `<id>` is `rb1` or `rb2`. That folder is inside the git repo on purpose, so runs can be committed and pushed. After a session, run `tools/save_runs.sh` to do both ([data/README.md](../data/README.md)).
+
+`metadata/car_id.txt` records the selected car, and `metadata/car.yaml` records `car_id` and `overlays:`, with each overlay's workspace-relative path and SHA-256 hash. If no car resolves, recording still succeeds: `car_id` is `null` and `car_id.txt` gives the reason. See [`run_metadata.py`](../src/race_diagnostics/race_diagnostics/run_metadata.py).
 
 The bag is split into 50 MB files (`bag/bag_0.mcap`, `bag_1.mcap`, ...) because GitHub refuses any file over 100 MB. You never open those files one at a time: `ros2 bag play <run>/bag` and the analysis tools read the whole `bag/` folder as one recording.
 
@@ -363,7 +369,7 @@ Because "what did the car actually see at the moment it hit the wall" is
 not answerable from log text. The bag makes a run replayable:
 
 ```bash
-ros2 bag play ~/racerbot-ws/data/racerbot_runs/<dir>/bag --clock
+ros2 bag play ~/racerbot-ws/data/<id>/racerbot_runs/<dir>/bag --clock
 ```
 
 `/scan` is ~90% of the size. Drop it for a 10× smaller bag if you only
@@ -379,7 +385,7 @@ ros2 launch race_diagnostics record_run.py \
 To read them back:
 
 ```bash
-ros2 bag play ~/racerbot-ws/data/racerbot_runs/<dir>/bag --clock &
+ros2 bag play ~/racerbot-ws/data/<id>/racerbot_runs/<dir>/bag --clock &
 ros2 topic echo /parameter_events
 ```
 
@@ -390,8 +396,8 @@ Keep `/parameter_events` in the list if you pass your own `topics:=`, as above.
 ## Reading the results
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir>
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir> --json   # for an agent
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<dir>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<dir> --json   # for an agent
 ```
 
 It reports, in the order that matters:
@@ -436,7 +442,7 @@ the log line reports every one as `value/limit`:
 |---|---|---|
 | departed the start | `departure_distance` | never leaves the start area |
 | distance travelled | `minimum_lap_distance` | loop shorter than the minimum can never close |
-| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session, and silently unreported by `summarize_run` before that day's regex fix |
+| turning done | `minimum_lap_turn_deg` | repeated reactive stops keep resetting progress before a full 300° accumulates — the actual blocker on every run in the 2026-08-25 session (TODO(verify): which car), and silently unreported by `summarize_run` before that day's regex fix |
 | elapsed time | `minimum_lap_duration_sec` (4.0 s), then also `minimum_lap_duration_fraction` (0.5) of the previous lap | The first lap needs 4 s. Later laps need the larger of 4 s and half the previous lap's time, so the gate follows the course length. The former fixed 15 s blocked short, fast laps; the 300° turning gate still applies. |
 | back near the start | `closure_distance` | passes the start but too wide |
 | heading matches start | `closure_heading_deg` | comes back the "wrong way round" |
@@ -518,7 +524,7 @@ output directory. It does not write into either run.
    is shown for the whole run and for each lap window. Each lap's scans are
    placed using the poses SLAM published at that time, then compared with the
    final map. Later loop closures can move the map, so early laps may score
-   lower even when the final map is not wrong. In the 19:49 run, laps 1 and 2
+   lower even when the final map is not wrong. In car 1's 19:49 run, laps 1 and 2
    scored 19–27%, while lap 4 scored 55%. Compare corresponding laps between
    runs rather than treating an early-to-late difference as a map fault.
 6. **Scan drops** counts dropped scan messages recorded on `/rosout`. The
@@ -528,7 +534,7 @@ output directory. It does not write into either run.
    map-frame path over the same time span. A ratio near 1 means their lengths
    agree, though it does not establish that either path is accurate.
 
-For example, run `20261026-194913` used `odom_imu` in both the parameter
+For example, car 1's run `20261026-194913` used `odom_imu` in both the parameter
 snapshot and the transforms. The final heading difference between `/odom/imu`
 and SLAM was −16.44°, compared with 102.61° for `/odom` and SLAM. The report
 found 32 scan drops, but that older recording has no system log, so CPU use
@@ -545,6 +551,87 @@ proof of map accuracy. Missing inputs are labelled in the report. If SLAM did
 not map the run, the report says so and still shows the other available data.
 
 ---
+
+## Rebuilding a racing folder from a run
+
+`map_course` does this for you after every run. Run it by hand for an older run, or one whose check was interrupted:
+
+**Terminal: any, with ROS sourced. It starts no node and publishes nothing.**
+
+```bash
+python3 tools/run_analysis/rebuild_run.py data/<id>/racerbot_runs/<time>
+```
+
+**Working when:** the first line starts `GO:` or `NO-GO:`, followed by `Saved in:` and a folder under `data/<id>/racerbot_auto/`. **If it says `NOTHING TO REBUILD`:** the run has no bag, or SLAM never ran in it. Existing folders are never overwritten, so delete or rename one to redo it.
+
+It takes the last `/map` in the bag and matches every scan against it, using odometry only to carry the pose between scans. That gives two scores:
+
+- **Fit:** the share of beams ending on a wall. Low means the map does not match the world. Limits: 0.90 on average, and 0.70 over its worst stretch.
+- **See-through:** the share of beams that pass through a mapped wall before they end, which a laser cannot do. High means walls are drawn twice. Limit: 15%.
+
+Fit alone cannot catch a doubled map, because a beam ending on either copy of a wall still counts: car 2's run `20261030-184556` has a doubled map that fits at 0.97. Why these scores, and how they did against an independent reference: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+
+A map that passes gets `raceline_profiled.csv`, capped at 1.5 m/s (`--max-speed` changes it), with `raceline_2p5.csv` and `raceline_4p0.csv` beside it. A refused map gets no line, so `race_launch.py` refuses that folder too. The numbers are in `rebuild.json`.
+
+The check starts from SLAM's own pose when that fits as well as the best place a search of the whole map finds. On a course that looks the same turned round, like the simulator's oval, the search alone can land on the mirror-image spot and call a good map NO-GO. `rebuild.json`'s `start_from` says which it used.
+
+## When mapping fails: the tools, in order
+
+These are the tools that found what was wrong on car 2 on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.
+
+**Terminal: any, with ROS sourced (`source /opt/ros/jazzy/setup.bash && source install/setup.bash`). None of them moves the car.**
+
+**1. What was this recording?** Many "failed maps" are not mapping runs at all.
+
+```bash
+python3 tools/run_analysis/run_triage.py data/<id>/racerbot_runs/<time>
+```
+
+**Working when:** it prints the driving code that ran, every LB hold with its distance and top speed, and a last line: `usable`, `not a mapping run`, or `carried between holds`. On 30 Oct most of the runs that "failed" were another team's algorithm, or a few seconds of driving.
+
+**2. Would its laps have closed?** This puts the run's recorded SLAM pose through the real lap counter, on each odometry.
+
+```bash
+python3 tools/run_analysis/lap_replay.py data/<id>/racerbot_runs/<time>
+```
+
+**Working when:** it prints one line per odometry frame, `counted in odom_imu 3 lap(s) [...] m`. Lap lengths that disagree, or many SLAM corrections in one frame only, mean the counter is reading the wrong odometry. It needs `/slam_pose`, so `map_course` runs and their replays only.
+
+**3. What does the whole launch do with this recording now?** This runs the real `map_course` launch on the run's recorded sensors, parked, and says whether its laps close and its map passes. It plays the driver's real LB presses, so it refuses to run while any driver or SLAM is up, and runs on ROS domain 78, localhost only.
+
+```bash
+python3 tools/run_analysis/replay_map_course.py data/<id>/racerbot_runs/<time> --out /tmp/replays
+python3 tools/run_analysis/replay_map_course.py data/<id>/racerbot_runs/<time> --out /tmp/replays imu:=true gyro_odom:=false
+```
+
+**Working when:** it ends with a JSON result, `laps_closed`, `map_go` and the reason, about as long as the run took. Exit 0 means the laps closed and the map passed. Launch arguments go after the run, as `map_course` takes them, so the same run can be tried with different settings. `--from-seconds` starts from a later stop.
+
+**4. How good is a map, against a known-good one?** This scores a map's walls against a reference map of the same course, and SLAM's live pose against the run's own scans tracked on that reference. It doesn't depend on the SLAM under test.
+
+```bash
+python3 tools/run_analysis/slam_score.py --reference data/<id>/racerbot_auto/<good run>/map.yaml data/<id>/racerbot_runs/<time>
+```
+
+**Working when:** one JSON line per target. `walls` near 0.9 or above is a good map; a map with every wall drawn twice scores about half. `live_p95_m` is how far the live pose strayed. The old settings scored 0.48 walls and 3.2 m on run `184556`; the new profile scored 0.92 and 0.27 m.
+
+**5. Can the tests behind a fix fail?** CLAUDE.md's Hard rule 1, rerunnable.
+
+```bash
+python3 tools/check_mutations.py tools/mutations/slam_reliability.json [--only map_localize]
+```
+
+**Working when:** it ends `N/N breaks caught`. Each break is applied to a temporary copy, so your files are never touched. A `MISSED` line names code no test would notice breaking. The full set of 140 takes about an hour.
+
+<details>
+<summary>What went wrong while finding the faults, so nobody repeats it (safe to skip)</summary>
+
+- **Test what the operator runs.** The SLAM fix sat in a profile that only loaded with two flags, and replaying SLAM alone never showed the lap counter reading the wrong odometry. Running the whole launch on recordings, with no flags, found both.
+- **Judge a SLAM setting over repeats, on more than one run.** Identical settings on identical data gave 0.32 and 0.64 of walls.
+- **Line maps up from many starts.** One start understated a 0.86 map as 0.22.
+- **Don't judge carrying from single scans placed on a map.** A false placement once made a car look carried 12 m. `run_triage.py` judges it from the car's own wheels and scans.
+- **The lap counter must use the odometry SLAM maps on.** It tells SLAM corrections from driving by comparing the two.
+
+</details>
 
 ## Replaying SLAM with the car parked
 
@@ -568,7 +655,7 @@ the replay's messages on a separate ROS graph from the car.
 ### Run an exact replay
 
 In one terminal at the workspace root, replace `RUN_DIR` with the recorded run
-folder. This example uses `odom_imu`, the wheel-and-gyro odometry used by run
+folder. This example uses `odom_imu`, the wheel-and-gyro odometry used by car 1's run
 `20261026-194913`. Use `--odom odom` for a recording mapped on wheel odometry.
 
 ```bash
@@ -582,7 +669,7 @@ and `pose_sequence_error`; a timeout prints the failed scan stamp and keeps the
 logs. See the measured limitation below before trying the 19:49 recording.
 
 Output defaults to
-`~/.ros/racerbot_runs/RUN_NAME-replay-odom_imu-exact/`. Existing output folders
+`data/<id>/racerbot_runs/RUN_NAME-replay-odom_imu-exact/` for the selected car ([`slam_replay.py`](../tools/run_analysis/slam_replay.py)). Existing output folders
 are refused, so use a different `--label` for another attempt. Add
 `--out-root /tmp/slam-replays` to put results in a scratch directory instead.
 The source run is read without being modified.
@@ -746,9 +833,9 @@ In all-scans mode, unbracketed boundary scans cannot have this acknowledgement;
 the feeder yields between sends so
 SLAM can handle them through its TF filter.
 
-### Measured result on the 19:49 run
+### Measured result on car 1's 19:49 run
 
-Run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
+Car 1's run `20261026-194913` contains **3,826 scans and 315 poses**. Every pose stamp
 matches a distinct recorded scan. The SLAM report's **314 updates** count
 changes between successive `map → odom_imu` corrections; the initial
 correction is identity. That count does not mean a pose lacks its scan.
@@ -929,7 +1016,7 @@ then automatic handover to pure pursuit]
 [e.g. handover completed, car accelerated, then hit a wall on the left]
 
 ## Recorded evidence
-Run directory: ~/racerbot-ws/data/racerbot_runs/<dir>
+Run directory: ~/racerbot-ws/data/<id>/racerbot_runs/<dir>
 - launch.log       full terminal output of every node
 - events.jsonl     probe stream: pipeline state + pose lag
 - bag/             replayable with `ros2 bag play <dir>/bag --clock`
@@ -989,6 +1076,8 @@ Run directory: ~/racerbot-ws/data/racerbot_runs/<dir>
 ---
 
 ## Postmortem: 2026-07-27
+
+TODO(verify): which car was used in this session.
 
 Four faults, each hiding the next. In the order they had to be peeled:
 
