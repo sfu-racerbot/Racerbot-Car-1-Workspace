@@ -29,15 +29,16 @@ web_dashboard_node:
     laser_offset_x: 0.26
 
     # The only nodes the tuning panel will probe or write to, and (parallel)
-    # the file "save" writes each one's tune back to. Both advertise a
+    # the files "save" writes each one's tune back to. A save goes to the
+    # last listed file that already holds the key (decision 13). Both advertise a
     # live_tunable_spec -- the contract is in
     # src/web_dashboards/car/docs/web-dashboard.md.
     tuning_nodes:
       - pure_pursuit_node
       - gap_follow_node
     tuning_config_files:
-      - pure_pursuit/config/pure_pursuit.yaml
-      - gap_follow/config/gap_follow.yaml
+      - pure_pursuit/config/pure_pursuit.yaml|racerbot_car/cars/rb2/calibration/pure_pursuit.yaml
+      - gap_follow/config/gap_follow.yaml|racerbot_car/cars/rb2/calibration/gap_follow.yaml
 
     # The only process names the stop panel may end. The actuation path
     # (ackermann_mux, joy_*, the VESC chain, bringup/teleop launches) is

@@ -26,6 +26,7 @@ No ROS needed:
 import glob
 import os
 import re
+import shutil
 import sys
 
 import pytest
@@ -111,9 +112,65 @@ def test_every_tunable_node_has_a_config_file_that_exists_here():
     params = _section('web_dashboard_node')
     nodes, files = params['tuning_nodes'], params['tuning_config_files']
     assert len(nodes) == len(files) >= 1
-    for relative in files:
-        package, rest = relative.split('/', 1)
-        assert os.path.isfile(os.path.join(_SRC, package, rest)), relative
+    for entry in files:
+        for relative in entry.split('|'):
+            package, rest = relative.split('/', 1)
+            assert os.path.isfile(os.path.join(_SRC, package, rest)), relative
+
+
+def test_tuning_files_are_shared_then_this_cars_overlays():
+    params = _section('web_dashboard_node')
+    assert len(params['tuning_nodes']) == len(params['tuning_config_files']) >= 1
+    for node, entry in zip(params['tuning_nodes'], params['tuning_config_files']):
+        package = node.removesuffix('_node')
+        filename = f'{package}.yaml'
+        expected = [f'{package}/config/{filename}',
+                    f'racerbot_car/cars/rb2/calibration/{filename}']
+        tuning = f'racerbot_car/cars/rb2/tuning/{filename}'
+        if os.path.isfile(os.path.join(_SRC, tuning)):
+            expected.append(tuning)
+        assert entry.split('|') == expected
+
+
+def test_every_listed_tuning_file_exists():
+    entries = _section('web_dashboard_node')['tuning_config_files']
+    assert entries
+    for entry in entries:
+        for relative in entry.split('|'):
+            package, rest = relative.split('/', 1)
+            assert os.path.isfile(os.path.join(_SRC, package, rest)), relative
+
+
+def test_a_dashboard_save_lands_in_the_file_that_holds_the_key(tmp_path):
+    sys.path.insert(0, _WD)
+    from web_dashboard import tuning
+
+    params = _section('web_dashboard_node')
+    entry = params['tuning_config_files'][params['tuning_nodes'].index('gap_follow_node')]
+    copies = []
+    for index, relative in enumerate(entry.split('|')):
+        destination = tmp_path / f'{index}.yaml'
+        shutil.copyfile(os.path.join(_SRC, relative), destination)
+        copies.append(destination)
+    before = [yaml.safe_load(path.read_text())['gap_follow_node']['ros__parameters']
+              for path in copies]
+    shared_index = next(i for i, p in enumerate(before) if 'max_speed' in p)
+    overlay_index = next(i for i, p in enumerate(before) if 'max_steering_angle' in p)
+    assert shared_index != overlay_index
+    assert sum('max_speed' in p for p in before) == 1
+    assert sum('max_steering_angle' in p for p in before) == 1
+    # A key absent from every layer falls back to the first (shared) file.
+    assert all('test_new_key' not in p for p in before)
+    tuning.save_layered(copies, 'gap_follow_node', {
+        'max_speed': 2.123, 'max_steering_angle': 0.234, 'test_new_key': 123})
+    after = [yaml.safe_load(path.read_text())['gap_follow_node']['ros__parameters']
+             for path in copies]
+    assert after[shared_index]['max_speed'] == 2.123
+    assert after[overlay_index]['max_steering_angle'] == 0.234
+    assert 'max_speed' not in after[overlay_index]
+    assert 'max_steering_angle' not in after[shared_index]
+    assert after[shared_index]['test_new_key'] == 123
+    assert all('test_new_key' not in p for i, p in enumerate(after) if i != shared_index)
 
 
 def test_no_stoppable_process_is_silently_dropped_as_protected():
