@@ -128,6 +128,32 @@
 - **Agents:** at most 3 paid Claude agents at once and at most 1 Haiku. Driving-code diffs and merge decisions are reviewed inline by the controller. Load on the shared dev box is checked before full suites (bananasaurs runs there too).
 - **Docs** follow the `novice-docs` and `racerbot-docs-voice` skills.
 
+## Findings during execution (2026-10-31)
+
+- **How ROS 2 Jazzy resolves several parameter files** (measured with an rclpy node, `--params-file A --params-file B`). It is **not** "later file wins":
+  - **Entries:** every top-level block key, exactly as written, is one entry, in order of first appearance across the files (`n` and `/n` are different entries).
+  - **Repeats:** a later file updates an existing entry in place; the entry doesn't move.
+  - **Resolution:** a node applies its matching entries in entry order, so later entries win.
+  - **Measured cases:** A={`/**`: x=1, `n`: x=2}, B={`/**`: x=3} gives x=2. A={`n`: 2}, B={`/**`: 3} gives 3. A={`/n`: 5, `/**`: 1}, B={`n`: 2} gives 2.
+
+  **Consequence:** every overlay key must sit under the same block key the shared file uses. `layers.check_block_keys_match` enforces this, and the oracle and `effective_values` implement the model. Inline launch dicts become a `/<node>` entry at the end, so they still override.
+- **Task 5 is split and reordered so every step stays green:**
+  - **5a:** car 1's calibration overlays (same values), `hardware.py`, `launch_car_id`/`car_params`, the four `f1tenth_stack` launches.
+  - **5b:** every other launch that passes a split config.
+  - **5c:** every Python reader in nodes, tools and tests switched to `effective_values(layered(...))`, with tests parametrized per car.
+  - **Task 6:** the `odom_calibration` writers.
+  - **5d:** only then are the calibration keys removed from the shared YAMLs.
+
+  The zero-diff gate runs after each.
+- **The oracle's sandbox:** `pgrep`/`git`/`ps`/`dpkg-query` are simulated, `range_libc` is stubbed, and includes of unbuilt packages are recorded by name. Event handlers are never registered. Writes outside a temp sandbox, process creation and device opens all fail loudly.
+- **Reference captures** are in `~/racerbot-merge/ref/rb1` (45 entries) and `ref/rb2` (44). Car 2's `racerbot_launch` needs `realsense2_camera`, so the dev box and car 1 never build `realsense-ros`.
+- **Dev-box test baselines:** `~/racerbot-merge/ref/car1-tests/summary.txt`, and `car2-tests`. Known noise:
+  - lint failures in upstream `teleop_tools`/`f1tenth_stack`
+  - the `tools/f1tenth_sim` (`gymnasium`) and `tools/neural_racer` (`torch`) collection errors
+  - two `imu_calibration` `test_online` failures that depend on car 1's IMU mount
+  - 16 `racerbot_sim` failures under load (re-run alone before treating as real)
+- **The simulator for Task 13** needs `tools/f1tenth_sim/setup.sh`, which installs into `tools/f1tenth_sim/.sim/` only, in each checkout used.
+
 ## Review Focus
 
 1. **The wrong car id on a Jetson would put the other car's servo map and steering limits on it.** Tests: an unknown serial refuses, and an env override that disagrees with the table refuses (Task 3). A hardware contradiction stops bringup: an `rb2` profile with a Hokuyo USB id present, or an `rb1` profile with a RealSense present (Task 5).
