@@ -1,0 +1,16 @@
+# Car 2's hardware. Calibration overlays (servo map, erpm gains, steering limits)
+# are added under calibration/ by a later task; until then every launch refuses on rb2.
+name: car 2
+lidar:
+  kind: ethernet              # Hokuyo UST-10LX
+  ip: 192.168.0.10
+  port: 10940
+  iface: enP8p1s0
+  host_ip: 192.168.0.15/24
+camera:
+  kind: realsense             # Intel RealSense D435i
+  usb_id: "8086:0b3a"
+  topic: /camera/camera/color/image_raw
+dashboard_site: rb2
+# USB ids only this car has: another car's profile refuses to start when one is present.
+distinctive_usb_ids: ["8086:0b3a"]

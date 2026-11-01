@@ -3,3 +3,5 @@
 # number would lose leading zeros). Value: the car id, a folder next to this file.
 # A machine not listed here (a dev box) must set RACERBOT_CAR=rb1|rb2 to run anything.
 "1421723021900": rb1
+# car 2 (read from the Jetson 2026-10-31)
+"1423025035537": rb2
