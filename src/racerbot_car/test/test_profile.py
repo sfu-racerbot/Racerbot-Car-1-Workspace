@@ -28,6 +28,8 @@ def test_shipped_machines_maps_car1_serial():
     ids = identity.known_car_ids(REAL_CARS)
     machines = identity.load_machines(REAL_CARS / 'machines.yaml', ids)
     assert machines['1421723021900'] == 'rb1'
+    # Oracle: car 2's Jetson survey, 2026-10-31.
+    assert machines['1423025035537'] == 'rb2'
 
 
 def test_profile_rb1_matches_car1_facts():
@@ -45,6 +47,18 @@ def test_profile_rb1_matches_car1_facts():
 def test_profile_rb2_fixture_ethernet_realsense():
     # Oracle: task's car 2 hardware facts.
     p = profile.load_profile('rb2', FIXTURES)
+    assert p.id == 'rb2'
+    assert p.name == 'car 2'
+    assert p.lidar == profile.LidarEthernet('192.168.0.10', 10940, 'enP8p1s0', '192.168.0.15/24')
+    assert p.camera == profile.CameraRealSense('8086:0b3a', '/camera/camera/color/image_raw')
+    assert p.dashboard_site == 'rb2'
+    assert p.hostnames == {}
+    assert p.distinctive_usb_ids == ('8086:0b3a',)
+
+
+def test_profile_rb2_matches_car2_facts():
+    # Oracle: docs/car1-vs-car2.md and the 2026-10-31 car survey.
+    p = profile.load_profile('rb2', REAL_CARS)
     assert p.id == 'rb2'
     assert p.name == 'car 2'
     assert p.lidar == profile.LidarEthernet('192.168.0.10', 10940, 'enP8p1s0', '192.168.0.15/24')
