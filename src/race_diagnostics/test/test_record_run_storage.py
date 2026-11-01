@@ -76,12 +76,17 @@ def test_both_ways_of_recording_use_that_command():
         assert calls, f'{path} does not build its bag command with bag_record_command'
 
 
-def test_runs_are_written_into_the_workspace_data_folder():
-    # oracle: spec -- data/README.md. Not ~/.ros, which git never sees.
+def test_runs_are_written_into_the_workspace_data_folder(tmp_path, monkeypatch):
+    # oracle: Task 7 and data/README.md: the resolved car is a path segment.
+    from racerbot_car.paths import data_dir
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     for node in ast.walk(_tree()):
         if (isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'DeclareLaunchArgument'
                 and node.args and getattr(node.args[0], 'value', None) == 'output_directory'):
-            default = {k.arg: k.value.value for k in node.keywords}['default_value']
-            assert default == '~/racerbot-ws/data/racerbot_runs'
+            default = {k.arg: k.value for k in node.keywords}['default_value']
+            for car in ('rb1', 'rb2'):
+                actual = eval(compile(ast.Expression(default), _LAUNCH, 'eval'),
+                              {'data_dir': data_dir, 'car_id': car})
+                assert actual == str(tmp_path / 'data' / car / 'racerbot_runs')
             return
     raise AssertionError('record_run.py no longer declares output_directory')

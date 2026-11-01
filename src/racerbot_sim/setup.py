@@ -18,7 +18,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='racerbotcar-1',
+    maintainer='SFU Racerbot',
     maintainer_email='bryanmaubc@gmail.com',
     description=(
         'Headless F1TENTH Gym simulator exposed as ROS2 topics, so the real '

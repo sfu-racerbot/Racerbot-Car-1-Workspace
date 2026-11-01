@@ -40,7 +40,7 @@ from racerbot_sim.hardware_guard import HardwareInterlock
 from racerbot_sim.sim_bridge import (
     LIDAR_BEAMS, LIDAR_HALF_FOV, LIDAR_OFFSET_X, LIDAR_OFFSET_Z,
     LIDAR_RANGE_MAX, LIDAR_RANGE_MIN, OpponentPlan, SimBridge, SimConfig,
-    car_names, command_is_fresh, sanitize_command,
+    car_names, command_is_fresh, sanitize_command, resolve_car_profile,
 )
 
 
@@ -52,6 +52,8 @@ class GymBridgeNode(Node):
 
     def __init__(self):
         super().__init__('gym_bridge_node')
+        self.declare_parameter('car', '')
+        car_profile = resolve_car_profile(self.get_parameter('car').value)
 
         self.declare_parameter('track', 'indoor_oval')
         self.declare_parameter('track_directory', '~/.ros/racerbot_sim/tracks')
@@ -125,6 +127,7 @@ class GymBridgeNode(Node):
             ))
 
         self.bridge = SimBridge(SimConfig(
+            car=car_profile.id,
             track_path=str(track_path),
             centerline=centerline,
             control_dt=1.0 / self.rate_hz,

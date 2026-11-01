@@ -9,7 +9,7 @@ waypoint_recorder_node:
     laser_offset_x: 0.26              # meters -- MEASURED rear-axle base_link to LiDAR
     laser_offset_y: 0.0
     # Required -- e.g.:
-    #   /home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
+    #   $HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
     output_file: ''
     min_spacing_m: 0.15
     # Diagnose a missing/stalled localization feed and report recording

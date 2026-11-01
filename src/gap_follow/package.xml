@@ -4,7 +4,7 @@
   <name>gap_follow</name>
   <version>0.1.0</version>
   <description>Reactive follow-the-gap baseline autonomous driving algorithm for the race car</description>
-  <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>
+  <maintainer email="bryanmaubc@gmail.com">SFU Racerbot</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
@@ -15,6 +15,7 @@
   <depend>drive_intent</depend>
   <!-- gap_follow_launch.py includes imu_bridge's vehicle_state_launch.py for steering_damping:=true -->
   <exec_depend>imu_bridge</exec_depend>
+  <exec_depend>racerbot_car</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

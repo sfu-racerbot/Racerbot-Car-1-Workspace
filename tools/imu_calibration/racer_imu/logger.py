@@ -1,4 +1,4 @@
-"""CSV run logs: logs/<YYYYmmdd_HHMMSS>_<name>/{meta.json, <imu>_imu.csv, wheel.csv, est.csv, ...}.
+"""CSV run logs in data/<car>/imu_calibration/<YYYYmmdd_HHMMSS>_<name>/.
 
 IMU logs are RAW (before calibration, before sync offsets) so any run can be re-calibrated and
 re-synced offline. Each CSV starts with '# key: value' metadata lines.
@@ -7,21 +7,24 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-from .types import ImuSample, WheelSample
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'src/racerbot_car'))
+from racerbot_car.paths import data_dir  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+from .types import ImuSample, WheelSample  # noqa: E402
+
 IMU_COLS = ["t", "t_dev", "rtt", "ax", "ay", "az", "gx", "gy", "gz", "qw", "qx", "qy", "qz", "label"]
 WHEEL_COLS = ["t", "erpm", "v_in", "tacho"]
 
 
 class RunLogger:
     def __init__(self, name: str = "run", root: str | Path | None = None, meta: dict | None = None):
-        root = Path(root) if root else ROOT / "logs"
+        root = Path(root).expanduser() if root else data_dir('imu_calibration')
         self.dir = root / f"{time.strftime('%Y%m%d_%H%M%S')}_{name}"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.meta = {"created": time.strftime("%Y-%m-%d %H:%M:%S"), "clock": "host time.monotonic() [s]",
@@ -104,6 +107,6 @@ def load_run(run_dir) -> dict:
 
 
 def latest_run(root: str | Path | None = None, contains: str = "") -> Path | None:
-    root = Path(root) if root else ROOT / "logs"
+    root = Path(root).expanduser() if root else data_dir('imu_calibration')
     runs = sorted(p for p in root.glob(f"*{contains}*") if p.is_dir())
     return runs[-1] if runs else None

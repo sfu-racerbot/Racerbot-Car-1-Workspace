@@ -1,0 +1,6 @@
+demo_node:
+  ros__parameters:
+    servo_min: 0.15
+/ns2/named_node:
+  ros__parameters:
+    gain: 2.0

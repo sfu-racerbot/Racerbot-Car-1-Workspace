@@ -1,0 +1,12 @@
+name: car 1
+steering:
+  full_lock_rad: {left: 0.401, right: -0.46265060240963857}
+lidar:
+  kind: serial
+  port: /dev/sensors/hokuyo
+  usb_id: "15d1:0000"
+camera:
+  kind: uvc
+  device: /dev/video0
+dashboard_site: rb1
+distinctive_usb_ids: ["15d1:0000"]

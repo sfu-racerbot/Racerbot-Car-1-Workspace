@@ -2,6 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>neural_racer</name>
+  <exec_depend>racerbot_car</exec_depend>
   <version>0.1.0</version>
   <description>Learned racing policy (LiDAR + IMU, reactive and map modes) inside a deterministic safety wrapper, with the LB deadman</description>
   <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>

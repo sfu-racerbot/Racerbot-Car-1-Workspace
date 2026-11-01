@@ -29,6 +29,8 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import ExecutableInPackage
 from race_diagnostics.auto_record import recorder_node_names
+from racerbot_car.identity import current_car_id
+from racerbot_car.paths import data_dir
 from race_diagnostics.recording import bag_record_command, DEFAULT_TOPICS
 from race_diagnostics.run_metadata import (
     find_repo_root, imu_calibration_files, metadata_repos, team_repos, write_packages,
@@ -172,10 +174,11 @@ def _setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
+    car_id = current_car_id()
     return LaunchDescription([
         RegisterEventHandler(OnShutdown(on_shutdown=_exit_even_if_launch_hangs)),
         DeclareLaunchArgument(
-            'output_directory', default_value='~/racerbot-ws/data/racerbot_runs',
+            'output_directory', default_value=str(data_dir('racerbot_runs', car_id)),
             description='Parent directory; one timestamped subdirectory per run.'),
         DeclareLaunchArgument(
             'run_directory', default_value='',

@@ -1,0 +1,15 @@
+name: car 2
+steering:
+  full_lock_rad: {left: 0.5090708884223831, right: -0.44751997515716985}
+lidar:
+  kind: ethernet
+  ip: 192.168.0.10
+  port: 10940
+  iface: enP8p1s0
+  host_ip: 192.168.0.15/24
+camera:
+  kind: realsense
+  usb_id: "8086:0b3a"
+  topic: /camera/camera/color/image_raw
+dashboard_site: rb2
+distinctive_usb_ids: ["8086:0b3a"]

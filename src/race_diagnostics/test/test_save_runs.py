@@ -27,7 +27,7 @@ def git(repo, *args):
 
 
 def add_run(repo, name, info):
-    run = repo / 'data' / 'racerbot_runs' / name
+    run = repo / 'data' / 'rb1' / 'racerbot_runs' / name
     run.mkdir(parents=True)
     (run / 'bag.mcap').write_text('x')
     if info is not None:
@@ -39,6 +39,9 @@ def repo(tmp_path):
     root = tmp_path / 'repo'
     (root / 'tools').mkdir(parents=True)
     shutil.copy(SCRIPT, root / 'tools' / 'save_runs.sh')
+    # save_runs always resolves identity from the checkout, including unsourced.
+    shutil.copytree(SCRIPT.parents[1] / 'src/racerbot_car', root / 'src/racerbot_car',
+                    ignore=shutil.ignore_patterns('__pycache__'))
     git(root, 'init', '-q')
     git(root, 'config', 'user.email', 'test@example.invalid')
     git(root, 'config', 'user.name', 'test')
@@ -64,25 +67,26 @@ def fake_pgrep(tmp_path, running=''):
 
 
 def save(repo, tmp_path, *args, running=''):
-    env = dict(os.environ, PATH=f"{fake_pgrep(tmp_path, running)}:{os.environ['PATH']}")
+    env = dict(os.environ, PATH=f"{fake_pgrep(tmp_path, running)}:{os.environ['PATH']}",
+               RACERBOT_CAR='rb1')
     return subprocess.run(['bash', 'tools/save_runs.sh', '--no-push', *args], cwd=repo,
                           env=env, capture_output=True, text=True)
 
 
 def committed(repo):
     names = git(repo, 'ls-tree', '-r', '--name-only', 'HEAD', 'data').splitlines()
-    return sorted({Path(n).parts[2] for n in names})
+    return sorted({Path(n).parts[3] for n in names})
 
 
 def test_idle_runs_are_listed_but_still_committed_by_default(repo, tmp_path):
     done = save(repo, tmp_path)
     assert done.returncode == 0, done.stderr
     assert committed(repo) == ['by_hand', 'driven', 'idle', 'stub', 'unknown']
-    for name in ('data/racerbot_runs/idle', 'data/racerbot_runs/stub'):
+    for name in ('data/rb1/racerbot_runs/idle', 'data/rb1/racerbot_runs/stub'):
         assert name in done.stdout
-    assert 'data/racerbot_runs/driven\n' not in done.stdout
-    assert 'data/racerbot_runs/by_hand' not in done.stdout
-    assert 'data/racerbot_runs/unknown' not in done.stdout
+    assert 'data/rb1/racerbot_runs/driven\n' not in done.stdout
+    assert 'data/rb1/racerbot_runs/by_hand' not in done.stdout
+    assert 'data/rb1/racerbot_runs/unknown' not in done.stdout
 
 
 def test_skip_idle_leaves_only_flagged_runs_uncommitted(repo, tmp_path):
@@ -90,12 +94,12 @@ def test_skip_idle_leaves_only_flagged_runs_uncommitted(repo, tmp_path):
     assert done.returncode == 0, done.stderr
     # A run with no record, or an unknown one, must never be treated as idle.
     assert committed(repo) == ['by_hand', 'driven', 'unknown']
-    assert (repo / 'data' / 'racerbot_runs' / 'idle' / 'bag.mcap').exists(), \
+    assert (repo / 'data' / 'rb1' / 'racerbot_runs' / 'idle' / 'bag.mcap').exists(), \
         'skipping must not delete anything'
-    assert (repo / 'data' / 'racerbot_runs' / 'stub' / 'bag.mcap').exists()
+    assert (repo / 'data' / 'rb1' / 'racerbot_runs' / 'stub' / 'bag.mcap').exists()
     untracked = git(repo, 'status', '--short', 'data')
-    assert 'data/racerbot_runs/idle/' in untracked
-    assert 'data/racerbot_runs/stub/' in untracked
+    assert 'data/rb1/racerbot_runs/idle/' in untracked
+    assert 'data/rb1/racerbot_runs/stub/' in untracked
 
 
 def test_an_already_committed_idle_run_is_not_listed_again(repo, tmp_path):
@@ -103,12 +107,12 @@ def test_an_already_committed_idle_run_is_not_listed_again(repo, tmp_path):
     add_run(repo, 'driven2', {'activity': {'moved': True}})
     done = save(repo, tmp_path)
     assert done.returncode == 0, done.stderr
-    assert 'data/racerbot_runs/idle' not in done.stdout
+    assert 'data/rb1/racerbot_runs/idle' not in done.stdout
 
 
 def test_skip_idle_with_nothing_else_commits_nothing(repo, tmp_path):
     for name in ('driven', 'by_hand', 'unknown'):
-        shutil.rmtree(repo / 'data' / 'racerbot_runs' / name)
+        shutil.rmtree(repo / 'data' / 'rb1' / 'racerbot_runs' / name)
     before = git(repo, 'rev-parse', 'HEAD')
     done = save(repo, tmp_path, '--skip-idle')
     assert done.returncode == 0, done.stderr

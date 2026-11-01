@@ -1,0 +1,21 @@
+# Car 2's hardware. Everything car-specific that isn't a ROS parameter.
+# Calibration overlays (servo map, erpm gains, steering limits) live next to this
+# file under calibration/, taken from car 2's own configs at the 2026-11 merge.
+name: car 2
+steering:
+  full_lock_rad:
+    left: 0.5090708884223831  # atan(0.36 / 0.645), +0.509 rad: tape-measured full-lock half circles, 2026-10-16, servo 0.178; racerbot_sim/sim_bridge.py and tools/f1tenth_sim/sim_fidelity/calibration.py.
+    right: -0.44751997515716985  # -atan(0.36 / 0.750), -0.448 rad: tape-measured full-lock half circles, 2026-10-16, servo_max 0.95; racerbot_sim/sim_bridge.py and tools/f1tenth_sim/sim_fidelity/calibration.py.
+lidar:
+  kind: ethernet              # Hokuyo UST-10LX
+  ip: 192.168.0.10
+  port: 10940
+  iface: enP8p1s0
+  host_ip: 192.168.0.15/24
+camera:
+  kind: realsense             # Intel RealSense D435i
+  usb_id: "8086:0b3a"
+  topic: /camera/camera/color/image_raw
+dashboard_site: rb2
+# USB ids only this car has: another car's profile refuses to start when one is present.
+distinctive_usb_ids: ["8086:0b3a"]

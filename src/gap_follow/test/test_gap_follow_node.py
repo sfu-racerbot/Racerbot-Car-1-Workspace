@@ -19,6 +19,7 @@ import os
 
 import numpy as np
 import pytest
+from conftest import car_config_args
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
@@ -960,7 +961,7 @@ def test_packaged_config_plus_mapping_overrides_actually_starts():
         overrides = []
         for name, value in speeds.items():
             overrides += ['-p', f'{name}:={value}']
-        rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG, *overrides, *TEST_ONLY_DRIVE])
+        rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG), *overrides, *TEST_ONLY_DRIVE])
         try:
             node = GapFollowNode()
             # Last, so it beats the packaged YAML's drive_topic: /drive.
@@ -981,7 +982,7 @@ def test_lowering_only_max_speed_is_still_rejected():
     race defaults, and 1.0 would be refused by the min_speed <= max_speed
     check, which runs first. 2.0 passes that check and fails the
     corner_speed_wide <= max_speed coupling this test is about."""
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', 'max_speed:=2.0', *TEST_ONLY_DRIVE])
     try:
         with pytest.raises(ValueError, match='corner_speed_wide'):
@@ -1209,7 +1210,7 @@ def test_test_only_drive_must_come_after_the_params_file(order, expected):
     from rclpy.node import Node
     with open(PACKAGED_CONFIG) as f:
         assert '    drive_topic: /drive\n' in f.read()
-    file_args = ['--params-file', PACKAGED_CONFIG]
+    file_args = car_config_args(PACKAGED_CONFIG)
     args = (['--ros-args', *file_args, *TEST_ONLY_DRIVE] if order == 'after'
             else ['--ros-args', *TEST_ONLY_DRIVE, *file_args])
     context = Context()

@@ -1,0 +1,146 @@
+{
+  "Setup": {
+    "parameter_frame": "odom_imu",
+    "tf_frame": "odom_imu",
+    "frame_mismatch": false,
+    "distance_m": 204.91936953975085,
+    "mean_speed_m_s": 2.5447327853604915,
+    "max_speed_m_s": 3.9325682919654423
+  },
+  "Heading drift": {
+    "/odom vs SLAM": {
+      "final_deg": 147.0582295618724,
+      "max_abs_deg": 164.12960101768238,
+      "rms_rate_deg_s": 19.942504063549634
+    },
+    "/odom/imu vs SLAM": {
+      "final_deg": 18.80819940675515,
+      "max_abs_deg": 29.859836605680457,
+      "rms_rate_deg_s": 6.951262872897006
+    },
+    "/odom vs /odom/imu": {
+      "final_deg": 129.90093419804614,
+      "max_abs_deg": 153.15121664825216,
+      "rms_rate_deg_s": 16.054570052397494
+    }
+  },
+  "Corrections and loop closures": {
+    "updates": 332,
+    "loop_closures": null,
+    "max_move_m": 1.5927811712465862,
+    "max_rotate_deg": 7.897893002250822,
+    "jumps_over_0_3m": 10,
+    "jumps_over_false_jump_m": 1,
+    "jumps_at_loop_closures": null
+  },
+  "Laps": [
+    {
+      "lap": 1,
+      "of": 3,
+      "distance_m": 41.3,
+      "turn_deg": 365.0,
+      "revolutions": 1.01,
+      "samples": 219,
+      "closest_m": 1.36,
+      "gate_m": 1.5,
+      "corrections": 69,
+      "t": 1793411190.2807407,
+      "quality": null,
+      "verdict": "not judged"
+    },
+    {
+      "lap": 2,
+      "of": 3,
+      "distance_m": 44.2,
+      "turn_deg": 378.0,
+      "revolutions": 1.05,
+      "samples": 241,
+      "closest_m": 0.17,
+      "gate_m": 1.5,
+      "corrections": 85,
+      "t": 1793411212.8825378,
+      "quality": null,
+      "verdict": "not judged"
+    }
+  ],
+  "Map consistency": {
+    "overall": 0.5485939259124132,
+    "laps": {
+      "1": 0.5900753202853407,
+      "2": 0.5268349489727504
+    }
+  },
+  "Scan drops": {
+    "count": 35,
+    "timeline": [
+      {
+        "t0": 1793411159.104119,
+        "drops": 4,
+        "cpu_mean": 11.916648445460057,
+        "cpu_max": 21.113243356748335
+      },
+      {
+        "t0": 1793411169.104119,
+        "drops": 4,
+        "cpu_mean": 29.639724828759004,
+        "cpu_max": 38.25413080840351
+      },
+      {
+        "t0": 1793411179.104119,
+        "drops": 4,
+        "cpu_mean": 28.59165357386193,
+        "cpu_max": 34.59085061230969
+      },
+      {
+        "t0": 1793411189.104119,
+        "drops": 3,
+        "cpu_mean": 32.04761465636482,
+        "cpu_max": 42.66745461704503
+      },
+      {
+        "t0": 1793411199.104119,
+        "drops": 4,
+        "cpu_mean": 31.082609648667205,
+        "cpu_max": 37.08422351811917
+      },
+      {
+        "t0": 1793411209.104119,
+        "drops": 4,
+        "cpu_mean": 32.24833688907762,
+        "cpu_max": 46.978255048272295
+      },
+      {
+        "t0": 1793411219.104119,
+        "drops": 4,
+        "cpu_mean": 30.121618471159017,
+        "cpu_max": 33.72396608369657
+      },
+      {
+        "t0": 1793411229.104119,
+        "drops": 4,
+        "cpu_mean": 30.798278821640267,
+        "cpu_max": 38.996781826797374
+      },
+      {
+        "t0": 1793411239.104119,
+        "drops": 4,
+        "cpu_mean": 33.18875856562856,
+        "cpu_max": 49.90755651034807
+      },
+      {
+        "t0": 1793411249.104119,
+        "drops": 0,
+        "cpu_mean": 30.529510745130654,
+        "cpu_max": 30.529510745130654
+      }
+    ],
+    "system_log": true
+  },
+  "Wheel vs scan-matched distance": {
+    "wheel_m": 204.70890832950263,
+    "slam_m": 201.37710286078834,
+    "ratio": 1.0165451057810557,
+    "start": 1793411163.788422,
+    "end": 1793411249.3980687
+  }
+}

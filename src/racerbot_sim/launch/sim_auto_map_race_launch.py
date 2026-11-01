@@ -21,9 +21,12 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from racerbot_car.layers import launch_car_id
+from racerbot_car.paths import data_dir
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     sim_share = get_package_share_directory('racerbot_sim')
 
     arguments = [
@@ -39,7 +42,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mapping_min_speed', default_value=''),
         DeclareLaunchArgument('mapping_laps', default_value='2'),
         DeclareLaunchArgument(
-            'output_directory', default_value='~/racerbot-ws/data/racerbot_sim/auto'),
+            'output_directory', default_value=str(data_dir('racerbot_sim', car_id) / 'auto')),
         DeclareLaunchArgument(
             'supervisor_config', default_value=os.path.join(
                 get_package_share_directory('pure_pursuit'),

@@ -1,0 +1,6 @@
+joy_teleop:
+  ros__parameters:
+    human_control:
+      axis_mappings:
+        drive-steering_angle:
+          scale: 0.38

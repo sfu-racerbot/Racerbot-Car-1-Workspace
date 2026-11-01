@@ -4,7 +4,7 @@
   <name>racerbot_wiimote_driver</name>
   <version>0.1.0</version>
   <description>Nintendo Wiimote as a ROS 2 joystick (sensor_msgs/Joy on /wiimote/joy) plus raw button, battery and accelerometer topics, and a Wiimote teleop control layer.</description>
-  <maintainer email="sfuracerbot@gmail.com">racerbotcar-1</maintainer>
+  <maintainer email="sfuracerbot@gmail.com">SFU Racerbot</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

@@ -1,4 +1,7 @@
-"""Car 1's whole IMU side: BNO085 I2C bridge, imu_bridge, vehicle_state.
+"""The whole IMU side: BNO085 I2C bridge, imu_bridge, vehicle_state.
+
+Written on car 1. Car 2's BNO085 is wired the same way, on the Jetson's I2C
+bus (docs/car1-vs-car2.md#imu).
 
 Support code: nothing here can move the car. Publishes /imu/* (imu_bridge),
 /odom/fused and /steering/measured (vehicle_state). Run on top of bringup,
@@ -29,6 +32,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import launch_car_id
+from racerbot_car.paths import cars_dir
 
 BRIDGE_SCRIPT = 'bno_i2c_bridge.py'
 # pgrep -f pattern (POSIX extended regex) for a *running* bridge: a Python
@@ -44,6 +49,7 @@ def bridge_running():
 
 
 def _actions(context, *args, **kwargs):
+    car = launch_car_id()
     hardware_value = LaunchConfiguration('hardware').perform(context).strip().lower()
     if hardware_value not in ('true', 'false'):
         raise RuntimeError('hardware must be true or false')
@@ -81,7 +87,8 @@ def _actions(context, *args, **kwargs):
             package='imu_bridge', executable='imu_bridge_node', name='imu_bridge_node',
             output='screen',
             parameters=[os.path.join(share, 'config', 'imu_bridge.yaml'),
-                        {'racer_imu_root': root, 'bno_port': pty if bno else ''}],
+                        {'racer_imu_root': root, 'bno_port': pty if bno else '',
+                         'car_yaml': str(cars_dir() / car / 'imu/car.yaml')}],
         ))
     # Without the BNO there is no trusted forward accelerometer on car 1 (the
     # VESC's mount rotation is still car 2's): publish the wheel speed as is.
@@ -103,11 +110,10 @@ def generate_launch_description():
             description='true starts the real IMU stack; false uses simulated IMU topics.'),
         DeclareLaunchArgument(
             'bno', default_value='true',
-            description='Use the BNO085 (front axle, Jetson I2C). false = VESC IMU only.'),
+            description='Use the BNO085 (Jetson I2C). false = VESC IMU only.'),
         DeclareLaunchArgument(
             'racer_imu_root', default_value='~/racerbot-ws/tools/imu_calibration',
-            description='Where the IMU calibration lives (car.yaml, calibration, '
-                        'the I2C bridge).'),
+            description='Where racer_imu code and the I2C bridge live.'),
         DeclareLaunchArgument(
             'bno_pty', default_value='/tmp/bno085',
             description="The I2C bridge's virtual serial port."),

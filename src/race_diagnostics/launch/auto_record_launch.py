@@ -8,7 +8,7 @@ on its own, though it can be, next to any bringup that lacks it:
 
 It records only while some node publishes /drive (or another trigger topic
 in config/auto_record.yaml), never beside another recorder, into
-~/racerbot-ws/data/racerbot_runs/<time>/. Subscribe-free and publish-free: it reads the
+~/racerbot-ws/data/<car>/racerbot_runs/<time>/. Subscribe-free and publish-free: it reads the
 ROS graph and nothing else, so it starts nothing that can move the car.
 docs/run-diagnostics.md#automatic-recording
 """
@@ -20,14 +20,17 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.identity import current_car_id
+from racerbot_car.paths import data_dir
 
 
 def generate_launch_description():
+    car_id = current_car_id()
     config = os.path.join(
         get_package_share_directory('race_diagnostics'), 'config', 'auto_record.yaml')
     return LaunchDescription([
         DeclareLaunchArgument(
-            'record_output_directory', default_value='~/racerbot-ws/data/racerbot_runs',
+            'record_output_directory', default_value=str(data_dir('racerbot_runs', car_id)),
             description='Where automatic recordings go, one timestamped '
                         'subdirectory per run.'),
         Node(

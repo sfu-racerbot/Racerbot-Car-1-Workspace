@@ -1,0 +1,23 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-10-30T17:57:28-07:00'
+algorithms:
+  /drive:
+  - /gap_follow_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /gap_follow_node
+- /joy
+- /static_baselink_to_laser
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+stopped: '2026-10-30T18:02:58-07:00'
+stop_reason: no algorithm publishing for 3.5 s
+duration_sec: 329.5
+recorder_exit_code: 0
+recorder_killed: false
+bag_bytes: 94433515

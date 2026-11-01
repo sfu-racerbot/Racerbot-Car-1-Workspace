@@ -1,0 +1,19 @@
+Rebuilt offline 2026-10-30 from run 20261030-185036. Not written by map_course.
+map.pgm/map.yaml: that run's final live /map, despeckled.
+raceline_raw.csv: one lap (t=89-110 s) with every scan re-localized against that map,
+  because the live SLAM pose sits 0.4-1.4 m off the map after lap 1. raceline_profiled.csv: same line, 1.5 m/s.
+Checked: real particle_filter on bag scans, median 7 cm / p95 22 cm / 0.84 deg over 5 laps.
+NOT checked: pure_pursuit_node driving on these files.
+
+Every terminal:  source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
+
+0. Stop every other control layer (gap_follow, disparity_extender + safety_node, teleop). Keep bringup running.
+   Wheels off the ground for the first try.
+1. Put the car on the spot and heading where run 185036 started (see preview.png).
+     python3 /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/check_start.py        must print GO
+2. ros2 launch racerbot_launch race_launch.py run_dir:=/home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed
+   Wait for "Particle filter is at the start pose; racing can begin."  Hold LB to drive; release to stop.
+3. On the floor, faster, only after step 2 looks right at 1.5 m/s (stop race_launch first):
+     cp /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_2p5.csv /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_profiled.csv     # 1.64-2.5 m/s
+     cp /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_4p0.csv /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_profiled.csv     # 1.64-4.0 m/s
+     cp /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_1p5.csv /home/racerbotcar-2/racerbot-ws/data/racerbot_auto/20261030-185036-fixed/raceline_profiled.csv     # back to 1.5 m/s

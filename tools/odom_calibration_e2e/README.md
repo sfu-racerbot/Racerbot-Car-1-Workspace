@@ -5,8 +5,10 @@
 > **What's in it:** how to run the whole wizard against the car's real software with only the hardware simulated.
 
 `run_e2e.py` starts the car's real `ackermann_to_vesc_node`,
-`vesc_to_odom_node`, `ackermann_mux`, `joy_teleop` (with the real config
-files, as temporary copies) and the wizard's real launch file.
+`vesc_to_odom_node`, `ackermann_mux`, `joy_teleop` and the wizard's real launch
+file. It layers temporary copies of the selected car's calibration overlays
+over the shared configs. Select the car with `--car rb1`, for example, or set
+`RACERBOT_CAR` before running it.
 
 It fakes only the hardware: a scripted F710, and a VESC (the motor and servo
 controller) that clips the servo like `vesc_driver` and drives a simulated

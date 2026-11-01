@@ -25,7 +25,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='racerbotcar-1',
+    maintainer='SFU Racerbot',
     maintainer_email='bryanmaubc@gmail.com',
     description='Map-based race controller: pure pursuit over a curvature-aware velocity profile, '
                 'plus tools to record and pace a racing line.',
@@ -39,6 +39,7 @@ setup(
             'optimize_raceline = pure_pursuit.optimize_raceline:main',
             'auto_map_race_node = pure_pursuit.auto_map_race_node:main',
             'seed_start_pose = pure_pursuit.seed_start_pose:main',
+            'check_start = pure_pursuit.check_start:main',
         ],
     },
 )

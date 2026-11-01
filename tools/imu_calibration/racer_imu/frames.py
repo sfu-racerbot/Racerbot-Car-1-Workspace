@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import sys
 
 import numpy as np
 import yaml
@@ -22,7 +23,28 @@ import yaml
 from .types import G, ImuSample
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = ROOT / "config" / "car.yaml"
+
+
+def default_config_path() -> Path:
+    """The selected car's IMU profile; never borrow another car's mount."""
+    repo = ROOT.parent.parent
+    source = str(repo / 'src/racerbot_car')
+    if source not in sys.path:
+        sys.path.insert(0, source)
+    from racerbot_car.identity import current_car_id, UnknownCarError, CarMismatchError
+    from racerbot_car.paths import cars_dir
+    profiles = cars_dir()
+    try:
+        car = current_car_id()
+    except (UnknownCarError, CarMismatchError, OSError, ValueError) as exc:
+        raise FileNotFoundError(
+            f'Expected {profiles}/<car>/imu/car.yaml; set RACERBOT_CAR '
+            f'or pass --config: {exc}') from exc
+    path = profiles / car / 'imu/car.yaml'
+    if not path.is_file():
+        raise FileNotFoundError(
+            f'Expected {path}; check RACERBOT_CAR or pass --config')
+    return path
 
 
 # ---------------------------------------------------------------- rotations
@@ -139,15 +161,22 @@ class Config:
     def section(self, name: str) -> dict:
         return self.raw.get(name, {}) or {}
 
-    def resolve(self, p: str | None) -> Path | None:
+    def resolve(self, p: str | None, *, for_write: bool = False) -> Path | None:
         if not p:
             return None
         p = Path(p)
-        return p if p.is_absolute() else self.path.parent.parent / p
+        if p.is_absolute():
+            return p
+        if p.parts[:2] == ('calib', 'sim'):
+            return ROOT / p
+        local = self.path.parent / p
+        if for_write or local.exists():
+            return local
+        return ROOT / p
 
 
 def load_config(path: str | Path | None = None) -> Config:
-    path = Path(path) if path else DEFAULT_CONFIG
+    path = Path(path).expanduser().resolve() if path else default_config_path()
     raw = yaml.safe_load(path.read_text())
     car = CarGeometry(**(raw.get("car") or {}))
     imus = {}

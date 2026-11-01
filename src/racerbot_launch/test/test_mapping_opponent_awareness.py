@@ -16,6 +16,7 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile
 import pytest
 import yaml
+from ament_index_python.packages import get_package_share_directory
 
 PACKAGE = Path(__file__).resolve().parents[1]
 LAUNCHES = ('map_course_launch.py', 'auto_map_race_launch.py',
@@ -55,7 +56,7 @@ def _parameters(node, context):
     for entry in node._Node__parameters:
         if isinstance(entry, ParameterFile):
             path = Path(''.join(part.perform(context) for part in entry.param_file))
-            files.append(path.name)
+            files.append(path.resolve())
             result.update(yaml.safe_load(path.read_text())['gap_follow_node']['ros__parameters'])
         elif isinstance(entry, dict):
             for key, value in entry.items():
@@ -71,7 +72,10 @@ def test_default_is_off_after_yaml(filename):
     node, context = _node(filename)
     params, files = _parameters(node, context)
     # oracle: spec CLAUDE.md: mapping defaults off despite racing YAML.
-    assert files == ['gap_follow.yaml']
+    root = PACKAGE.parents[1]
+    shared = (Path(get_package_share_directory('gap_follow')) / 'config/gap_follow.yaml').resolve()
+    assert shared == (root / 'src/gap_follow/config/gap_follow.yaml').resolve()
+    assert files == [shared, (root / 'src/racerbot_car/cars/rb1/calibration/gap_follow.yaml').resolve()]
     assert params['enable_opponent_awareness'] is False
 
 
@@ -100,7 +104,7 @@ def test_map_course_forwards_opponent_argument(tmp_path, monkeypatch):
     ros2.chmod(ros2.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv('PATH', f'{bin_dir}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setattr(wrapper, '_running', lambda name: name == wrapper.SIM_DRIVER)
-    monkeypatch.setattr(wrapper, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     assert wrapper.main(['opponent_awareness:=true']) == 0
     # oracle: scripts/map_course launch_arguments docstring; approved 2026-10-29:
     # name:=value reaches ros2 launch, with simulated IMU hardware readers off.

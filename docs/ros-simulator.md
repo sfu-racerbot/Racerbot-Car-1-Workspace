@@ -252,7 +252,7 @@ contact-and-distance verdict. Inspect `imu_validation` separately: that verdict
 does not apply the IMU acceptance thresholds below. Steering damping is on by
 default; adaptive grip is off and `imu_all` leaves it off. The harness passes
 `imu_hardware:=false` itself. Its own tests run with the other tool suites:
-`python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ -q`
+`python3 -m pytest tools/f1tenth_sim/tests/ tools/racerbot_sim/tests/ tools/run_analysis/tests/ tools/dev/tests/ -q`
 (sourced, on an isolated domain; see CLAUDE.md). `colcon test` does not run them.
 
 The explicit `imu_hardware:=false` selects the simulator's IMU even if the

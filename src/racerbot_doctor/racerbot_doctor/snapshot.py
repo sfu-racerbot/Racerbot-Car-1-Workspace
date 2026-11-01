@@ -93,6 +93,13 @@ class Process:
 
 
 @dataclass
+class NetIface:
+    name: str
+    carrier: object = None
+    ipv4: list = field(default_factory=list)
+
+
+@dataclass
 class Snapshot:
     usb: list = field(default_factory=list)
     processes: list = field(default_factory=list)
@@ -105,6 +112,9 @@ class Snapshot:
     # a USB device. joy_node (SDL2) reads the event node, not the js node.
     input_readable: dict = field(default_factory=dict)  # 'event5' -> bool
     camera_device: object = None        # True: rw OK, False: no access, None: absent
+    ifaces: dict = field(default_factory=dict)
+    lidar_ping: object = None           # True/False, None: probe unavailable
+    lidar_tcp: object = None            # True/False, None: not probed
     env: dict = field(default_factory=dict)
 
 

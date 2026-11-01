@@ -21,7 +21,7 @@ On top of that, it combines them with the wheel speed into three things the rest
 ## Highlights
 
 - **Converts the VESC's IMU to SI units and car axes.** The [VESC](../../docs/glossary.md#vesc) (the motor controller) reports g and deg/s, in whatever direction its board happens to face. On car 2 that's rotated about 85° from the car. This node outputs m/s² and rad/s, with x forward, y left and z up.
-- **Uses the club's existing calibration, unchanged.** It reads `car.yaml` and the calibration files from `tools/imu_calibration/` (the club's [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo, now kept in this workspace), and applies the same formula as its `racer_imu`. A test checks the two give the same answer to 1e-12 on the car's real calibration file.
+- **Uses the selected car's calibration.** Mounts live in `src/racerbot_car/cars/CAR/imu/car.yaml`, with calibration JSONs in the adjacent `calib/` directory. The conversion formula matches `racer_imu` in `tools/imu_calibration/`; a test compares the two to 1e-12 on the car's real calibration file.
 - **Removes leftover gyro bias at startup.** For the first 3 s it averages the gyro while the car sits still. It only counts samples where the wheels report under 0.03 m/s *and* every gyro axis is under 0.05 rad/s. Any motion throws the window away and starts again.
 - **Gives the wheel [odometry](../../docs/glossary.md#odometry--odom) an honest uncertainty.** `/odom` arrives claiming zero uncertainty, which an EKF would treat as perfect. This node republishes it with a speed uncertainty of 0.08 m/s, and marks everything else as untrusted.
 - **Ships a "shadow" EKF config.** It runs the EKF alongside everything else for comparison, without changing what any driving node uses.
@@ -30,7 +30,7 @@ On top of that, it combines them with the wheel speed into three things the rest
 - **The steering angle the car really turned at.** `/steering/measured` solves the bicycle model backwards from the measured yaw rate and speed. It includes understeer and slip, which the servo command can't show. Below 0.3 m/s it reads `NaN` rather than guessing.
 - **Two gyros cross-checked; a wrongly mounted IMU is refused.** Both gyros are averaged. If they steadily disagree by more than 0.15 rad/s, the angle reads `NaN` instead of being wrong. An IMU whose gravity reading says it is upside down or on its side is left out entirely.
 - **Gyro odometry for SLAM, without touching bringup.** `/odom/imu` is `vesc_to_odom`'s distance with the gyro's heading. An extra frame, `odom_imu -> odom`, makes the chain `odom_imu -> base_link` exactly that pose (checked with tf2 to 1e-15), so `slam_toolbox` can map on it while `vesc_to_odom` keeps its own transform. With no usable gyro it *is* today's `/odom`, to the bit.
-- **Car 1's BNO085 is on the Jetson's own I2C bus.** There is no microcontroller in between: imu-calibration's `tools/bno_i2c_bridge.py` reads the sensor (bus 7, address 0x4A, ~250 Hz) and presents it as a serial port at `/tmp/bno085`. `vehicle_state_launch.py` starts it for you. (Car 2's BNO085 sits behind a microcontroller on a USB port; that path still works with `bno_port:=/dev/ttyACM1`.)
+- **Each car's BNO085 is on the Jetson's I2C bus.** The calibration tool `tools/bno_i2c_bridge.py` reads bus 7, address 0x4A, and presents a serial port at `/tmp/bno085`. `vehicle_state_launch.py` starts it. Car 2 previously used a microcontroller on USB; `bno_port:=/dev/ttyACM1` remains available for that setup. See [`vehicle_state_launch.py`](launch/vehicle_state_launch.py) and [car 2's profile](../racerbot_car/cars/rb2/imu/car.yaml).
 - **All the math runs without ROS.** `convert.py` and `vehicle_state.py` have no `rclpy` import, so their tests run with a bare `pytest`. Every new test was seen to fail against deliberately broken code (52 different breaks).
 
 ### Why it exists
@@ -79,9 +79,31 @@ An **EKF** (extended Kalman filter) combines two imperfect sensors into one bett
 
 ## Before you start
 
-- [ ] **The VESC's IMU must be switched on.** It was measured on 2026-08-19 sending all zeros because it was off in VESC Tool; it has been on, and working, since the October 2026 tests (see [docs/localization.md](../../docs/localization.md)). It was calibrated through the imu-calibration repo in September 2026, which means it works over that repo's own serial driver. This node prints a warning every 5 s if it still sees all zeros.
+- [ ] **The VESC's IMU must be switched on.** Car 2's IMU was measured on 2026-08-19 sending all zeros because it was off in VESC Tool. October 2026 tests showed it working on both cars (see [hardware-reference.md](../../docs/hardware-reference.md)). This node prints a warning every 5 s if it still sees all zeros.
+
+  Car 2's VESC was calibrated through the imu-calibration repo in September 2026 and worked over that repo's serial driver.
 - [ ] **Car 1: the BNO085 must answer on I2C.** It is wired to the Jetson's 40-pin header (pin 1 3.3 V, pin 3 SDA, pin 5 SCL, pin 6 GND), which is I2C bus 7. Working when `i2cdetect -y -r 7` shows `4a` in its grid. Only the `-r` form works on this Jetson. A `Remote I/O error` on every address means SDA and SCL are swapped. Your user must be in group `i2c` (`id` lists it).
-- [ ] **Nothing to clone: the IMU calibration ships in this workspace** as `tools/imu_calibration/` (brought in from the [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo on 2026-10-31, history kept). Working when `ls ~/racerbot-ws/tools/imu_calibration/config/car.yaml` prints the path. To use a calibration somewhere else, pass `racer_imu_root:=/that/path` when launching. On car 1, `~/imu-calibration` is a symlink to the workspace copy, so older commands still work. The node **refuses to start** without its `config/car.yaml`. Without the mount rotation it would swap the x and y axes.
+- [ ] **Select the car's IMU calibration.** On a development machine, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2`; each car can use its Jetson serial. Check `src/racerbot_car/cars/<id>/imu/car.yaml` and the adjacent `calib/*.json` for the selected car.
+
+  The IMU launches pass the mount file as `car_yaml`. The node **refuses to start** if the selected file is missing, because using another mount would produce incorrect axes. Calibration tools are in `tools/imu_calibration/`.
+
+`racer_imu_root` locates the driver code and I2C bridge in `tools/imu_calibration/`.
+The node's `car_yaml` parameter selects the mount file; when empty, it uses
+`cars_dir()/CAR/imu/car.yaml`. `RACERBOT_CARS_DIR` can override the profile directory.
+Relative calibration paths prefer the mount file's own directory, then the code root.
+Each recorded run copies that car's `car.yaml` and calibration JSONs into
+`metadata/files/`, and records the car ID in `metadata/car_id.txt`.
+
+To check selection without starting hardware, use a terminal at the workspace
+root with ROS sourced and run the launch-capture regression:
+
+```bash
+RB_WS=$PWD rb python3 -m pytest src/imu_bridge/test/test_imu_calibration_per_car.py -q -p no:cacheprovider
+```
+
+Expect all tests to pass. The capture checks that `vehicle_state_launch.py`
+passes `cars/rb1/imu/car.yaml`; both IMU launches must refuse an unknown machine.
+
 - [ ] **For the EKF only**, install robot_localization once:
   ```bash
   sudo apt install ros-jazzy-robot-localization
@@ -120,7 +142,7 @@ To run `imu_bridge_node` on its own instead:
 
 ```bash
 ros2 launch imu_bridge imu_bridge_launch.py
-# with a BNO085 behind a microcontroller on USB (car 2's setup):
+# with a BNO085 behind a microcontroller on USB (car 2's former setup):
 ros2 launch imu_bridge imu_bridge_launch.py bno_port:=/dev/ttyACM1
 ```
 
@@ -130,7 +152,7 @@ ros2 launch imu_bridge imu_bridge_launch.py bno_port:=/dev/ttyACM1
 - every 5 s, from `vehicle_state_node`: `rates: bno 250 Hz, vesc 50 Hz | speed: fused 250 | ...`. `fused` means the accelerometer is being used; `wheel_only` means it isn't (see [Troubleshooting](#troubleshooting)).
 
 **If it doesn't:**
-- `car.yaml not found`: the repo isn't cloned where `racer_imu_root` points.
+- `Expected IMU calibration at ...`: the selected car's `imu/car.yaml` is missing.
 - `no VESC IMU data`: bringup isn't running.
 - `all zeros`: the IMU is off in VESC Tool.
 - The bias line never appears: something is moving the car, or `/odom` is missing (see [Troubleshooting](#troubleshooting)).
@@ -170,7 +192,7 @@ ros2 topic echo /steering/measured --field position
 ```
 
 5. **With the car still, it reads `[nan]`.** That is correct: an IMU can't see the steering angle of a car that isn't moving.
-6. **Drive a slow circle with the steering held fully left.** This is manual driving: `teleop_launch.py` in another terminal, LB held, on the floor with room around the car. The value should be **positive** and at most about 0.38 rad, which is full stick. Less than that is understeer: the car turning less than the wheels point. Fully right gives negative.
+6. **Drive a slow circle with the steering held fully left.** This is manual driving: `teleop_launch.py` in another terminal, LB held, on the floor with room around the car. The value should be **positive** and at most about 0.38 rad on car 1, which is its full stick. Less than that is understeer: the car turning less than the wheels point. Fully right gives negative.
 
 ```bash
 ros2 topic echo /odom/fused --field twist.twist.linear.x
@@ -335,7 +357,9 @@ output = clamp(v, z - max_divergence, z + max_divergence)
 
 `sigma_accel` is a speed random walk (m/s per √s), not a per-sample noise, so the filter behaves the same at any IMU rate. Its value, 0.15, also sets how long a slip can be told apart from a real change of speed: the gate widens as the filter's uncertainty grows between accepted wheel readings. At 0.5 the gate opened within 50 ms, shorter than a spin.
 
-**Lever arm.** The BNO085 sits on the front axle, 0.36 m ahead of base_link (the rear axle). On a turning car a point ahead of the axle also accelerates towards the turn centre, which shows up on its x axis as `−yaw_rate² × 0.36`: about −0.36 m/s² at 1 rad/s, read as braking in every corner. `accel_at_base_link` adds it back, using the BNO's own gyro (same chip, same instant). The test checks it against the circle's geometry differentiated numerically.
+**Lever arm.** The model places the BNO085 on the front axle, 0.36 m ahead of base_link (the rear axle). This is car 1's assumed position; car 2's position has not been measured ([car 2 profile](../racerbot_car/cars/rb2/imu/car.yaml)).
+
+On a turning car a point ahead of the axle also accelerates towards the turn centre. This shows up on its x axis as `−yaw_rate² × 0.36`: about −0.36 m/s² at 1 rad/s, read as braking in every corner. `accel_at_base_link` adds it back, using the BNO's own gyro. The test checks it against the circle's geometry differentiated numerically.
 
 **Gravity check.** Each IMU's z acceleration is averaged (1 s time constant). Under 0.7 g, or before 10 samples, that IMU is not used at all. An upside-down IMU reads −9.8, and its gyro reads yaw rate with the wrong sign. Averaged in, it would cancel the good gyro and report the car driving straight.
 
@@ -349,23 +373,27 @@ output = clamp(v, z - max_divergence, z + max_divergence)
 
 ## Known limits
 
-- **Acceleration is measured where the IMU sits, not at the car's centre.** In a turn, an IMU off-centre also feels centripetal acceleration. The VESC is about 9 cm left of centre. Yaw rate is the same everywhere on a rigid car, so it's unaffected. `/imu/*` carries the acceleration as measured. The full lever-arm correction lives in `racer_imu`'s `CenterFuser` and isn't ported here. `vehicle_state_node` corrects only what it uses: the BNO's forward axis.
+- **Acceleration is measured where the IMU sits, not at the car's centre.** In a turn, an IMU off-centre also feels centripetal acceleration. Car 2's VESC is about 9 cm left of centre ([profile](../racerbot_car/cars/rb2/imu/car.yaml)). Yaw rate is the same everywhere on a rigid car, so it's unaffected.
+
+  `/imu/*` carries the acceleration as measured. The full lever-arm correction lives in `racer_imu`'s `CenterFuser` and isn't ported here. `vehicle_state_node` corrects only what it uses: the BNO's forward axis.
 - **VESC samples are timestamped when they arrive, at 50 Hz.** `vesc_driver_node` polls every 20 ms and stamps each reply with the time it was received, so every reading is late by the serial round-trip. The BNO085 path uses the sensor's own clock, mapped onto ROS time.
 - **No orientation is published.** The VESC's own orientation estimate is in board axes and is dropped. The BNO085's quaternion is kept only on `/imu/bno/raw`.
 - **The startup bias needs `/odom`.** Unknown wheel speed counts as moving. Without `vesc_to_odom_node` the bias never completes, and the node says so every 5 s.
-- **Gyro odometry is untested on a moving car.** On 2026-10-24 it passed two checks, both on an isolated ROS domain:
+- **Gyro odometry was untested on a moving car as of 2026-10-24.** On car 1 it passed two checks, both on an isolated ROS domain:
   - a fake car on a circle: heading from the gyro, the tf2 chain exact, the two-parents guard fired;
   - parked, with the real LiDAR, real BNO and real `slam_toolbox` on `odom_imu`: map built, `map → base_link` resolved, 0.009° of gyro drift in 45 s.
 
   The first moving test is the A/B in [docs/launchstart.md](../../docs/launchstart.md#testing-the-imu-in-mapping-ab).
-- **The lap counter still counts turning in `odom`**, the steering model's frame, even with `gyro_odom:=true`. That keeps the A/B to one difference. Switching it to `odom_imu` (`auto_map_race.yaml` `odom_frame`) would make its 300° gate exact; do it after the A/B.
+- **The lap counter previously counted turning in `odom`**, the steering model's frame, even with `gyro_odom:=true`. See the current mapping workflow in [run-diagnostics.md](../../docs/run-diagnostics.md#when-mapping-fails-the-tools-in-order) for the odometry-frame check.
 - **Not yet driven on.** As of 2026-10-24, on car 1:
   - `vehicle_state_node` passed a static topic check on an isolated ROS domain, against a fake car on a steady circle: speed exact, angle matching the closed form.
   - `vehicle_state_launch.py` ran against the real BNO085 on the bench: 250 Hz, startup bias removed, gravity check passed.
   - Nothing has been driven on yet. Do the hand checks above before trusting any of it.
 - **Its tuning is reasoned, not fitted.** `sigma_accel`, `slip_gate` and the rest come from the sensors' specs and synthetic tests, not car data. Record some runs with `record_bag:=true` and check them before trusting the numbers.
 - **Car 1's VESC IMU mount and calibration are car 2's.** imu-calibration's `car.yaml` still holds car 2's `rpy_deg` and `vesc_calib.json` for the VESC. So `vehicle_state_node` uses only the VESC's yaw rate, which survives that because both boards lie flat, and the gravity check would catch one that doesn't. It does not use the VESC's accelerometer. Redo `calibrate_imu.py --step mount` on car 1.
-- **The BNO085's mount yaw is not measured yet.** On 2026-10-24, parked on a level floor, the nominal mount read −0.41 m/s² forward and −0.89 m/s² sideways: about 2.4° of pitch and 5.2° of roll error. `rpy_deg` in imu-calibration's `car.yaml` is now `[92.44, 5.22, 90.11]`, which puts gravity at 0.00 / 0.00 / 9.76. Which way is *forward* can't be seen from gravity, so the yaw is still the nominal one: check it with the forward push in [the A/B test](../../docs/launchstart.md#testing-the-imu-in-mapping-ab), step 1.
+- **Car 1's BNO085 mount yaw was not measured.** On 2026-10-24, parked on a level floor, the nominal mount read −0.41 m/s² forward and −0.89 m/s² sideways: about 2.4° of pitch and 5.2° of roll error.
+
+  `rpy_deg` in imu-calibration's `car.yaml` was set to `[92.44, 5.22, 90.11]`, which puts gravity at 0.00 / 0.00 / 9.76. Forward cannot be seen from gravity, so the yaw is still nominal. Check it with the forward push in [the A/B test](../../docs/launchstart.md#testing-the-imu-in-mapping-ab), step 1.
 - **The angle is the path's, not the wheels'.** It assumes the rear wheels don't slide sideways (the kinematic bicycle model). In a rear-wheel slide the car yaws faster than its wheels point, and the reported angle reads high.
 
 <details>
@@ -381,7 +409,7 @@ gyro_car = R @ (gyro - (gyro_bias - radians(device_offsets.gyro_deg_s))) - start
 - `A_inv`, `acc_bias`, `gyro_bias` come from `calib/<imu>_calib.json`. That's an ellipsoid fit of the accelerometer over 12 static poses, and the gyro mean while still.
 - `device_offsets` is the part of the bias the VESC already subtracts itself (VESC Tool → App Settings → IMU). `acc_bias`/`gyro_bias` are always the **total** bias, so only the remainder is removed and nothing is corrected twice. A file without `device_offsets` means the device removes nothing.
 - `R = Rz(yaw) · Ry(pitch) · Rx(roll)` from `imus.<imu>.rpy_deg` in `car.yaml`. This is Z-Y-X order, like ROS/tf, and maps sensor axes to car axes.
-- The calib path in `car.yaml` is relative to the repo root, the parent of `config/`.
+- The calib path in `car.yaml` is resolved relative to the mount file first, then the calibration code root.
 - A missing calib file gives an identity calibration. The node logs `identity (no calibration file)`, and the mount rotation is still applied. A file that exists but is malformed (missing key, non-3×3 or non-finite `A_inv`) stops the node instead.
 
 This must stay identical to `racer_imu.calibration.ImuCalibration.apply` followed by `racer_imu.frames` rotation. `test_matches_racer_imu_on_its_real_calibration_file` checks it against the real repo whenever it's present:
@@ -414,12 +442,12 @@ Source ROS first and give the tests their own domain (`export ROS_DOMAIN_ID=79 R
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Node exits with `car.yaml not found` | `racer_imu_root` doesn't point at the calibration | Leave it at its default (`tools/imu_calibration/` in this workspace), or pass `racer_imu_root:=...` |
+| Node exits with `Expected IMU calibration at ...` | The selected car's mount file is missing | Check `RACERBOT_CAR`, `RACERBOT_CARS_DIR` and that car's `imu/car.yaml` |
 | `startup gyro bias removed` never appears | car moving, or no `/odom` | Keep it still; check `ros2 topic hz /odom` |
 | Warning: all zeros | VESC IMU disabled | VESC Tool → App Settings → IMU, sample rate > 0 |
 | Turning left gives negative `z` | wrong `rpy_deg` for this IMU in `car.yaml` | Redo the mount step in imu-calibration (`tools/calibrate_imu.py --step mount`) |
 | `ModuleNotFoundError: racer_imu` with `bno_port` set | repo missing at `racer_imu_root` | Same as the first row |
-| `no BNO085 data` (car 2) | wrong port, or the MCU isn't streaming | Check `ls /dev/ttyACM*`. The VESC is usually `ttyACM0`. |
+| `no BNO085 data` (car 2, former USB microcontroller setup) | wrong port, or the MCU isn't streaming | Check `ls /dev/ttyACM*`. The VESC is usually `ttyACM0`. |
 | `no BNO085 data ... retrying every 2 s` (car 1) | the I2C bridge isn't running or can't reach the sensor | Look for `bno_i2c_bridge` errors above it; check `i2cdetect -y -r 7` shows `4a`. It reconnects by itself once the bridge works. |
 | vehicle_state: `no usable bno accelerometer: /odom/fused is exactly the wheel speed` | no `/imu/bno/data`, or it failed the gravity check | Check `ros2 topic hz /imu/bno/data`, then the `mounted wrong` warning |
 | vehicle_state: `... mounted wrong ...` | that IMU's z doesn't read about +9.8 at rest | Fix `rpy_deg` in imu-calibration's `car.yaml` (mount step) |

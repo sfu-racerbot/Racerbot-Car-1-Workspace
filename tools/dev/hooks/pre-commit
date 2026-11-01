@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+limit=$((95 * 1024 * 1024))
+failed=0
+while IFS= read -r -d '' path; do
+    size=$(git cat-file -s ":$path")
+    if (( size > limit )); then
+        printf '%s: %d.%02d MB exceeds the 95 MB limit\n' "$path" \
+            "$((size / 1048576))" "$((size % 1048576 * 100 / 1048576))" >&2
+        failed=1
+    fi
+done < <(git diff --cached --name-only --diff-filter=AM -z)
+exit "$failed"

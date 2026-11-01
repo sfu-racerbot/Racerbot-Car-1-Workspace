@@ -63,13 +63,13 @@ def race_command(run_dir, steering_law: str = 'pure_pursuit') -> str:
 
 
 def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
-                  start_ok: bool = True) -> str:
+                  start_ok: bool = True, posegraph: bool = True) -> str:
     """The full block printed at the end of a mapping-only run."""
     run_dir = Path(run_dir)
     lines = [RULE, f'MAPPING FINISHED.  Saved in: {run_dir}', RULE]
     saved = []
     if map_ok:
-        saved.append('map.yaml + map.pgm (the map), posegraph (SLAM pose graph)')
+        saved.append('map.yaml + map.pgm (the map)' + (', posegraph (SLAM pose graph)' if posegraph else ''))
     if raceline_ok:
         saved.append('raceline_profiled.csv (racing line with speeds)')
     if start_ok:
@@ -107,6 +107,9 @@ def commands_text(run_dir, raceline_ok: bool = True, map_ok: bool = True,
         'Terminal 1 -- hardware: the bringup you mapped with, still running.',
         'If you closed it, start it again:',
         '  ros2 launch f1tenth_stack bringup_launch.py',
+        '',
+        'Terminal 2 -- check the car is on the spot. This must print GO:',
+        f'  ros2 run pure_pursuit check_start --ros-args -p run_dir:={run_dir}',
         '',
         'Terminal 2 -- pick ONE, then hold LB to drive:',
     ]

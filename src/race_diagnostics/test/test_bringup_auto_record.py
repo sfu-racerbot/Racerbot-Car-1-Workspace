@@ -110,7 +110,8 @@ def _bringup_include(record):
     return includes[0], context
 
 
-def test_real_bringup_starts_the_recorder_by_default():
+def test_real_bringup_starts_the_recorder_by_default(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     include, context = _bringup_include('true')
     assert include.condition.evaluate(context) is True
     included = include.launch_description_source.get_launch_description(context)
@@ -121,6 +122,7 @@ def test_real_bringup_starts_the_recorder_by_default():
     assert ('race_diagnostics', 'auto_record') in nodes
 
 
-def test_real_bringup_record_false_leaves_the_recorder_out():
+def test_real_bringup_record_false_leaves_the_recorder_out(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     include, context = _bringup_include('false')
     assert include.condition.evaluate(context) is False

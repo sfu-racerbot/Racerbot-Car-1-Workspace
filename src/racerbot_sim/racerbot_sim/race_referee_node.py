@@ -15,6 +15,7 @@ from std_msgs.msg import String
 from racerbot_sim import tracks
 from racerbot_sim.referee import Referee, format_table
 from racerbot_sim.sim_bridge import SimConfig
+from racerbot_car.paths import data_dir
 
 
 class RaceRefereeNode(Node):
@@ -35,8 +36,9 @@ class RaceRefereeNode(Node):
         if self.cars < 1:
             raise ValueError('controlled_cars must be positive')
         self.centerline = tracks.centerline_for(self.track, self.track_directory)
-        self.output_dir = Path(os.path.expanduser(str(value('output_dir')) or
-            f'~/.ros/racerbot_sim/races/{datetime.now(timezone.utc):%Y%m%d-%H%M%S}'))
+        self.output_dir = (Path(str(value('output_dir'))).expanduser()
+                           if value('output_dir') else data_dir('racerbot_sim') / 'races' /
+                           f'{datetime.now(timezone.utc):%Y%m%d-%H%M%S}')
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.reverse = bool(value('reverse'))
         self.laps = float(value('laps'))

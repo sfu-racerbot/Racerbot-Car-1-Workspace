@@ -448,7 +448,7 @@ def test_matches_racer_imu_on_its_real_calibration_file(tmp_path, with_device_of
         sys.path.remove(str(RACER_IMU_ROOT))
     assert racer_G == G
 
-    car_yaml = RACER_IMU_ROOT / 'config' / 'car.yaml'
+    car_yaml = Path(__file__).resolve().parents[3] / 'src/racerbot_car/cars/rb1/imu/car.yaml'
     config = load_config(car_yaml)
     ext = config.imus['vesc']
     calib_path = config.resolve(ext.extra['calib'])

@@ -12,7 +12,7 @@ Each run: car still on the start mark -> push it straight, by hand, exactly `dis
 let go. Push at walking pace: very slow pushes can be undercounted by the sensorless motor observer.
 For more runs, push it back the same distance (direction doesn't matter, the size of the count does).
 Run 1 must be FORWARD: its sign decides the sign of the gain (so forward reads as positive speed).
---write puts the averaged gain into config/car.yaml.
+--write puts the averaged gain into the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml).
 """
 import argparse
 import re
@@ -82,7 +82,7 @@ def main():
     ap.add_argument("--distance", type=float, required=True, help="how far you push it each run [m]")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--timeout", type=float, default=90.0, help="per run [s]")
-    ap.add_argument("--write", action="store_true", help="store the result in config/car.yaml")
+    ap.add_argument("--write", action="store_true", help="store the result in the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml)")
     a = ap.parse_args()
     cfg, sources, sim = setup(a, only=["vesc"])
     if not sources:

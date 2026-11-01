@@ -70,7 +70,8 @@ from imu_bridge.vehicle_state import steering_from_yaw_rate  # noqa: E402
 from recognition import false_movers, moving_track_ids  # noqa: E402
 from racerbot_sim import tracks as sim_tracks  # noqa: E402
 from run_analysis import weave  # noqa: E402
-from sim_fidelity import CALIBRATION, PROFILES  # noqa: E402
+from sim_fidelity import calibration_for_car, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
 CONTROL_DT = 0.025
@@ -106,11 +107,6 @@ def map_tracks() -> tuple:
     if not catalog.exists():
         return ()
     return tuple(sorted(yaml.safe_load(catalog.read_text()) or {}))
-
-# Parameters: exactly what the car loads (gap_follow.yaml, via
-# gap_mirror.node_params), every one overridable with --set name=value.
-DEFAULTS = node_params()
-
 
 # Indoor layouts already written by this process (or by a parent process
 # before it forked workers -- see sweep_gap.py), so parallel runs never race
@@ -149,9 +145,11 @@ def track_map_yaml(track_spec: str):
     return Path(path).parent / f"{Path(path).name}_map.yaml"
 
 
-def make_plant(track_spec: str, seed: int) -> FidelityPlant:
+def make_plant(track_spec: str, seed: int, calibration=None, car_id=None) -> FidelityPlant:
     """Build a fidelity plant for a gym circuit name or an indoor layout."""
-    components = env_components(PROFILES[DEFAULT_PROFILE], CALIBRATION)
+    # The selected car's own calibration unless one (e.g. with a floor profile) is given.
+    calibration = calibration if calibration is not None else calibration_for_car(car_id)
+    components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     map_name = track_path(track_spec)
     config = EnvConfig(
         seed=seed,
@@ -172,7 +170,7 @@ def make_plant(track_spec: str, seed: int) -> FidelityPlant:
         render_enabled=False,
     )
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
-    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], 1, seed, CONTROL_DT, CALIBRATION)
+    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], 1, seed, CONTROL_DT, calibration)
 
 
 def _reverse_laps(plant) -> float:
@@ -184,10 +182,10 @@ def _reverse_laps(plant) -> float:
 
 
 def run_track(track: str, params: dict, seed: int, timeout_s: float,
-              reverse: bool = False) -> dict:
+              reverse: bool = False, calibration=None, car_id=None) -> dict:
     """One lap of ``track``. ``reverse`` starts facing backwards, so the
     indoor layouts (all counter-clockwise) get exercised with right turns."""
-    plant = make_plant(track, seed)
+    plant = make_plant(track, seed, calibration=calibration, car_id=car_id)
     line = plant.env.unwrapped.track.raceline
     start = np.array([[line.xs[0], line.ys[0],
                        line.yaws[0] + (math.pi if reverse else 0.0)]], dtype=float)
@@ -197,9 +195,9 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     class _Lidar:
         pass
     lid = _Lidar()
-    lid.angle_min = float(-components_half_fov())
-    lid.angle_increment = float(components_increment())
-    lid.range_min = float(components_range_min())
+    lid.angle_min = float(-components_half_fov(car_id))
+    lid.angle_increment = float(components_increment(car_id))
+    lid.range_min = float(components_range_min(car_id))
     ctrl = GapController(params, lid)
 
     max_steps = int(math.ceil(timeout_s / CONTROL_DT))
@@ -336,27 +334,21 @@ def run_track(track: str, params: dict, seed: int, timeout_s: float,
     return result
 
 
-_COMPONENTS_CACHE = None
+def _components(car_id=None):
+    return env_components(PROFILES[DEFAULT_PROFILE], calibration_for_car(car_id))
 
 
-def _components():
-    global _COMPONENTS_CACHE
-    if _COMPONENTS_CACHE is None:
-        _COMPONENTS_CACHE = env_components(PROFILES[DEFAULT_PROFILE], CALIBRATION)
-    return _COMPONENTS_CACHE
+def components_half_fov(car_id=None):
+    return -_components(car_id)["lidar_config"].angle_min
 
 
-def components_half_fov():
-    return -_components()["lidar_config"].angle_min
-
-
-def components_increment():
-    cfg = _components()["lidar_config"]
+def components_increment(car_id=None):
+    cfg = _components(car_id)["lidar_config"]
     return (cfg.angle_max - cfg.angle_min) / (cfg.num_beams - 1) if hasattr(cfg, "num_beams") else (cfg.angle_max - cfg.angle_min) / 1080.0
 
 
-def components_range_min():
-    return _components()["lidar_config"].range_min
+def components_range_min(car_id=None):
+    return _components(car_id)["lidar_config"].range_min
 
 
 def corridor_offset(scan, lid):
@@ -419,16 +411,18 @@ def select_tracks(spec: str) -> list:
     return [spec]
 
 
-def parse_set(values):
-    params = dict(DEFAULTS)
+def parse_set(values, car_id=None):
+    """Load the selected car's parameters, then apply --set overrides."""
+    defaults = node_params(car_id=car_id)
+    params = dict(defaults)
     for item in values or []:
         if "=" not in item:
             raise SystemExit(f"--set expects name=value, got {item!r}")
         name, _, raw = item.partition("=")
         name = name.strip()
-        if name not in DEFAULTS:
+        if name not in defaults:
             raise SystemExit(f"unknown parameter {name!r}")
-        default = DEFAULTS[name]
+        default = defaults[name]
         if isinstance(default, bool):
             params[name] = raw.strip().lower() in ("1", "true", "yes", "on")
         elif isinstance(default, str):
@@ -439,13 +433,14 @@ def parse_set(values):
 
 
 def _job(job):
-    track, seed, params, timeout, reverse = job
-    return run_track(track, params, seed, timeout, reverse)
+    track, seed, params, timeout, reverse, car_id, calibration = job
+    return run_track(track, params, seed, timeout, reverse, calibration=calibration, car_id=car_id)
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(parser)
     parser.add_argument("--track", default="asb_10000",
                         help="track name, 'indoor', 'narrow', 'maps', 'gym', 'all', "
                              "or a comma-separated list of any of these")
@@ -461,13 +456,19 @@ def main(argv=None) -> int:
     parser.add_argument("--output", help="write JSON results here")
     parser.add_argument("--reverse", action="store_true",
                         help="drive each track the other way round")
+    parser.add_argument("--friction", type=float,
+                        help="floor friction for this run (default: the calibration's)")
+    parser.add_argument("--floor", choices=sorted(FLOORS),
+                        help="a measured floor profile (default: the plain calibration)")
     args = parser.parse_args(argv)
+    car_id = car_from_args(parser, args)
 
     selected = select_tracks(args.track)
-    params = parse_set(args.set)
+    params = parse_set(args.set, car_id)
     for track in selected:
         track_path(track)  # build the layouts before any worker process forks
-    jobs = [(track, args.seed + k, params, args.timeout, args.reverse)
+    calibration = with_friction(args.friction, with_floor(args.floor, calibration_for_car(car_id)))
+    jobs = [(track, args.seed + k, params, args.timeout, args.reverse, car_id, calibration)
             for track in selected for k in range(args.seeds)]
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:

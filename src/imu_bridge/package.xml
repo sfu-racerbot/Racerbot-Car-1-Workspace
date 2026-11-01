@@ -20,6 +20,7 @@
   <depend>python3-serial</depend>
 
   <exec_depend>launch</exec_depend>
+  <exec_depend>racerbot_car</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>robot_localization</exec_depend>
 

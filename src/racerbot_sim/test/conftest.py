@@ -1,10 +1,22 @@
 """Fail before ROS test setup can create a publisher or start a process."""
 import os
+from pathlib import Path
+import sys
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'racerbot_car'))
+
 
 PRODUCTION_DRIVE_TOPICS = {'/drive', '/car2/drive', '/ackermann_cmd', '/car2/ackermann_cmd'}
+
+
+@pytest.fixture(autouse=True)
+def simulated_car_identity(monkeypatch):
+    # Tests run on development hosts with no Jetson serial. Production refuses
+    # that ambiguity; explicitly select a physical model for these fixtures.
+    if not os.environ.get('RACERBOT_CAR'):
+        monkeypatch.setenv('RACERBOT_CAR', 'rb1')
 
 
 def require_test_drive_topic(topic):

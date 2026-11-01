@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 import copy
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -28,6 +29,9 @@ import tornado.ioloop
 import tornado.web
 import tornado.websocket
 import yaml
+from racerbot_car import identity, paths
+from racerbot_car.identity import CarMismatchError, UnknownCarError
+from racerbot_car.layers import MissingCalibrationError, effective_values, layered
 
 from odom_calibration import calibration_math
 from odom_calibration import steering_chain
@@ -331,6 +335,7 @@ class OdomCalibrationNode(Node):
         self.declare_parameter('steering_axis', 3)
         self.declare_parameter('vesc_yaml_path', '')
         self.declare_parameter('joy_teleop_yaml_path', '')
+        self.declare_parameter('calibration_paths_are_overlays', False)
         self.declare_parameter('rear_track_m', 0.27)
         self.declare_parameter('allow_apply', True)
         self.declare_parameter('planner_max_steering_rad', 0.349)
@@ -366,9 +371,12 @@ class OdomCalibrationNode(Node):
             'servo_command_topic').value
         self.allow_apply = bool(self.get_parameter('allow_apply').value)
         self.vesc_yaml_path = self._resolve_config(
-            self.get_parameter('vesc_yaml_path').value, 'vesc.yaml')
+            self.get_parameter('vesc_yaml_path').value, 'vesc.yaml', self.get_logger().warning)
         self.joy_teleop_yaml_path = self._resolve_config(
-            self.get_parameter('joy_teleop_yaml_path').value, 'joy_teleop.yaml')
+            self.get_parameter('joy_teleop_yaml_path').value, 'joy_teleop.yaml',
+            self.get_logger().warning)
+        self.calibration_paths_are_overlays = bool(
+            self.get_parameter('calibration_paths_are_overlays').value)
         self.vehicle_settings = {
             'model': str(self.get_parameter('vehicle_model').value),
             'physical_width_m': float(
@@ -674,27 +682,41 @@ class OdomCalibrationNode(Node):
             self._schedule_broadcast()
 
     @staticmethod
-    def _resolve_config(configured, name):
-        """The f1tenth_stack config file the car really loads, in src/.
-
-        With ``colcon build --symlink-install`` the installed config is a
-        symlink into src/, so resolving it lands on the git-tracked file.
-        """
+    def _resolve_config(configured, name, warn=None):
+        """Resolve an explicit target or the current car's calibration overlay."""
         if configured:
             return Path(os.path.expanduser(configured)).resolve()
         try:
-            share = get_package_share_directory('f1tenth_stack')
-        except Exception:  # Package not built: apply stays unavailable.
+            car = identity.current_car_id()
+            target = (paths.cars_dir() / car / 'calibration' / name).resolve()
+            if not target.is_file():
+                raise FileNotFoundError(f'Calibration overlay not found: {target}')
+            return target
+        except (UnknownCarError, CarMismatchError, OSError, ValueError) as exc:
+            (warn or logging.getLogger(__name__).warning)(str(exc))
             return None
-        return Path(share, 'config', name).resolve()
+
+    def _is_calibration_overlay(self, path):
+        if self.calibration_paths_are_overlays:
+            return True
+        directory = paths.cars_dir()
+        target = Path(path).resolve()
+        return any(target.is_relative_to((directory / car / 'calibration').resolve())
+                   for car in identity.known_car_ids(directory))
 
     def _file_stick_scale(self):
         if self.joy_teleop_yaml_path is None:
             return None
         try:
-            return teleop_yaml.read_scale(
-                self.joy_teleop_yaml_path.read_text(encoding='utf-8'))
-        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+            params = effective_values(layered(str(self.joy_teleop_yaml_path),
+                                              'joy_teleop.yaml'), 'joy_teleop')
+            value = params[STICK_SCALE_PARAMETER]
+            document = {'joy_teleop': {'ros__parameters': {
+                teleop_yaml.PROFILE: {'axis_mappings': {
+                    teleop_yaml.MAPPING: {'scale': value}}}}}}
+            return teleop_yaml.read_scale(yaml.safe_dump(document))
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError,
+                MissingCalibrationError, UnknownCarError, CarMismatchError) as exc:
             self.get_logger().warning(
                 f'Cannot read the steering scale from {self.joy_teleop_yaml_path}: {exc}')
             return None
@@ -896,10 +918,12 @@ class OdomCalibrationNode(Node):
         try:
             if vesc_updates:
                 results.append(vesc_yaml.apply(
-                    self.vesc_yaml_path, vesc_updates, backups, label=label))
+                    self.vesc_yaml_path, vesc_updates, backups, label=label,
+                    target_is_overlay=self._is_calibration_overlay(self.vesc_yaml_path)))
             if scale is not None:
                 results.append(teleop_yaml.apply(
-                    self.joy_teleop_yaml_path, scale, backups, label=label))
+                    self.joy_teleop_yaml_path, scale, backups, label=label,
+                    target_is_overlay=self._is_calibration_overlay(self.joy_teleop_yaml_path)))
         except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
             # One write is all or nothing: put back what already landed.
             for result in results:

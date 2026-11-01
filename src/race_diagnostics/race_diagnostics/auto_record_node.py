@@ -4,7 +4,7 @@ auto_record_node.py
 Bringup's automatic run recorder. Every f1tenth_stack bringup starts it
 (pass `record:=false` to leave it out). While an algorithm runs -- any node
 publishing /drive or another trigger topic in config/auto_record.yaml, ours
-or team A's -- it records into a new ~/racerbot-ws/data/racerbot_runs/<ts>/,
+or team A's -- it records into a new ~/racerbot-ws/data/<car>/racerbot_runs/<time>/,
 the same layout a hand-started recording writes, and stops when the algorithm
 goes. It never records beside another recorder.
 
@@ -43,6 +43,7 @@ from rclpy.signals import SignalHandlerOptions
 import yaml
 
 from race_diagnostics import auto_record as ar
+from racerbot_car.paths import data_dir
 from race_diagnostics.recording import bag_record_command, DEFAULT_TOPICS
 
 
@@ -90,7 +91,7 @@ class AutoRecordNode(Node):
     def __init__(self):
         super().__init__('auto_record')
         p = self.declare_parameter
-        p('output_directory', '~/racerbot-ws/data/racerbot_runs')
+        p('output_directory', '')
         p('trigger_topics', ['/drive'])
         p('ignore_publishers', ['ackermann_mux'])
         p('other_recorders', ['race_diag_node', 'rosbag2_recorder*'])
@@ -106,7 +107,8 @@ class AutoRecordNode(Node):
         def value(name):
             return self.get_parameter(name).value
 
-        self.output_directory = Path(os.path.expanduser(value('output_directory')))
+        self.output_directory = (Path(value('output_directory')).expanduser()
+                                 if value('output_directory') else data_dir('racerbot_runs'))
         self.record_bag = bool(value('record_bag'))
         self.topics = str(value('topics')).split() or list(DEFAULT_TOPICS)
         self.live_topics = [topic for topic in value('live_topics') if topic in self.topics]

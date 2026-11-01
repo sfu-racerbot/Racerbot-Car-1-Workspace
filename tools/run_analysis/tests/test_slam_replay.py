@@ -10,7 +10,7 @@ brief's values or a file named by path; "run" = a value read from the recorded r
 ~/.ros/racerbot_runs/20261026-194514. The fixtures copy that run's file shapes, not its folder.
 
 The process table is a fake /proc under tmp_path (PROC_ROOT) and nothing is written under the
-real ~/.ros: RUNS_ROOT is redirected too. Popen is replaced with a trap wherever a test must
+real data: RACERBOT_WS is redirected too. Popen is replaced with a trap wherever a test must
 prove that nothing was started.
 """
 import os
@@ -372,24 +372,24 @@ def test_main_refuses_while_drivers_run(tmp_path, monkeypatch, capsys):
     proc.mkdir()
     _proc(proc, '4242', URG)
     monkeypatch.setattr(slam_replay, 'PROC_ROOT', proc)
-    monkeypatch.setattr(slam_replay, 'RUNS_ROOT', tmp_path / 'racerbot_runs')
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     _trap_popen(monkeypatch)
     run = make_run(tmp_path / 'src')
     assert slam_replay.main([str(run), '--odom', 'odom_imu']) == 2
     assert 'urg_node' in capsys.readouterr().err
-    assert not (tmp_path / 'racerbot_runs').exists()
+    assert not (tmp_path / 'data/rb1/racerbot_runs').exists()
 
 
 def test_main_refuses_a_run_that_cannot_be_replayed(tmp_path, monkeypatch, capsys):
     # With no driver running, a run without /odom/imu is refused with code 2, and no folder is made.
     monkeypatch.setattr(slam_replay, 'PROC_ROOT', tmp_path / 'empty_proc')
     (tmp_path / 'empty_proc').mkdir()
-    monkeypatch.setattr(slam_replay, 'RUNS_ROOT', tmp_path / 'racerbot_runs')
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     _trap_popen(monkeypatch)
     run = make_run(tmp_path / 'src', topics=['/scan', '/tf_static', '/odom'])
     assert slam_replay.main([str(run), '--odom', 'odom_imu']) == 2
     assert '/odom/imu' in capsys.readouterr().err
-    assert not (tmp_path / 'racerbot_runs').exists()
+    assert not (tmp_path / 'data/rb1/racerbot_runs').exists()
 
 
 @pytest.mark.parametrize('rate', ['0', '-1', 'nan', 'fast'])

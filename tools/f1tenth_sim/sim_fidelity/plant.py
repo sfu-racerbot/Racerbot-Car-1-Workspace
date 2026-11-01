@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 from .actuation import SteeringServo, TransportDelay
-from .calibration import CALIBRATION, CarCalibration
-from .grip import GripEnvelope, longitudinal_accel
+from .calibration import CarCalibration, calibration_for_car
+from .grip import GripEnvelope, ProgressiveGrip, longitudinal_accel
 from .sensing import OdomSensor, PoseSensor, ScanSensor
 
 
@@ -112,16 +113,18 @@ DEFAULT_PROFILE = "car"
 
 def env_components(
     profile: FidelityProfile,
-    calibration: CarCalibration = CALIBRATION,
+    calibration: CarCalibration | None = None,
     *,
     legacy_beams: int = 819,
     legacy_wheelbase: float = 0.36,
+    car_id: str | None = None,
 ):
     """Build the gym config pieces this profile needs.
 
     Returns a dict with ``params``, ``control_config``, ``lidar_config`` and
     ``collision_check``, ready to drop into an ``EnvConfig``.
     """
+    calibration = calibration or calibration_for_car(car_id)
     from f1tenth_gym.envs.action import SteerActionType
     from f1tenth_gym.envs.collision_models import CollisionCheckMode
     from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
@@ -228,9 +231,11 @@ class FidelityPlant:
         num_agents: int,
         seed: int,
         control_dt: float,
-        calibration: CarCalibration = CALIBRATION,
+        calibration: CarCalibration | None = None,
         degrade_agents: frozenset[int] = frozenset({0}),
+        *, car_id: str | None = None,
     ):
+        calibration = calibration or calibration_for_car(car_id)
         self.env = env
         self.profile = profile
         self.calibration = calibration
@@ -245,13 +250,21 @@ class FidelityPlant:
         self.degrade_agents = degrade_agents
 
         self.grip = [
-            GripEnvelope(
+            ProgressiveGrip(calibration.grip_curve, calibration.wheelbase)
+            if calibration.grip_curve is not None
+            else GripEnvelope(
                 friction_accel_limit=calibration.friction_accel_limit,
                 wheelbase=calibration.wheelbase,
                 longitudinal_coupling=calibration.longitudinal_grip_coupling,
             )
             for _ in range(num_agents)
         ]
+        self._linkage = None
+        if calibration.steering_linkage is not None:
+            commands, angles = zip(*calibration.steering_linkage)
+            if list(commands) != sorted(commands) or list(angles) != sorted(angles):
+                raise ValueError("steering_linkage must ascend in both columns")
+            self._linkage = (np.array(commands), np.array(angles))
         self.servos = [
             SteeringServo(
                 gain=calibration.steering_servo_gain,
@@ -284,13 +297,15 @@ class FidelityPlant:
                 )
             )
             self.odom_sensors.append(
-                OdomSensor(calibration.odom_speed_noise, rng)
+                OdomSensor(calibration.odom_speed_noise, rng, calibration.odom_speed_scale)
             )
             self.scan_sensors.append(
                 ScanSensor(
                     calibration.lidar_delay_ticks,
                     calibration.lidar_dropout_rate,
                     rng,
+                    calibration.lidar_noise_per_metre,
+                    calibration.lidar_self_hits,
                 )
             )
 
@@ -309,6 +324,32 @@ class FidelityPlant:
         self._collision = collision
         self._get_vertices = get_vertices
         self._distance_transform = distance_transform
+        self._contact_dt = self._load_contact_walls()
+
+    def _load_contact_walls(self):
+        """A distance field of ``<map>_contact.png``, if the track has one; else None.
+
+        Some maps keep beams and walls apart: real scans pass through gaps that a car
+        cannot (scan_map.py), so contact is judged on walls that stay closed. The array
+        is laid out as gym lays out the beam map, by comparing the two images.
+        """
+        map_name = getattr(self.env.unwrapped, "map", None)
+        if not isinstance(map_name, str):
+            return None
+        contact = Path(map_name + "_contact.png")
+        if not contact.exists():
+            return None
+        from PIL import Image
+        from scipy.ndimage import distance_transform_edt
+        scan_sim = self.env.unwrapped.sim.scan_sims[0]
+        walls = np.array(Image.open(contact).convert("L")) > 128
+        beams = np.array(Image.open(map_name + ".png").convert("L")) > 128
+        if not np.array_equal(beams[::-1], np.asarray(scan_sim.map_img) > 0):
+            if not np.array_equal(beams, np.asarray(scan_sim.map_img) > 0):
+                raise ValueError(f"cannot tell how gym laid out {map_name}.png")
+        else:
+            walls = walls[::-1]
+        return distance_transform_edt(walls) * scan_sim.map_resolution
 
     # -- lifecycle -------------------------------------------------------
 
@@ -360,7 +401,10 @@ class FidelityPlant:
                 speed = min(
                     max(speed, self.calibration.speed_min),
                     self.calibration.speed_max,
-                )
+                ) * self.calibration.speed_command_scale
+
+            if self._linkage is not None:
+                steering = float(np.interp(steering, *self._linkage))
 
             if self.profile.speed_loop_model:
                 speed = self._measured_speed_loop(speed, measured_speed)
@@ -433,18 +477,24 @@ class FidelityPlant:
         if scan_sim.dt is None:
             return set()
         touching: set[int] = set()
+        field = scan_sim.dt if self._contact_dt is None else self._contact_dt
         for index in range(self.num_agents):
             corners = self._chassis_outline(index)
             # Corners plus edge midpoints: a barrier can intrude on an edge
             # without containing either corner that bounds it.
             samples = np.vstack((corners, (corners + np.roll(corners, -1, 0)) / 2.0))
+            if self._contact_dt is not None:
+                # Those walls may be one cell thin; sample closer than the gap between
+                # midpoints, so a body cannot straddle one.
+                ahead = np.roll(corners, -1, 0)
+                samples = np.vstack([samples] + [corners + (ahead - corners) * f for f in (0.125, 0.25, 0.375, 0.625, 0.75, 0.875)])
             for x, y in samples:
                 clearance = self._distance_transform(
                     float(x), float(y),
                     scan_sim.orig_x, scan_sim.orig_y,
                     scan_sim.orig_c, scan_sim.orig_s,
                     scan_sim.map_height, scan_sim.map_width,
-                    scan_sim.map_resolution, scan_sim.dt,
+                    scan_sim.map_resolution, field,
                 )
                 if clearance <= 0.0:
                     touching.add(index)

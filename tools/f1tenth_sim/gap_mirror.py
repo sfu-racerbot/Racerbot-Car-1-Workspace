@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import sys
 
 import numpy as np
 import yaml
@@ -29,6 +30,8 @@ from gap_follow import opponent_tracking
 
 CONTROL_DT = 0.025
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'src' / 'racerbot_car'))
+from racerbot_car.layers import effective_config  # noqa: E402
 NODE_CONFIG = ROOT / "src" / "gap_follow" / "config" / "gap_follow.yaml"
 
 # Node parameters the mirror does not use (topics, deadman, intent, logging)
@@ -121,6 +124,8 @@ REQUIRED_PARAMS = frozenset((
     "enable_swept_clearance",
     "enable_ttc",
     "escape_creep_speed",
+    "aim_depth_bias",
+    "aim_depth_bias_fallback",
     "fallback_min_gap_distance",
     "forward_fov_deg",
     "forward_stop_clearance",
@@ -169,6 +174,7 @@ REQUIRED_PARAMS = frozenset((
     "opponent_beta",
     "opponent_min_hits",
     "opponent_max_misses",
+    "opponent_follow_floor",
     "opponent_moving_speed",
     "opponent_stopped_release_sec",
     "opponent_radius",
@@ -217,6 +223,8 @@ LEGACY_VALUES = {
     "braking_latency_sec": 0.0,
     "speed_hold_sec": 0.0,
     "steering_gain_speed_ref": 0.0,
+    "aim_depth_bias": 0.0,
+    "aim_depth_bias_fallback": 0.0,
     "narrow_corridor_speed": 1e9,  # off
     "narrow_corridor_clearance": 0.05,
     "open_corridor_clearance": 0.15,
@@ -251,15 +259,22 @@ LEGACY_VALUES = {
 }
 
 
-def node_params(config_path: Path = NODE_CONFIG, fill_legacy: bool = False) -> dict:
-    """gap_follow_node's ros__parameters from the shipped YAML, minus the
-    ones the mirror has no use for.
+def node_params(config_path: Path = NODE_CONFIG, fill_legacy: bool = False,
+                car_id: str | None = None) -> dict:
+    """Effective current config, or an explicit snapshot exactly as recorded.
+
+    The shipped path uses the selected car's overlays. A separate config path
+    is a historical input and is never overlaid. Remove only parameters the
+    mirror has no use for.
 
     Refuses a config that enables something the mirror does not model, so a
     simulator run can never quietly measure a different controller.
     """
-    data = yaml.safe_load(Path(config_path).read_text())
-    params = dict(data["gap_follow_node"]["ros__parameters"])
+    if Path(config_path).resolve() == NODE_CONFIG.resolve():
+        params = effective_config('gap_follow.yaml', 'gap_follow_node', car_id)
+    else:
+        data = yaml.safe_load(Path(config_path).read_text())
+        params = dict(data["gap_follow_node"]["ros__parameters"])
     if fill_legacy:
         for name, value in LEGACY_VALUES.items():
             if name not in params:
@@ -531,7 +546,8 @@ class GapController:
                 follow_cap, step * CONTROL_DT)
             follow_cap = min(follow_cap, alongside_cap)
             if held:
-                self.opponent_mode = "follow_memory"
+                self.opponent_mode = ("follow_memory" if alongside_cap == math.inf
+                                      else "follow")
                 tel["follow_cap"] = follow_cap
 
         if gap_start is None:
@@ -543,7 +559,8 @@ class GapController:
                                   else "ttc_escape")
 
         target_in_window = gap_logic.aim_within_gap(
-            processed, gap_start, gap_end, beam_angles)
+            processed, gap_start, gap_end, beam_angles,
+            p["aim_depth_bias_fallback"] if used_fallback else p["aim_depth_bias"])
         self.previous_target_idx = target_in_window
         target_angle = float(beam_angles[target_in_window])
         target_distance = float(processed[target_in_window])

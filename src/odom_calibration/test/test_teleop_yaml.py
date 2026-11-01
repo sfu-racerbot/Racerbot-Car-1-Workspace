@@ -15,14 +15,27 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from odom_calibration import teleop_yaml, vesc_yaml  # noqa: E402
+from racerbot_car.layers import effective_config
 
 REAL = (Path(__file__).resolve().parents[2]
         / 'f1tenth_system' / 'f1tenth_stack' / 'config' / 'joy_teleop.yaml')
 
 
 @pytest.fixture
-def original():
-    return REAL.read_text(encoding='utf-8')
+def effective_teleop(tmp_path):
+    scale = effective_config('joy_teleop.yaml', 'joy_teleop', 'rb1')[
+        'human_control.axis_mappings.drive-steering_angle.scale']
+    text = REAL.read_text(encoding='utf-8').replace(
+        '# per car: src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml',
+        f'scale: {scale}')
+    path = tmp_path / 'joy_teleop.yaml'
+    path.write_text(text, encoding='utf-8')
+    return path.read_text(encoding='utf-8')
+
+
+@pytest.fixture
+def original(effective_teleop):
+    return effective_teleop
 
 
 def _profiles(text):
@@ -62,7 +75,8 @@ def test_writes_only_the_human_control_steering_scale(original):
         [l for l in original.splitlines() if l.lstrip().startswith('#')]
 
 
-def test_the_default_profile_scale_is_never_touched(original):
+def test_the_default_profile_scale_is_never_touched(effective_teleop):
+    original = effective_teleop
     default_before = _profiles(original)['default']
     new = teleop_yaml.update_text(original, 0.3)
     assert _profiles(new)['default'] == default_before
@@ -89,7 +103,8 @@ def test_refuses_two_scale_lines(original):
         teleop_yaml.update_text(doubled, 0.4)
 
 
-def test_verify_catches_any_other_change(original):
+def test_verify_catches_any_other_change(effective_teleop):
+    original = effective_teleop
     new = teleop_yaml.update_text(original, 0.4)
     tampered = new.replace('deadman_buttons: [4]', 'deadman_buttons: [5]', 1)
     assert tampered != new
@@ -125,17 +140,55 @@ def test_apply_writes_nothing_when_refused(tmp_path, original):
 
 # --- servo limits in vesc.yaml -----------------------------------------------
 
-VESC = REAL.parent / 'vesc.yaml'
+@pytest.fixture
+def effective_vesc(tmp_path):
+    params = effective_config('vesc.yaml', '/**', 'rb1')
+    path = tmp_path / 'vesc.yaml'
+    path.write_text(yaml.safe_dump({'/**': {'ros__parameters': params}}), encoding='utf-8')
+    return path
 
 
-def test_servo_max_is_written_into_the_shared_block_only():
-    text = VESC.read_text(encoding='utf-8')
+def test_servo_max_is_written_into_the_shared_block_only(effective_vesc):
+    text = effective_vesc.read_text(encoding='utf-8')
     new = vesc_yaml.update_text(text, {'servo_max': 0.9})
     vesc_yaml.verify(text, new, {'servo_max': 0.9})
     assert yaml.safe_load(new)['/**']['ros__parameters']['servo_max'] == 0.9
     assert vesc_yaml.read_values(new, ('servo_max', 'servo_min'))['servo_max'] == 0.9
 
 
-def test_reading_calibration_values_does_not_return_the_limits():
-    values = vesc_yaml.read_values(VESC.read_text(encoding='utf-8'))
+def test_reading_calibration_values_does_not_return_the_limits(effective_vesc):
+    values = vesc_yaml.read_values(effective_vesc.read_text(encoding='utf-8'))
     assert set(values) == set(vesc_yaml.CALIBRATION_NAMES)
+
+
+def test_apply_overlay_scale(tmp_path):
+    text = ('joy_teleop:\n  ros__parameters:\n    human_control:\n'
+            '      axis_mappings:\n        drive-steering_angle:\n          scale: 0.38\n')
+    path = tmp_path / 'joy_teleop.yaml'
+    path.write_text(text)
+    result = teleop_yaml.apply(path, 0.4, tmp_path / 'backup')
+    assert path.read_text() == text.replace('scale: 0.38', 'scale: 0.4')
+    assert Path(result['backup']).read_text() == text
+
+
+def test_editor_on_the_real_rb1_overlay(tmp_path):
+    import difflib
+    import shutil
+
+    from racerbot_car.guards import check_calibration_overlay
+    from racerbot_car.paths import cars_dir
+
+    source = cars_dir() / 'rb1' / 'calibration' / 'joy_teleop.yaml'
+    target = tmp_path / 'joy_teleop.yaml'
+    shutil.copyfile(source, target)
+    original = target.read_text(encoding='utf-8')
+    scale = teleop_yaml.read_scale(original) + 0.01
+    teleop_yaml.apply(target, scale, tmp_path / 'backups', target_is_overlay=True)
+    edited = target.read_text(encoding='utf-8')
+
+    assert teleop_yaml.read_scale(edited) == pytest.approx(scale, abs=1e-6)
+    changes = [line for line in difflib.ndiff(original.splitlines(), edited.splitlines())
+               if line.startswith(('- ', '+ '))]
+    assert len(changes) == 2 and changes[0].startswith('- ') and changes[1].startswith('+ ')
+    teleop_yaml.verify(original, edited, scale)
+    assert check_calibration_overlay(target, 'joy_teleop.yaml') == []

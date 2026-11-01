@@ -25,6 +25,34 @@ from test_checks import healthy_live, healthy_snap, without  # noqa: E402
 PKG = pathlib.Path(__file__).resolve().parents[1] / 'racerbot_doctor'
 
 
+def test_doctor_lists_overrides_with_reasons(tmp_path, monkeypatch):
+    import shutil
+    from racerbot_car import identity, guards, layers
+    root = pathlib.Path(__file__).resolve().parents[3]
+    shutil.copytree(root / 'src/racerbot_car/cars', tmp_path / 'cars')
+    tuning = tmp_path / 'cars/rb1/tuning/gap_follow.yaml'
+    tuning.parent.mkdir(exist_ok=True)
+    tuning.write_text('gap_follow_node:\n  ros__parameters:\n'
+                      '    # why: different tyres\n    max_speed: 0.1\n')
+    assert guards.check_tuning_overlay(tuning, layers.shared_config_path(tuning.name), tuning.name) == []
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path / 'cars'))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    code, text, _ = _run(['--no-live'], healthy_snap())
+    assert code == 0
+    assert text.splitlines()[:2] == [
+        'Car rb1 (serial none), tuning overrides:',
+        '  gap_follow.yaml: gap_follow_node.max_speed = 0.1  # different tyres']
+
+
+def test_doctor_says_no_overrides_when_none(monkeypatch, tmp_path):
+    from racerbot_car import identity
+    monkeypatch.delenv('RACERBOT_CARS_DIR', raising=False)
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    code, text, _ = _run(['--no-live'], healthy_snap())
+    assert code == 0
+    assert text.splitlines()[0] == 'Car rb1 (serial none), tuning overrides: none'
+
+
 def _run(argv, snap, live=None, sample_exc=None):
     out = io.StringIO()
     calls = {'gather': [], 'sample': []}
@@ -33,12 +61,13 @@ def _run(argv, snap, live=None, sample_exc=None):
         calls['gather'].append(kw)
         return snap
 
-    def sample(window_s):
+    def sample(window_s, **kw):
         calls['sample'].append(window_s)
         if sample_exc:
             raise sample_exc
         return live
 
+    argv = argv if '--car' in argv else ['--car', 'rb1', *argv]
     code = main(argv, gather_fn=gather, sample_fn=sample, out=out)
     return code, out.getvalue(), calls
 
@@ -112,7 +141,7 @@ def test_gather_crash_exits_two():
 
     def gather(**kw):
         raise PermissionError('/proc')
-    assert main([], gather_fn=gather, sample_fn=None, out=out) == 2
+    assert main(['--car', 'rb1'], gather_fn=gather, sample_fn=None, out=out) == 2
     assert 'PermissionError' in out.getvalue()
 
 
@@ -120,7 +149,8 @@ def test_gather_takes_no_lidar_probe_option():
     # Car 1's LiDAR is a USB tty: there is no TCP probe to opt into, and
     # the doctor never opens a tty (system.py).
     _, _, calls = _run([], healthy_snap(), healthy_live())
-    assert calls['gather'] == [{}]
+    from racerbot_car.profile import load_profile
+    assert calls['gather'] == [{'spec': car.spec_for(load_profile('rb1'))}]
 
 
 def test_teleop_alone_still_samples_the_graph():
@@ -191,3 +221,28 @@ def test_package_never_publishes_or_opens_device_nodes():
                     hits.append(f'{path.name}:{n}: {line.strip()}')
     assert hits == []
     assert len(list(PKG.glob('*.py'))) >= 7    # the scan saw the package
+
+
+def test_car_override_selects_rb2_ladders(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    from test_rb2_checks import healthy_snap as rb2_snap, live
+    code, text, _ = _run(['--car', 'rb2', '--no-color'], rb2_snap(), live())
+    assert code == 0
+    assert 'Ethernet link' in text and 'realsense2_camera_node' in text
+    assert '/dev/sensors/hokuyo' not in text
+
+
+def test_identity_resolution_and_refusal(monkeypatch):
+    from racerbot_car import identity
+    monkeypatch.setattr(identity, 'SERIAL_PATH', '/nonexistent/doctor-test-serial')
+    out = io.StringIO()
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    assert main(['--no-live'], gather_fn=lambda **kw: healthy_snap(), out=out) == 0
+    assert '/dev/sensors/hokuyo' in out.getvalue()
+    monkeypatch.delenv('RACERBOT_CAR')
+    out = io.StringIO()
+    assert main([], out=out) == 2
+    assert 'RACERBOT_CAR' in out.getvalue() and '--car' in out.getvalue()
+    out = io.StringIO()
+    assert main(['--car', 'unknown'], out=out) == 2
+    assert 'rb1' in out.getvalue() and 'rb2' in out.getvalue()

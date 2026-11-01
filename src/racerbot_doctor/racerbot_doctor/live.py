@@ -27,7 +27,7 @@ DEFAULT_TOPICS = {
 }
 
 
-def sample(window_s, *, discovery_s=1.0, topics=None):
+def sample(window_s, *, spec=car.RB1, discovery_s=1.0, topics=None):
     """Count messages per topic over window_s seconds (after discovery_s of
     discovery, which is not counted), keep the last message of the topics
     whose content is checked, count /joy messages with LB held and non-zero
@@ -41,12 +41,15 @@ def sample(window_s, *, discovery_s=1.0, topics=None):
                            qos_profile_sensor_data)
     from nav_msgs.msg import Odometry
     from ackermann_msgs.msg import AckermannDriveStamped
-    from sensor_msgs.msg import Joy, LaserScan
+    from sensor_msgs.msg import Image, Joy, LaserScan
     from std_msgs.msg import Float64
     from tf2_msgs.msg import TFMessage
     from vesc_msgs.msg import VescStateStamped
 
-    names = dict(DEFAULT_TOPICS, **(topics or {}))
+    defaults = dict(DEFAULT_TOPICS)
+    if isinstance(spec.camera, car.RealSenseSpec):
+        defaults['camera'] = spec.camera.topic
+    names = dict(defaults, **(topics or {}))
     # (key, msg type, keep the deserialized last message?) -- joy and motor
     # are deserialized too, for the LB and non-zero counts below.
     wanted = [('core', VescStateStamped, True), ('scan', LaserScan, True),
@@ -54,6 +57,8 @@ def sample(window_s, *, discovery_s=1.0, topics=None):
               ('teleop', AckermannDriveStamped, False),
               ('ackermann_cmd', AckermannDriveStamped, False),
               ('motor', Float64, True), ('servo', Float64, False)]
+    if isinstance(spec.camera, car.RealSenseSpec):
+        wanted.append(('camera', Image, False))
 
     ctx = rclpy.Context()
     rclpy.init(context=ctx)
@@ -113,7 +118,7 @@ def sample(window_s, *, discovery_s=1.0, topics=None):
             st.window_s = elapsed
 
         return LiveSample(
-            topics={DEFAULT_TOPICS[key]: st for key, st in stats.items()},
+            topics={defaults[key]: st for key, st in stats.items()},
             teleop_publishers=node.count_publishers(names['teleop']),
             laser_tf=laser_tf[0] if laser_tf else None,
             joy_lb_held=flags['joy'], motor_nonzero=flags['motor'])

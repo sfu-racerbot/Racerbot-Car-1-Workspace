@@ -2,7 +2,7 @@
 """Analyse a recorded gap_follow run, end to end, in one command.
 
     source /opt/ros/jazzy/setup.bash          # first time only: reads the bag
-    python3 tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<ts>
+    python3 tools/run_analysis/analyze_run.py ~/racerbot-ws/data/<car>/racerbot_runs/<time>
 
 Writes ``<run>/analysis/report.md`` and plots beside it, and prints the
 report. For every LB hold in the run:
@@ -34,8 +34,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from run_analysis import actuation, replay  # noqa: E402
-from run_analysis.runlog import analysis_dir, load_run, read_events  # noqa: E402
+from run_analysis.runlog import NO_DRIVE, analysis_dir, load_run, read_events  # noqa: E402
 from run_analysis.scan_motion import scan_motion  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 
 
 def parse_overrides(items) -> dict:
@@ -118,9 +119,9 @@ def plot(run, t0, t1, motion, ticks, path):
     plt.close(fig)
 
 
-def analyze(run_dir, overrides=None, refresh=False, yaml_path=None) -> str:
+def analyze(run_dir, overrides=None, refresh=False, yaml_path=None, car_id=None) -> str:
     run = load_run(run_dir, refresh=refresh)
-    params = None
+    params = replay.gap_mirror.node_params(car_id=car_id) if not yaml_path else None
     config_name = "shipped YAML"
     if yaml_path:
         params = replay.gap_mirror.node_params(Path(yaml_path), fill_legacy=True)
@@ -131,6 +132,14 @@ def analyze(run_dir, overrides=None, refresh=False, yaml_path=None) -> str:
     if events:
         cats = Counter(e.get("category") for e in events)
         lines += [f"events.jsonl: {dict(cats)}", ""]
+    if len(run.drive) == 0:
+        # Every section below compares a driving node's /drive with the car;
+        # LB holds in /joy here were a person driving, not the node.
+        lines += [f"{NO_DRIVE}.", "",
+                  "For a manual run use tools/run_analysis/imu_report.py or imu_spectrum.py."]
+        text = "\n".join(lines) + "\n"
+        (out_dir / "report.md").write_text(text)
+        return text
     windows = run.lb_windows()
     if not windows:
         lines.append("No LB hold in /joy: the car was never driving autonomously.")
@@ -165,6 +174,7 @@ def analyze(run_dir, overrides=None, refresh=False, yaml_path=None) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("run_dir")
     ap.add_argument("--set", action="append", default=[],
                     help="counterfactual replay with this gap_follow parameter changed (repeatable)")
@@ -173,7 +183,8 @@ def main(argv=None) -> int:
                                    "An older file is accepted: parameters it predates take the "
                                    "value that reproduces the old behaviour")
     args = ap.parse_args(argv)
-    print(analyze(args.run_dir, parse_overrides(args.set), args.refresh, args.yaml))
+    car_id = car_from_args(ap, args)
+    print(analyze(args.run_dir, parse_overrides(args.set), args.refresh, args.yaml, car_id))
     return 0
 
 

@@ -5,8 +5,10 @@ import os
 import sys
 
 from ackermann_msgs.msg import AckermannDriveStamped
+from geometry_msgs.msg import TransformStamped
 import numpy as np
 import rclpy
+from tf2_ros import TransformException
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pure_pursuit.auto_map_race_node import (  # noqa: E402
@@ -1388,7 +1390,7 @@ def test_mapping_only_holds_the_car_until_the_start_pose_is_recorded(tmp_path):
         assert node.start_pose is None
         # First pose: recorded exactly, and the same tick forwards gap_follow.
         node._lookup_and_publish_pose = lambda: (3.25, -1.5, 1.0)
-        node._lookup_odom_yaw = lambda: None
+        node._lookup_odom_pose = lambda: (None, None)
         node._control_step()
         assert node.start_pose == (3.25, -1.5, 1.0)
         assert published[-1].drive.speed == pytest.approx(1.5)
@@ -1396,6 +1398,89 @@ def test_mapping_only_holds_the_car_until_the_start_pose_is_recorded(tmp_path):
         node._lookup_and_publish_pose = lambda: (4.0, 0.0, 2.0)
         node._control_step()
         assert node.start_pose == (3.25, -1.5, 1.0)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_the_control_loop_hands_odometry_to_the_lap_recorder(tmp_path):
+    """Wiring: a car at 3.5 m/s is not a stream of SLAM corrections.
+
+    Oracle: closed form. 0.14 m a tick is past the 0.12 m limit, and all of it is on odometry.
+    The second half proves the first detects something: the same poses with odometry missing
+    are absorbed, tick after tick.
+    """
+    clock = [100.0]
+    node, _ = _mapping_only_supervisor(tmp_path, clock)
+    try:
+        node.state = 'mapping'
+        command = AckermannDriveStamped()
+        command.drive.speed = 3.5
+        node.mapping_cmd = command
+        for index in range(20):
+            clock[0] += 0.025
+            node.mapping_cmd_time = clock[0]
+            x = index * 0.14
+            node._lookup_and_publish_pose = lambda value=x: (value, 0.0, 0.0)
+            node._lookup_odom_pose = lambda value=x: (0.0, (value, 0.0))
+            node._control_step()
+        assert node.recorder.reanchor_count == 0
+        for index in range(20, 40):
+            clock[0] += 0.025
+            node.mapping_cmd_time = clock[0]
+            x = index * 0.14
+            node._lookup_and_publish_pose = lambda value=x: (value, 0.0, 0.0)
+            node._lookup_odom_pose = lambda: (None, None)
+            node._control_step()
+        assert node.recorder.reanchor_count == 20
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+class _RecordingTfBuffer:
+    """A process boundary: answers lookups and records the time asked for."""
+
+    def __init__(self, error=None):
+        self.error = error
+        self.asked = []
+
+    def lookup_transform(self, target, source, at):
+        self.asked.append((target, source, at))
+        if self.error is not None:
+            raise self.error
+        transform = TransformStamped()
+        transform.transform.translation.x = 1.5
+        transform.transform.translation.y = -2.5
+        transform.transform.rotation.z = math.sin(0.25)
+        transform.transform.rotation.w = math.cos(0.25)
+        return transform
+
+
+def test_odometry_is_read_at_the_stamp_of_the_map_pose(tmp_path):
+    """The two poses must describe one instant, or their difference is motion, not a correction."""
+    clock = [100.0]
+    node, _ = _mapping_only_supervisor(tmp_path, clock)
+    try:
+        node.tf_buffer = _RecordingTfBuffer()
+        node._pose_stamp = rclpy.time.Time(seconds=42, nanoseconds=5).to_msg()
+        yaw, xy = node._lookup_odom_pose()
+        # oracle: closed form. A quaternion of half angle 0.25 rad is a yaw of 0.5 rad.
+        assert yaw == pytest.approx(0.5, abs=1e-9)  # rad
+        assert xy == (1.5, -2.5)
+        assert node.tf_buffer.asked[-1][:2] == (node.odom_frame, node.base_frame)
+        assert node.tf_buffer.asked[-1][2].nanoseconds == 42_000_000_005
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_no_odometry_transform_means_no_odometry(tmp_path):
+    clock = [100.0]
+    node, _ = _mapping_only_supervisor(tmp_path, clock)
+    try:
+        node.tf_buffer = _RecordingTfBuffer(error=TransformException('no odom yet'))
+        assert node._lookup_odom_pose() == (None, None)
     finally:
         node.destroy_node()
         rclpy.shutdown()

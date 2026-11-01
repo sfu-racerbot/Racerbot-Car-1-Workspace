@@ -1,13 +1,13 @@
 # Bringup's automatic run recorder (race_diagnostics auto_record_node).
 # Started by every f1tenth_stack bringup unless `record:=false` is passed.
 # It records only while an algorithm is running, into the same
-# ~/racerbot-ws/data/racerbot_runs/<ts>/ layout record_run.py writes, so analyze_run.py
+# ~/racerbot-ws/data/<car>/racerbot_runs/<time>/ layout record_run.py writes, so analyze_run.py
 # and summarize_run work on its runs unchanged. It subscribes to nothing
 # and publishes nothing itself: it only reads the ROS graph.
 # docs/run-diagnostics.md#automatic-recording
 auto_record:
   ros__parameters:
-    output_directory: ~/racerbot-ws/data/racerbot_runs
+    output_directory: ''  # Empty resolves per car with racerbot_car.paths.data_dir.
 
     # A node publishing on any of these is an algorithm. /drive is what
     # every control layer publishes, ours and team A's (ftg, disparity_

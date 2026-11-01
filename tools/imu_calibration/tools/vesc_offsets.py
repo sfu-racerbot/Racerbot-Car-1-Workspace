@@ -12,7 +12,7 @@ its orientation filter (less yaw drift), VESC Tool's IMU page, the F1TENTH ROS v
 
 Recording matters: once the VESC subtracts the offsets, racer_imu must subtract only what is left.
 Leave the VESC's IMU rotation (Imu Rotation Roll/Pitch/Yaw) unchanged: the calibration was measured
-with the current rotation, and the car mounting is handled by rpy_deg in config/car.yaml.
+with the current rotation, and the car mounting is handled by rpy_deg in the car's imu/car.yaml (src/racerbot_car/cars/<car>/imu/car.yaml).
 """
 import argparse
 import sys
@@ -46,6 +46,8 @@ def main():
     if not path or not path.exists():
         sys.exit(f"no calibration file at {path}: run tools/calibrate_imu.py first")
     cal = ImuCalibration.load(path)
+    if not a.calib and (a.written or a.cleared):
+        path = cfg.resolve(cfg.imus[a.imu].extra.get("calib"), for_write=True)
     acc_g, gyro_dps = vesc_values(cal)
     dev_acc_g, dev_gyro = np.round(cal.dev_acc_offset / G, 3), np.round(np.degrees(cal.dev_gyro_offset), 3)
 

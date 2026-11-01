@@ -1,0 +1,6 @@
+urg_node:
+  ros__parameters:
+    # Hokuyo UST-10LX over Ethernet (car.yaml: lidar.kind ethernet).
+    ip_address: "192.168.0.10"
+    ip_port: 10940
+    # serial_port: "/dev/sensors/hokuyo"

@@ -1,0 +1,8 @@
+joy_teleop:
+  ros__parameters:
+    human_control:
+      axis_mappings:
+        drive-steering_angle:
+          # 0.436 rad = 25 deg (was 0.34): full stick, a limit both sides reach with
+          # vesc.yaml's 2026-10-16 gain and servo_max (right tops out at ~26 deg).
+          scale: 0.436

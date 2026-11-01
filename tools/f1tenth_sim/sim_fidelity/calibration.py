@@ -17,9 +17,19 @@ Filling in a measurement means editing one line here. See
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import InitVar, dataclass, fields, replace
 from enum import Enum
 import math
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'src/racerbot_car'))
+from racerbot_car import identity  # noqa: E402
+from racerbot_car.identity import UnknownCarError, known_car_ids  # noqa: E402
+from racerbot_car.layers import effective_config  # noqa: E402
+from racerbot_car.paths import cars_dir  # noqa: E402
+from racerbot_car.profile import load_profile  # noqa: E402
 
 # Standard gravity, matching the figure used throughout the fidelity audit.
 G = 9.81
@@ -47,19 +57,11 @@ class Provenance(Enum):
 
 
 # --------------------------------------------------------------------------
-# Raw constants copied from this car's committed configuration files. Every
-# derived value below is computed from these rather than hard-coded, so that
-# re-deriving after a config change is a matter of updating one number.
+# Configuration-derived fields are resolved at call time. Only simulator
+# measurements and upstream constants remain fixed in this module.
 # --------------------------------------------------------------------------
 
-# src/f1tenth_system/f1tenth_stack/config/vesc.yaml
-SPEED_TO_ERPM_GAIN = 4614.0
-SPEED_MAX_ERPM = 23250.0
-STEERING_ANGLE_TO_SERVO_GAIN = -0.78
-STEERING_ANGLE_TO_SERVO_OFFSET = 0.5904
-SERVO_MIN = 0.15
-SERVO_MAX = 0.95
-MAX_SERVO_SPEED = 3.2  # throttle_interpolator block, rad/s
+# VESC values are resolved by calibration_for_car(), never during import.
 
 # Stock F1TENTH_VEHICLE_PARAMETERS, retained here so the fraction of the
 # wheelbase ahead of the centre of gravity survives our wheelbase override.
@@ -67,14 +69,20 @@ STOCK_LF = 0.15875
 STOCK_LR = 0.17145
 
 
-# Full-lock wheel angles, MEASURED 2026-10-16 with tape-measured half circles
+# Car 2's full-lock wheel angles, retained for the car-2 floor linkage checks.
+# MEASURED 2026-10-16 with tape-measured half circles
 # (docs/hardware-reference.md): angle = atan(wheelbase / rear-axle radius).
 # Not derived from the servo map above: the linkage is not linear, and
-# inverting -0.78 at servo_min would claim 0.565 rad left, past anything driven.
+# inverting the affine servo map can claim angles past anything driven.
 # Left: servo 0.178, radius 0.645 m (servo_min 0.15 itself was never driven).
 # Right: servo_max 0.95, radius 0.750 m.
 STEERING_MAX_LEFT_MEASURED = math.atan(0.36 / 0.645)    # +0.509 rad, 29.2 deg
 STEERING_MAX_RIGHT_MEASURED = -math.atan(0.36 / 0.750)  # -0.448 rad, 25.6 deg
+
+# CarCalibration's fields that come from the selected car's vesc.yaml (calibration_for_car);
+# None in a constructed calibration means "the selected car's value".
+VESC_FIELDS = ('steering_rate_max', 'speed_to_erpm_gain', 'steering_angle_to_servo_gain',
+               'steering_angle_to_servo_offset', 'servo_min', 'servo_max', 'speed_max', 'speed_min')
 
 
 @dataclass(frozen=True)
@@ -119,9 +127,15 @@ class CarCalibration:
     longitudinal_grip_coupling: float = 1.0
 
     # --- Actuation ------------------------------------------------------
-    steering_max_left: float = STEERING_MAX_LEFT_MEASURED
-    steering_max_right: float = STEERING_MAX_RIGHT_MEASURED
-    steering_rate_max: float = MAX_SERVO_SPEED
+    steering_max_left: float = None
+    steering_max_right: float = None
+    car_id: InitVar[str | None] = None
+    steering_rate_max: float = None
+    speed_to_erpm_gain: float = None
+    steering_angle_to_servo_gain: float = None
+    steering_angle_to_servo_offset: float = None
+    servo_min: float = None
+    servo_max: float = None
     # Closed-loop proportional gain of the steering servo's own position
     # loop, 1/s. Must stay below 1/control_dt (40 for a 40 Hz loop) or the
     # discrete servo overshoots -- which is the bug this replaces.
@@ -140,8 +154,8 @@ class CarCalibration:
     speed_loop_brake_max: float = 4.0
 
     # --- Speed envelope -------------------------------------------------
-    speed_max: float = SPEED_MAX_ERPM / SPEED_TO_ERPM_GAIN
-    speed_min: float = -SPEED_MAX_ERPM / SPEED_TO_ERPM_GAIN
+    speed_max: float = None
+    speed_min: float = None
 
     # --- Sensing --------------------------------------------------------
     lidar_beams: int = 1081
@@ -154,6 +168,38 @@ class CarCalibration:
     pose_noise_xy: float = 0.02
     pose_noise_yaw: float = 0.01
     odom_speed_noise: float = 0.05
+
+    # --- Floor models, off unless a floor profile sets them (see FLOORS) -
+    # Command to effective wheel angle, ((command, angle), ...), ascending.
+    steering_linkage: tuple | None = None
+    # Lateral acceleration the rack asks for to what the tyres deliver,
+    # ((asked, delivered), ...), ascending. None keeps GripEnvelope's sharp limit.
+    grip_curve: tuple | None = None
+    # True speed the car settles at per unit of commanded speed.
+    speed_command_scale: float = 1.0
+    # What /odom reads per unit of true speed.
+    odom_speed_scale: float = 1.0
+    # Extra range noise per metre of range, on top of lidar_noise_std.
+    lidar_noise_per_metre: float = 0.0
+    # Beams that hit the car itself: ((beam index, range), ...).
+    lidar_self_hits: tuple = ()
+    # The floor profile these values came from; empty for the plain calibration.
+    floor: str = ""
+
+    def __post_init__(self, car_id):
+        # Identity is provenance metadata, not a physical calibration/hash field.
+        object.__setattr__(self, 'car_id', car_id)
+        # Preserve CarCalibration(**overrides) for library users, resolving
+        # omitted car fields at construction rather than module import. Only
+        # these: the floor models' None means "off" (FLOORS), and resolving it
+        # through calibration_for_car would recurse.
+        missing = [name for name in (*VESC_FIELDS, 'steering_max_left',
+                                    'steering_max_right', 'car_id')
+                   if getattr(self, name) is None]
+        if missing:
+            selected = calibration_for_car(car_id)
+            for name in missing:
+                object.__setattr__(self, name, getattr(selected, name))
 
     # ------------------------------------------------------------------
     # Quantities the simulator needs that follow from the above
@@ -202,7 +248,7 @@ class CarCalibration:
             # v_min/v_max are deliberately NOT overridden here. In gym they
             # are not only the speed envelope: pid_accl derives its
             # proportional gain from them as 10*a_max/v_max, so writing this
-            # car's real 5.039 m/s ceiling into v_max would quietly multiply
+            # car's configured speed ceiling into v_max would quietly multiply
             # the plant's speed-loop gain by four. That gain is an upstream
             # invention, not a model of this car's VESC, so perturbing it is
             # not a fidelity improvement -- it just moves every result. The
@@ -273,9 +319,8 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "surface_friction": (
         Provenance.MEASURED,
-        "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py), which is not on "
-        "car 1 (likely car 2's floor: the workspace was ported from car 2 on 2026-10-23; "
-        "unverified): 0.55 best matched the real yaw rate of 0.40/0.55/0.70/0.90; the car "
+        "fitted to car 2's run 20261019-200703 (data/rb2/racerbot_runs/, recorded on car 2; "
+        "tools/run_analysis/fit_sim.py): 0.55 best matched the real yaw rate of 0.40/0.55/0.70/0.90; the car "
         "reached 91% of commanded curvature at 2.0-2.5 m/s^2 lateral and 78% "
         "above 2.5. Floor of that run only. Re-checked on car 1 on 2026-10-27 with "
         "tools/run_analysis/fit_sim.py (first LB hold): run 20261026-194514 yaw-rate "
@@ -291,15 +336,18 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "steering_max_left": (
         Provenance.MEASURED,
-        "full-lock circle 2026-10-16, servo 0.178 (servo_min 0.15 never driven)",
+        "rb2: tape-measured full-lock half circles 2026-10-16, atan(0.36 / 0.645), "
+        "servo 0.178 (servo_min 0.15 never driven); cars/rb2/car.yaml; "
+        "racerbot_sim/sim_bridge.py and sim_fidelity/calibration.py",
     ),
     "steering_max_right": (
         Provenance.MEASURED,
-        "full-lock circle 2026-10-16, at vesc.yaml servo_max 0.95",
+        "rb2: tape-measured full-lock half circles 2026-10-16, -atan(0.36 / 0.750), "
+        "servo_max 0.95; cars/rb2/car.yaml; racerbot_sim/sim_bridge.py and sim_fidelity/calibration.py",
     ),
     "steering_rate_max": (
         Provenance.DERIVED,
-        "vesc.yaml throttle_interpolator max_servo_speed 3.2 rad/s",
+        "selected car's effective vesc.yaml throttle_interpolator max_servo_speed, rad/s",
     ),
     "steering_servo_gain": (
         Provenance.MEASURED,
@@ -319,11 +367,11 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     "speed_loop_brake_max": (Provenance.MEASURED, "fitted to run 20261019-200703 (tools/run_analysis/fit_sim.py): recorded /drive replayed open-loop into the plant, scored against LiDAR scan-matched speed and yaw rate. docs/run-analysis.md"),
     "speed_max": (
         Provenance.DERIVED,
-        "vesc.yaml speed_max 23250 eRPM / speed_to_erpm_gain 4614. Enforced "
+        "selected car's effective vesc.yaml speed_max / abs(speed_to_erpm_gain). Enforced "
         "by clamping the speed command, not through gym's v_max -- see "
         "vehicle_parameters()",
     ),
-    "speed_min": (Provenance.DERIVED, "vesc.yaml speed_min, same conversion"),
+    "speed_min": (Provenance.DERIVED, "negative of the converted speed_max (symmetric envelope)"),
     "lidar_beams": (
         Provenance.SPEC,
         "Hokuyo UST-10LX: 1081 steps of 0.25 deg over 270 deg, and "
@@ -366,17 +414,223 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
         "VESC eRPM speed estimate; the 2026-07-27 log tracked commands "
         "within about 5%",
     ),
+    "steering_linkage": (Provenance.ESTIMATED, "off: the plain calibration has no linkage model. See FLOORS"),
+    "grip_curve": (Provenance.ESTIMATED, "off: the plain calibration has a sharp friction circle. See FLOORS"),
+    "speed_command_scale": (Provenance.DERIVED, "1: command taken as true speed. See FLOORS"),
+    "odom_speed_scale": (Provenance.DERIVED, "1: odometry taken as true speed. See FLOORS"),
+    "lidar_noise_per_metre": (Provenance.ESTIMATED, "0: flat noise. See FLOORS"),
+    "lidar_self_hits": (Provenance.ESTIMATED, "none. See FLOORS"),
+    "floor": (Provenance.DERIVED, "the floor profile's name, empty here"),
 }
 
 
-CALIBRATION = CarCalibration()
+for _name in ('speed_to_erpm_gain', 'steering_angle_to_servo_gain',
+              'steering_angle_to_servo_offset', 'servo_min', 'servo_max'):
+    PROVENANCE[_name] = (Provenance.DERIVED, "selected car's effective vesc.yaml " + _name)
 
 
-def describe(calibration: CarCalibration = CALIBRATION) -> list[tuple]:
+def selected_car(car_id: str | None = None, *, note: bool = True) -> str:
+    """Resolve implicit identity strictly; allow known explicit offline targets."""
+    directory = cars_dir()
+    known = known_car_ids(directory)
+    if car_id is None:
+        return identity.current_car_id()
+    if car_id not in known:
+        raise UnknownCarError(f'unknown car {car_id!r}; pass --car or set RACERBOT_CAR')
+    env = dict(os.environ)
+    env.pop(identity.ENV_VAR, None)
+    try:
+        machine_car = identity.resolve_car_id(
+            env, identity.read_serial(identity.SERIAL_PATH),
+            identity.load_machines(directory / 'machines.yaml', known), known)
+    except (UnknownCarError, OSError, ValueError):
+        machine_car = None
+    if note and machine_car and machine_car != car_id:
+        print(f'Note: machine identity is {machine_car}; explicitly selected {car_id}.')
+    return car_id
+
+
+def add_car_argument(parser):
+    parser.add_argument('--car', default=None,
+                        help='car profile ID (default: $RACERBOT_CAR; required)')
+
+
+def car_from_args(parser, args) -> str:
+    try:
+        return selected_car(args.car) if args.car is not None else selected_car()
+    except UnknownCarError as exc:
+        parser.error(str(exc))
+
+
+def calibration_for_car(car_id: str | None = None) -> CarCalibration:
+    """Build a fresh calibration from the selected car's effective VESC values."""
+    car_id = selected_car(car_id, note=False)
+    vesc = effective_config('vesc.yaml', '/**', car_id)
+    throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
+    profile = load_profile(car_id)
+    speed_max = vesc['speed_max'] / abs(vesc['speed_to_erpm_gain'])
+    return CarCalibration(
+        car_id=car_id, steering_max_left=profile.full_lock_left_rad,
+        steering_max_right=profile.full_lock_right_rad,
+        **{key: vesc[key] for key in ('speed_to_erpm_gain',
+           'steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',
+           'servo_min', 'servo_max')},
+        speed_max=speed_max, speed_min=-speed_max,
+        steering_rate_max=throttle['max_servo_speed'])
+
+
+def __getattr__(name):
+    # Compatibility for external probes. Internal callers use the factory.
+    if name == 'CALIBRATION':
+        return calibration_for_car()
+    keys = {'SPEED_TO_ERPM_GAIN': 'speed_to_erpm_gain',
+            'SPEED_MAX_ERPM': 'speed_max',
+            'STEERING_ANGLE_TO_SERVO_GAIN': 'steering_angle_to_servo_gain',
+            'STEERING_ANGLE_TO_SERVO_OFFSET': 'steering_angle_to_servo_offset',
+            'SERVO_MIN': 'servo_min', 'SERVO_MAX': 'servo_max',
+            'MAX_SERVO_SPEED': 'steering_rate_max'}
+    if name in keys:
+        cal = calibration_for_car()
+        if name == 'SPEED_MAX_ERPM':
+            return cal.speed_max * abs(cal.speed_to_erpm_gain)
+        return getattr(cal, keys[name])
+    raise AttributeError(name)
+
+
+#: Fitted to these 2026-10-30 runs, located against data/rb2/racerbot_auto/20261030-185036-fixed.
+SFU_COURSE_FIT_RUNS = ("20261030-185036", "20261030-184556", "20261030-175728",
+                       "20261030-180355", "20261030-181616", "20261030-183607")
+#: Held out of every fit, and used only to check it.
+SFU_COURSE_HELD_OUT_RUNS = ("20261030-184826", "20261030-183134", "20261030-181003",
+                            "20261030-181819", "20261030-184316", "20261030-175124")
+
+
+@dataclass(frozen=True)
+class Floor:
+    """One floor with one set of tyres, and how it was measured."""
+
+    name: str
+    description: str
+    overrides: dict
+    sources: dict
+    fit_runs: tuple
+    held_out_runs: tuple
+    track: str = ""
+
+
+FLOORS: dict[str, Floor] = {
+    "sfu_course_2026_10_30": Floor(
+        name="sfu_course_2026_10_30",
+        description="The 2026-10-30 course's floor and the tyres on car 2 that day. Measured "
+                    "with tools/run_analysis/car_measure.py; see docs/sim-calibration.md.",
+        track="course_2026_10_30_scans",
+        fit_runs=SFU_COURSE_FIT_RUNS,
+        held_out_runs=SFU_COURSE_HELD_OUT_RUNS,
+        overrides=dict(
+            floor="sfu_course_2026_10_30",
+            # The rack sits 0.0105 rad left of the command (yaw on straights, fit runs). Full
+            # stick, 0.436 rad, turns 0.423 both sides, and the servo limits reach 0.509 left and
+            # 0.448 right (tape-measured circles, 2026-10-16, docs/hardware-reference.md).
+            # Between those, straight lines: a table binned from yaw read 30% less rack at
+            # 0.1-0.2 rad, and replaying real commands against the gyro rejected it (yaw error
+            # 0.24-0.31 rad/s against 0.14). Binning by a lagged noisy command flattens it.
+            # Servo limits as commands: (0.95 - 0.5904) / -0.78 = -0.461 right, (0.178 - 0.5904) / -0.78 = 0.528 left.
+            steering_linkage=((-0.461, -0.448), (-0.436, -0.423), (0.0, 0.0105), (0.436, 0.423), (0.528, 0.509)),
+            # The real asked-against-achieved curve of the fit runs, times 1.15, never above
+            # what was asked. Times 1.15 because the plant's stock tyres understeer by themselves
+            # on top of it; 1.15-1.2 fitted best by replay against the gyro.
+            grip_curve=((0.0, 0.0), (2.0, 2.0), (2.25, 2.25), (2.75, 2.737), (3.25, 3.013), (3.75, 3.209),
+                        (4.5, 3.45), (5.5, 3.841), (7.0, 4.255), (10.0, 4.715), (20.0, 5.175)),
+            steering_delay_ticks=2,
+            speed_loop_accel_gain=7.0,
+            speed_loop_accel_max=4.0,
+            # Braking gain from the whole-run replay; the ceiling from the wall-measured stop of
+            # run 20261030-180355 (fit set): 3.10 m/s on the wheels to 0.29 in 1.31 m. This gives
+            # 1.23 m there and 3.44 m on the held-out stop of run 20261030-175124 (measured 3.39).
+            # Not reproduced: the real stops end with a soft tail under 1 m/s, so they take
+            # 0.93 and 1.40 s against 0.72 and 1.21 here. Gain 3 matches those times too, but
+            # then ordinary driving brakes too gently and laps come out 5% fast.
+            speed_loop_brake_gain=7.0,
+            speed_loop_brake_max=4.5,
+            speed_delay_ticks=3,
+            # vesc.yaml commands through 4614 eRPM per m/s and /odom reads through 4447.98.
+            # With the measured wheel over-read: 4614 / 4447.98 / 1.033.
+            speed_command_scale=1.004,
+            odom_speed_scale=1.033,
+            # Parked, run 20261030-185036: 3 mm near, 10 mm past 4 m. No echo: 4e-7 of beams.
+            lidar_noise_std=0.003,
+            lidar_noise_per_metre=0.0015,
+            lidar_dropout_rate=0.0,
+            # Parked, run 20261030-185036: the car's own rear right, -135 to -130 deg.
+            lidar_self_hits=tuple(enumerate((
+                .147, .140, .123, .108, .093, .085, .083, .086, .091, .127, .140, .155,
+                .172, .195, .199, .204, .224, .247, .270, .285, .301, .338, .385))),
+        ),
+        sources=dict(
+            steering_linkage="trim from yaw on straights, fit runs; full stick and limits from the circles "
+                             "of 2026-10-16; chosen over a binned table by replay against the gyro",
+            grip_curve="fit runs' asked-against-achieved curve (car_measure.py), scaled 1.15 by replay of "
+                       "runs 20261030-185036, -184556, -181616, -183607 against the gyro (validate_calibration.py "
+                       "fit-plant): yaw rate error 0.140 rad/s",
+            steering_delay_ticks="real commands through the plant against the gyro, runs 20261030-185036 and "
+                                 "-184556: yaw rate error 0.123 rad/s, lag within 6 ms. Gain 15 and the "
+                                 "3.2 rad/s slew stand: slew does not bind from 2.5 up",
+            speed_loop_accel_gain="true speed replay, fit runs",
+            speed_loop_accel_max="true speed replay, fit runs",
+            speed_loop_brake_gain="true speed replay, fit runs",
+            speed_loop_brake_max="wall-measured stop of run 20261030-180355 (fit runs); checked on held-out "
+                                 "run 20261030-175124",
+            speed_delay_ticks="true speed replay, fit runs",
+            speed_command_scale="vesc.yaml gains and the measured wheel over-read",
+            odom_speed_scale="wheel against scan-to-map speed, fit runs (held out: the same 1.033)",
+            lidar_noise_std="parked scans, run 20261030-185036",
+            lidar_noise_per_metre="parked scans, run 20261030-185036",
+            lidar_dropout_rate="driving scans, run 20261030-185036",
+            lidar_self_hits="parked scans, run 20261030-185036",
+        ),
+    ),
+}
+
+
+def with_floor(name: str | None, base: CarCalibration | None = None) -> CarCalibration:
+    """``base`` (default: the selected car's calibration, resolved now) with a named floor
+    profile's values; None leaves it unchanged. The profiles were measured on one car (see
+    each Floor's description): applying one to another car is a deliberate choice."""
+    base = calibration_for_car() if base is None else base
+    if name is None:
+        return base
+    if name not in FLOORS:
+        raise ValueError(f"unknown floor {name!r}; known: {sorted(FLOORS)}")
+    return replace(base, **FLOORS[name].overrides)
+
+
+def with_friction(friction: float | None, base: CarCalibration | None = None) -> CarCalibration:
+    """``base`` (default: the selected car's calibration, resolved now) on a floor of this
+    friction; None leaves it unchanged."""
+    base = calibration_for_car() if base is None else base
+    if friction is None:
+        return base
+    if not (math.isfinite(friction) and friction > 0.0):
+        raise ValueError(f"friction must be positive and finite, got {friction!r}")
+    return replace(base, surface_friction=float(friction))
+
+
+def describe(calibration: CarCalibration | None = None) -> list[tuple]:
     """(provenance, name, value, source) rows, least trustworthy first."""
+    calibration = calibration or calibration_for_car()
     rows = []
     for field in fields(calibration):
         provenance, source = PROVENANCE[field.name]
+        if calibration.car_id == 'rb1':
+            if field.name == 'steering_max_left':
+                provenance, source = (Provenance.MEASURED,
+                    'rb1: 0.401 rad left, measured 2026-10-21 check circles; '
+                    'docs/hardware-reference.md "Steering limits, 2026-10-22"; '
+                    'full stick reaches servo_min (0.051 vs 0.05); cars/rb1/car.yaml')
+            elif field.name == 'steering_max_right':
+                provenance, source = (Provenance.DERIVED,
+                    'rb1: -(0.75 - 0.366) / 0.83 rad, computed from the servo map, not measured; '
+                    'cars/rb1/calibration/vesc.yaml at servo_max 0.75; cars/rb1/car.yaml')
         rows.append(
             (provenance, field.name, getattr(calibration, field.name), source)
         )
@@ -384,7 +638,7 @@ def describe(calibration: CarCalibration = CALIBRATION) -> list[tuple]:
     return rows
 
 
-def unmeasured(calibration: CarCalibration = CALIBRATION) -> list[str]:
+def unmeasured(calibration: CarCalibration | None = None) -> list[str]:
     """Fields still inherited from upstream rather than justified here."""
     return [
         name
@@ -393,8 +647,13 @@ def unmeasured(calibration: CarCalibration = CALIBRATION) -> list[str]:
     ]
 
 
-def main() -> int:
-    rows = describe()
+def main(argv=None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_car_argument(parser)
+    args = parser.parse_args(argv)
+    calibration = calibration_for_car(car_from_args(parser, args))
+    rows = describe(calibration)
     width = max(len(name) for _p, name, _v, _s in rows)
     current = None
     for provenance, name, value, source in rows:
@@ -403,7 +662,7 @@ def main() -> int:
             current = provenance
         shown = f"{value:.5g}" if isinstance(value, float) else str(value)
         print(f"  {name:<{width}}  {shown:>10}   {source}")
-    print(f"\n{len(unmeasured())} of {len(rows)} values are still gym stock.")
+    print(f"\n{len(unmeasured(calibration))} of {len(rows)} values are still gym stock.")
     return 0
 
 

@@ -1,0 +1,28 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-10-30T18:56:53-07:00'
+algorithms:
+  /drive:
+  - /disparity_extender_node
+nodes:
+- /_ros2cli_daemon_0_65a0d657e48549f8b8d764170d6def7a
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /disparity_extender_node
+- /foxglove_bridge
+- /joy
+- /launch_ros_137226
+- /safety_node
+- /slam_toolbox
+- /static_baselink_to_laser
+- /transform_listener_impl_aaaada6f67e0
+- /urg_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+stopped: '2026-10-30T19:10:32-07:00'
+stop_reason: no algorithm publishing for 3.0 s
+duration_sec: 819.6
+recorder_exit_code: 0
+recorder_killed: false
+bag_bytes: 223900306

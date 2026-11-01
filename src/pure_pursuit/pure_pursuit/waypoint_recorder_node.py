@@ -13,7 +13,7 @@ pipeline described in docs/racing-autonomy.md:
 
 Usage (see docs/operations.md for the full step-by-step procedure):
     ros2 launch pure_pursuit waypoint_recorder_launch.py \
-        output_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
+        output_file:=$HOME/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
 Then drive one lap by hand (teleop) with localization already running,
 and Ctrl+C this node once you're back at the start.
 """
