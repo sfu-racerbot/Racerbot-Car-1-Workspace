@@ -242,9 +242,9 @@ def test_the_real_saved_map_loses_only_phantoms_in_clear_track():
     # Committed to the repo under data/ since 2026-10-25, so this runs on
     # every clone rather than only on the car that recorded it.
     path = os.path.join(os.path.dirname(__file__), '..', '..', '..',
-                        'data', 'racerbot_auto', '20260727-200103', 'map.yaml')
+                        'data', 'rb1', 'racerbot_auto', '20260727-200103', 'map.yaml')
     if not os.path.exists(path):
-        pytest.skip('the recorded reference map (data/racerbot_auto/20260727-200103) is missing')
+        pytest.skip('the recorded reference map (data/rb1/racerbot_auto/20260727-200103) is missing')
     before = OccupancyMap.from_yaml(path, inflate_cells=0)
     after = OccupancyMap.from_yaml(path, inflate_cells=0, despeckle_max_cells=4)
     removed = int((before.grid == OCCUPIED).sum() - (after.grid == OCCUPIED).sum())
