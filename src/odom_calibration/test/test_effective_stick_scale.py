@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+pytest.importorskip('ackermann_msgs.msg', reason='requires sourced ROS messages')
+
 from odom_calibration.calibration_node import OdomCalibrationNode
 
 

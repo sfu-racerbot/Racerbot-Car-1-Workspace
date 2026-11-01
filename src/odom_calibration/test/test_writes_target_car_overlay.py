@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip('ackermann_msgs.msg', reason='requires sourced ROS messages')
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from odom_calibration.calibration_node import OdomCalibrationNode
 from odom_calibration import vesc_yaml
