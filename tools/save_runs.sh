@@ -110,7 +110,7 @@ total=0
 while IFS= read -r -d '' path; do
     size=$(git cat-file -s ":$path")
     total=$((total + size))
-done < <(git diff --cached --name-only --diff-filter=AM -z)
+done < <(git diff --cached --name-only --diff-filter=AM -z -- "${paths[@]}")
 if (( total > PUSH_LIMIT_BYTES )); then
     git reset -q -- "${paths[@]}"
     echo "push too large: $(( (total + 1048575) / 1048576 )) MB staged, GitHub refuses pushes over 2 GB; commit fewer runs at a time (e.g. once per session)" >&2
