@@ -33,6 +33,7 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 20. [Traction control (IMU)](#traction-control-imu)
 21. [Impact stop (IMU)](#impact-stop-imu)
 22. [Launch boost](#launch-boost) — full speed off the start line, once per race
+23. [Speed on the real course (2026-10-30)](#speed-on-the-real-course-2026-10-30) — why it stopped mid-lap, the fix, and `time_trial:=true`
 
 ## Highlights
 
@@ -46,12 +47,15 @@ They were first driven on the car on 2026-10-19. That run had no contact, but th
 
 - **No more false hard stops in corridors (2026-10-20).** On the 2026-10-19 run, all 97 stop ticks were the TTC brake reacting to the inside wall of a bend 0.12–0.18 m *beside* the car. Replayed through the final config, the same scans produce none.
 - **Other cars: on by default since 2026-10-28.** Two simulated cars on the shipped settings passed 32 of 32 runs, with no contact and no stalls. With the layer off, 24 of 32 passed, with 3 contacts and 5 stalls. It follows slower cars and rarely passes them. Off switch: `opponent_awareness:=false`. It has never run on the floor. See [Several cars at once](#several-cars-at-once).
-- **Launch boost: full speed off the start line (2026-10-30).** The first LB press goes straight to full speed and ignores other cars until the straight ends. Simulated on car 1's course it is about 1 m ahead after 2 s, with no contact in 44 runs. Never run on the floor. Off: `launch_boost:=false`, see [Launch boost](#launch-boost).
+- **Launch boost: full speed off the start line (ported from car 1, 2026-10-30).** The first LB press goes straight to `max_speed` and ignores other cars until the straight ends. Simulated on car 2's room map it is about 0.25 m ahead after 1 s, and it costs 0.86 s over the solo lap there. With two cars on that map, 8 of 8 runs finish with it off and 5 to 6 of 8 with it on, with no contact. Never run on the floor. Off: `launch_boost:=false`, see [Launch boost](#launch-boost).
+- **No more parking for pieces of wall (2026-10-30).** Replaying that day's single-car recordings, time with the follow limit near zero falls from 45.8 s to 2.1 s of 410 s. A new `time_trial:=true` runs one car on the course in about 19 s in the simulator. Never driven on the floor. See [Speed on the real course](#speed-on-the-real-course-2026-10-30).
 - **More of every track completes (2026-10-20).** Across 11 simulated tracks, 6 seeds each, both directions, 108 of 132 runs pass, against 96 for the 2026-10-19 config. The hall loop `levine_blocked` laps in 23.6 s instead of 34.7 s.
 
 **Limits:** these numbers come from the simulator only. `max_lateral_accel` was raised from 1.0 to 2.0 m/s² for this work, then to 2.5 m/s² on 2026-10-26.
 
-The 2.5 step rests on a map run's grip reading (`20261026-194514`). That run was driven at a 2.0 ceiling, so no run has yet used 2.5 on the floor. The 2026-10-19 floor run and that map run disagree on grip above 2.0 m/s². [The 2026-10-19 run](#the-2026-10-19-run) has both readings.
+**Car 2 took the same 2.5 on 2026-10-29** (team decision), although its own floor run (2026-10-19) read 0.91 of the commanded turn at 2.0–2.5. Bring it up in the order in [Validation](#validation).
+
+On car 1, the 2.5 step rests on a map run's grip reading (`20261026-194514`). That run was driven at a 2.0 ceiling, so no run has yet used 2.5 on the floor. The 2026-10-19 floor run and that map run disagree on grip above 2.0 m/s². [The 2026-10-19 run](#the-2026-10-19-run) has both readings.
 
 ## Race defaults (2026-10-27)
 
@@ -62,6 +66,10 @@ The 2.5 step rests on a map run's grip reading (`20261026-194514`). That run was
 
 The team asked for a faster `gap_follow` with less weave, one that can win races. The shipped setup changed to the one that was fastest in the simulator with no wall contact. **Nothing has been driven on the car at these values yet.**
 
+> **On car 2** (ported from car 1 on 2026-10-29): the speeds, the speed ramp, `max_lateral_accel` 2.5, corner setup off and, since 2026-10-31, steering damping on are the same as car 1's. One thing differs: **`max_steering_angle` is 0.349 rad**, car 2's limit from its 2026-10-16 circles.
+>
+> The table below was measured with car 1's values, so car 2's laps will differ.
+
 ### What changed
 
 - **Top speed 3.5 → 5.0 m/s** (`max_speed`). A launch can still lower it, for example `max_speed:=1.0` for a first floor run. A launch cannot raise it above 5.0.
@@ -70,7 +78,7 @@ The team asked for a faster `gap_follow` with less weave, one that can win races
 - **Corner setup off** (`enable_corner_setup: false`). Its values are kept.
 - **Speed ramp 3.0 → 5.0 m/s²** (`max_acceleration`). It limits how fast a speed command may rise. It never limits braking.
 
-Left alone on purpose: the LB hold ([deadman](glossary.md#deadman)), the time-to-collision brake, and the emergency and forward clearance stops. Also unchanged are `max_braking_decel` (3.0 m/s²), `max_lateral_accel` (2.5 m/s²) and `max_steering_angle` (0.33 rad). Adaptive grip still ships off.
+Left alone on purpose: the LB hold ([deadman](glossary.md#deadman)), the time-to-collision brake, and the emergency and forward clearance stops. Also unchanged are `max_braking_decel` (3.0 m/s²), `max_lateral_accel` (2.5 m/s²) and `max_steering_angle` (0.33 rad on car 1, 0.349 on car 2). Adaptive grip still ships off.
 
 ### The evidence
 
@@ -97,7 +105,9 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 ### Going back
 
-- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off. The IMU stack stops only when all six IMU features are off: steering damping, adaptive grip, fused speed, understeer, traction and impact stop. `max_speed:=<m/s>` lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
+- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off.
+- **The IMU stack** stops only when all six IMU features are off: steering damping, adaptive grip, fused speed, understeer, traction and impact stop.
+- **`max_speed:=<m/s>`** lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
 - **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
   - `enable_steering_damping: false`, `steering_damping_gain: 0.03` and `enable_corner_setup: true`.
   - `max_speed: 3.5`, `min_speed: 1.0`, `corner_speed: 1.5`, `corner_speed_wide: 1.9`, `narrow_corridor_speed: 2.5` and `max_acceleration: 3.0`.
@@ -106,13 +116,13 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 ### Other launches that read the same file
 
 - `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
-- `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does, so do not run the two together.
+- `gap_follow_launch.py` now starts the IMU stack by default, on both cars. `map_course` does too, so do not run the two together.
 - The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read.
 - Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run.
 
 ### Before the first run on the car
 
-Follow [Validation](#validation) exactly: wheels off with the stack up, then the floor. On the floor, pass `max_speed:=1.0` for the first run. To test the speed change alone first, turn steering damping off with `steering_damping:=false`.
+Follow [Validation](#validation) exactly: wheels off with the stack up, then the floor. On the floor, pass `max_speed:=1.0` for the first run. To test the speed change alone first, turn steering damping off with `steering_damping:=false` (car 2: already off until its IMU is set up).
 
 ## What changed, in plain words
 
@@ -138,7 +148,7 @@ The rule exists because a driving node with a bug does not know it has a bug. LB
 
 **The 2026-10-20 changes have only run in the simulator. Bring them up wheels-off first, then at low speed** — the exact order is in [Validation](#validation).
 
-The simulator's car is close to this one, but not identical. Its grip has been read on the car in two runs, but no run has yet used the 2.5 m/s² cornering limit on the floor. Bring that limit up in the order in [Validation](#validation).
+The simulator's car is close to this one, but not identical. Its grip has been read on the cars in two runs, but no run has yet used the 2.5 m/s² cornering limit on the floor. Bring that limit up in the order in [Validation](#validation).
 
 **The other-car layer is on by default, and it has never run on the floor.** It can only slow the car or choose a side of an opening. Its first-run order is in [Several cars at once](#several-cars-at-once). If it reads a wall as a car, the decision lines show `opponent mode=` with no other car moving. Let go of LB at that point.
 
@@ -153,7 +163,7 @@ The simulator's car is close to this one, but not identical. Its grip has been r
 3. **Floor, low speed, open space, with the recorder on.** Lower the speed first: set `max_speed` to about 1.0 m/s and `max_lateral_accel` back to 1.0. Both can be changed live from the dashboard's tuning panel. Record every floor run (commands below), so the next change can be checked against what the car really did.
    - Since 2026-10-27 the top speed is 5.0 m/s unless a launch says otherwise, so this step is not optional ([race defaults](#race-defaults-2026-10-27)).
    - Drive a straight corridor, then a single corner, with someone ready to let go of LB.
-4. **Raise speed in steps.** Raise `max_lateral_accel` toward 2.5 only after the low-speed runs look right. No run has used 2.5 on the floor yet, so its first run follows the same order as any speed increase: wheels off, then low speed.
+4. **Raise speed in steps.** Raise `max_lateral_accel` back toward the shipped 2.5 only after the low-speed runs look right. No run has used 2.5 on the floor yet, so its first run follows the same order as any speed increase: wheels off, then low speed.
    - **If the car slides or runs wide in corners:** the floor has less grip than the simulator. Keep `max_lateral_accel` at the highest value that stayed planted.
 
 If anything looks wrong, turn the suspect feature off (next section) and compare. That is what the separate switches are for.
@@ -213,7 +223,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `narrow_corridor_speed` | `3.571` (since 2026-10-27; was `2.5`) | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
-| `enable_steering_damping` | `true` (since 2026-10-27; was `false`) | No gyro term: the steering is what it was before 2026-10-27. Turn it off with `steering_damping:=false` on the launch line. The stack is skipped only when every IMU feature is off. See [Steering damping (gyro)](#steering-damping-gyro). |
+| `enable_steering_damping` | `true` (car 1 since 2026-10-27, car 2 since 2026-10-31) | No gyro term: the steering is what it was before 2026-10-27. `steering_damping:=false` on the launch line does the same for one run. See [Steering damping (gyro)](#steering-damping-gyro). |
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 | `enable_opponent_awareness` (launch: `opponent_awareness`) | `true` (since 2026-10-28; was `false`) | The other-car layer is off, and the node's commands are what they were before the layer existed (2026-10-22). Launch with `opponent_awareness:=false`. See [Several cars at once](#several-cars-at-once). |
 | `opponent_follow_memory_sec` | `1.0` s (since 2026-10-28; was none) | The follow cap is dropped the moment its car is lost, with the layer still on. Set it to `0.0` to get that. |
@@ -221,7 +231,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 
 These switches are **not** live-tunable: edit the YAML and restart `gap_follow_launch.py`. The workspace is built with `--symlink-install`, so no rebuild is needed.
 
-`max_lateral_accel` (shipped 2.5; 1.0 before 2026-10-19, 2.0 until 2026-10-26) is live-tunable from the dashboard.
+`max_lateral_accel` (shipped 2.5: car 1 since 2026-10-26, car 2 since 2026-10-29; 1.0 before 2026-10-19, then 2.0) is live-tunable from the dashboard.
 
 ### IMU launch flags
 
@@ -235,7 +245,7 @@ The launch refuses `imu:=false` if any IMU feature is enabled, including one ena
 
 ## The 2026-10-19 run
 
-The first floor run of this rework, recorded as `~/.ros/racerbot_runs/20261019-200703` and analysed with the tools in [run-analysis.md](run-analysis.md).
+The first floor run of this rework, recorded as `~/.ros/racerbot_runs/20261019-200703` (archived in `data/racerbot_runs/` since 2026-10-25) and analysed with the tools in [run-analysis.md](run-analysis.md).
 
 **What happened.** One LB hold of 35.4 s: 78 m at 2.2 m/s on average, peak 3.75 m/s, no contact. The closest the padded body came to anything was 0.12 m. The track was a mostly-left-turning loop, 1.24 m wide at the median and 0.83 m at its narrowest 5%.
 
@@ -504,7 +514,7 @@ ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a 
 ros2 launch racerbot_sim sim_race_launch.py track:=indoor_wide opponent:=team_a laps:=3 swap_starts:=true timeout_s:=300 car1_params:=/tmp/gap-follow-team-a.yaml
 ```
 
-**Working when:** each race prints a standings table and writes a `race.json` under `~/.ros/racerbot_sim/races/`. A wall contact ends the race early. **If it doesn't:** check the terminal for missing team A packages or a hardware interlock message. Timing can vary between runs.
+**Working when:** each race prints a standings table and writes a `race.json` under `~/racerbot-ws/data/racerbot_sim/races/`. A wall contact ends the race early. **If it doesn't:** check the terminal for missing team A packages or a hardware interlock message. Timing can vary between runs.
 
 | Track | Start order | Contact time (simulated seconds) | Car 1 laps | Team A laps |
 |---|---|---:|---:|---:|
@@ -519,7 +529,7 @@ A rerun with today's defaults, which enable opponent awareness, may differ from 
 
 Normal starts put car 1 first; swapped starts put team A first. In all four files, car 2 has wall contact, neither car has car contact, both finish times are `null`, and `winner` is `null`.
 
-The measured cause was team A's disparity extender turning in late at 3.0 m/s, then asking for 0.56–0.67 rad of steering. The simulator limits steering to car 1's measured 0.509 rad left and 0.448 rad right (`STEERING_MAX_LEFT/RIGHT` in `sim_bridge.py`), so the car runs wide.
+The measured cause was team A's disparity extender turning in late at 3.0 m/s, then asking for 0.56–0.67 rad of steering. The simulator limits steering to car 2's measured 0.509 rad left and 0.448 rad right (`STEERING_MAX_LEFT/RIGHT` in `sim_bridge.py`), so the car runs wide.
 
 Team A's shipped settings are tuned for its own car: `wheelbase` 0.33 m, `max_speed` 3.0 m/s and `max_lateral_acc` 3.5 m/s². See [how to launch the race](ros-simulator.md#race-team-a).
 
@@ -591,7 +601,7 @@ The arc guard checks the requested arc first. It looks `arc_guard_length` (1.0 m
 
 - **Arc clear:** nothing happens. On open track the guard never acts.
 - **Arc blocked:** it tries steering angles across the full range (`arc_guard_candidates`, 29 of them) and takes the clear one *nearest* to what was asked.
-- **Nothing clear within `arc_guard_max_correction`:** it takes the freest arc within that bound, so it can never swing the wheels further than 0.165 rad (9.5°, half of car 1's 0.33 rad limit; 0.1745 on car 2) from the request.
+- **Nothing clear within `arc_guard_max_correction`:** it takes the freest arc within that bound, so it can never swing the wheels further than 0.1745 rad (10°) from the request.
 
 When it acts, the decision log says `arc guard <requested>-><used>rad (requested arc blocked)`. It is off while the car is creeping out of a tight spot.
 
@@ -716,7 +726,7 @@ python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 > **You'll be able to:** turn it on, tell when it is working, and know what it falls back to.
 > **Time:** 10 minutes to read, plus the car checks.
 
-Steering damping is **on by default** since 2026-10-27 ([race defaults](#race-defaults-2026-10-27)). It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
+Steering damping is **on by default**: on car 1 since 2026-10-27 ([race defaults](#race-defaults-2026-10-27)), on car 2 since 2026-10-31 ([car1-vs-car2.md](car1-vs-car2.md#imu)). It has never been driven on car 2's floor. It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
 
 ### What it does, in plain words
 
@@ -747,7 +757,7 @@ ros2 launch f1tenth_stack bringup_launch.py
 
 **Working when:** the motor controller (VESC) and the LiDAR come up. This never moves the car by itself.
 
-**Terminal 2** — `gap_follow` with its IMU stack. Steering damping is on by default, so the bare launch starts it:
+**Terminal 2** — `gap_follow` with its IMU stack. On car 2, ask for it (car 1's bare launch already does this). It needs `~/imu-calibration`, so it works only after the [IMU setup](car1-vs-car2.md#imu):
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
@@ -756,7 +766,7 @@ ros2 launch gap_follow gap_follow_launch.py
 
 **Working when:** the decision lines name a `steering damping` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
 
-To turn the gyro term off, add `steering_damping:=false` to the launch line.
+Add `steering_damping:=false` to turn the gyro term off.
 The IMU stack starts when any of `steering_damping`, `adaptive_grip`, `fused_speed`,
 `imu_understeer`, `imu_traction` or `imu_impact_stop` is on.
 The stack is not started when all six are off.
@@ -877,9 +887,9 @@ One more case gives no reason, because it is not a gyro fault. If the wheel spee
 Do these in order, as in [Validation](#validation). Each step needs the one before it.
 
 1. **Fallback check, wheels off the ground.** Start the launch with the car on a stand, and keep it still. The decision lines should say `adaptive_grip_off: imu waiting` for about 3 seconds, and then `adaptive grip limit 2.50m/s^2`. That is the base, unchanged.
-2. **Low speed does nothing, on purpose.** The node judges only when the sideways push the steering asks for reaches 80% of the limit. That push grows with speed squared, so with the shipped 2.5 m/s²:
-   - at the 0.33 rad steering limit, judging starts at about 1.45 m/s;
-   - at 0.2 rad, it starts at about 1.9 m/s;
+2. **Low speed does nothing, on purpose.** The node judges only when the sideways push the steering asks for reaches 80% of the limit. That push grows with speed squared, so with the shipped 2.5 m/s² (car 1, at its 0.33 rad limit: about 1.45 m/s):
+   - at car 2's 0.349 rad steering limit, judging starts at about 1.41 m/s;
+   - at 0.2 rad, it starts at about 1.89 m/s;
    - at 1 m/s, the limit never moves.
 
    A low-speed run therefore shows nothing. That is correct.
@@ -900,6 +910,8 @@ not establish the grip available on the floor.
 
 The flag starts `vehicle_state_launch.py`, the IMU stack that publishes `/odom/fused`.
 All six IMU features share one copy of that stack, even when enabled together.
+
+**On car 2** that stack starts with `bno:=false` (its BNO085 is not calibrated yet, [car1-vs-car2.md](car1-vs-car2.md#imu)), so `/odom/fused` is exactly the wheel speed and the flag changes nothing you could measure. `/odom/fused` comes from car 2's own four-state speed filter in `imu_bridge`, not car 1's estimator; the fallback rules below hold for both.
 
 When the IMU is untrusted, `gap_follow` drives on raw `/odom` instead, including its
 speed checks, acceleration ramp, time-to-collision brake and stale-odometry stop.
@@ -1216,7 +1228,7 @@ impact detection is enabled.
 **To resume after a latched stop, release LB and then press it again.**
 Holding LB, or pressing it without a release received after the impact, never
 clears the stop. A controller message missing the LB button does not count as
-a release. Starting a new `gap_follow` process starts with a cleared latch.
+a release. Starting a new `gap_follow` process starts with a cleared latch (the stop's held "on" state).
 
 ### What triggers it
 
@@ -1260,10 +1272,12 @@ controller with no earlier cap would have reached.
 <details>
 <summary><b>Recorded spikes and parameter reference</b>: skip unless checking or tuning the threshold.</summary>
 
-The 2026-10-29 sweep checked every bag under `~/.ros/racerbot_runs/*/bag`.
+Car 1's 2026-10-29 sweep checked every bag on car 1, under `~/.ros/racerbot_runs/*/bag`.
 Eight had non-empty `/imu/data`; the sixteen gyro-odometry replay bags did not.
-Metadata and all bag data used for the analysis were copied to
-`/tmp/oc-part-b23-i6/`; the source runs were not changed.
+The source runs were not changed.
+
+None of car 2's runs (in `data/racerbot_runs/`) were swept. The analysis copies
+stayed on car 1, in `/tmp/oc-part-b23-i6/`.
 
 | Run | Finite horizontal samples | Maximum h (m/s²) | 99.9th percentile (m/s²) |
 |---|---:|---:|---:|
@@ -1351,10 +1365,10 @@ Cars in a race start side by side, and the first corner can be as little as 2 m 
 
 The **first** time you press LB after starting `gap_follow_launch.py`, the car:
 
-- asks for full speed (`max_speed`, 5.0 m/s) straight away, instead of climbing to it at `max_acceleration` (5 m/s²). Some wheelspin is expected and fine.
+- asks for full speed (`max_speed`, 5.0 m/s on car 2 unless you lower it with `max_speed:=`) straight away, instead of climbing to it at `max_acceleration` (5 m/s²). Some wheelspin is expected and fine. That 5.0 m/s is 23,070 ERPM (motor speed) at car 2's `speed_to_erpm_gain` of 4614, just inside the 23,250 limit in `vesc.yaml`.
 - skips the comfort limits: the corner cap, the narrow-corridor cap and the speed hold.
 - ignores the other cars as *cars*: no following, no passing logic, no braking for a car alongside.
-- **holds straight** while its own straight path is clear. A car alongside whose nose is ahead of ours does not make it veer away.
+- **holds straight** while its own straight path is clear. A car alongside whose nose is ahead of ours does not make it veer away. On car 2 the steering command is then exactly 0, because gyro [steering damping](#steering-damping-gyro), the only thing that may add to it, is off until the BNO085 is set up.
   - "Clear" means nothing inside the band the body sweeps driving straight: its width plus 5 cm a side.
   - It has to be clear for as far as the car needs to stop, at least 1 m and at most 3 m.
 - if something gets into that straight path, such as a car cutting across or the wall at the end of the straight, it steers round it with the normal gap logic.
@@ -1378,7 +1392,7 @@ These still apply on every tick of the launch, exactly as they do the rest of th
 - **The braking limit**, so the car can still stop before the wall at the end of the straight.
 - **The curvature (grip) limit**, so it never takes a bend faster than the tyres can hold.
 
-With the IMU features (all off by default):
+With the IMU features (all off by default, and on car 2 none has its own thresholds yet, see [car1-vs-car2.md](car1-vs-car2.md#imu-feature-thresholds)):
 
 - The [understeer check](#understeer-check-imu) still caps speed during the launch, because it is a grip limit.
 - [Traction control](#traction-control-imu)'s hold is skipped during the launch: some wheelspin off the line is accepted.
@@ -1387,7 +1401,7 @@ With the IMU features (all off by default):
 <details>
 <summary>Why "the car starts turning" is not an end condition (safe to skip)</summary>
 
-The first plan also ended the launch when the steering request went past 0.15 rad. The simulator showed that this ends the launch on a dead-straight track.
+Car 1's first plan also ended the launch when the steering request went past 0.15 rad. The simulator showed that this ends the launch on a dead-straight track.
 
 When a car alongside gets its nose ahead of ours, plain gap_follow aims at the middle of the free space next to it. In the test scene that is about 0.23 rad of steering, which is no corner at all.
 
@@ -1419,26 +1433,83 @@ The knobs are in `src/gap_follow/config/gap_follow.yaml`, under `# --- Launch bo
 
 ### The car test order
 
-**Wheels off the ground first, and know what the first press does.** With the car on a stand, the first LB press spins the wheels straight up to the full 5 m/s command, with no ramp. Keep hands and cables clear of the wheels before you press. Then, in order:
+**Wheels off the ground first, and know what the first press does.** With the car on a stand, the first LB press spins the wheels straight up to the full 5 m/s command, with no ramp. Keep hands and cables clear of the wheels before you press. Nothing here has been run on car 2. Then, in order:
 
-1. **Wheels off.** Press LB once and check for the `launch_boost` state, then the `launch boost ended` line. With the wheels in the air the car never reaches a wall, so expect `time` after 3 s. Release, press again, and check that the wheels now ramp up.
+1. **Wheels off.** Press LB once and check for the `launch_boost` state, then the `launch boost ended` line.
+   - Expect the reason `distance` after about 1.3 s, not `time`. The launch counts distance from wheel speed, and the wheels are spinning freely. With the 0.3 s lag the car's speed loop shows, 5 m of wheel travel takes about 1.3 s.
+   - `braking` or `ttc_brake` is also fine if a wall is within about 5 m of the LiDAR. The node believes the wheel speed, so it thinks it is closing on that wall.
+   - Release, press again, and check that the wheels now ramp up.
 2. **Floor, low speed.** `ros2 launch gap_follow gap_follow_launch.py max_speed:=1.0`. The launch then asks for 1.0 m/s, not 5.0. Do a standing start down a straight with nobody in front of the car.
-3. **Floor, full speed, alone.** Shipped settings, a straight of at least 2 m, nobody in front.
+3. **Floor, full speed, alone.** Shipped settings, a straight of at least 2 m, nobody in front. Read the stopping limit below first, and make sure what's at the far end can take a hit.
 4. **Then side by side** with another car, with a person on each controller.
 
 ### What the simulator says
 
-The simulator's copy (`tools/f1tenth_sim/gap_mirror.py`) has the same launch logic, and `test_gap_mirror_parity.py` checks a whole launch against the real node, tick by tick. Measured 2026-10-30:
+The simulator's copy (`tools/f1tenth_sim/gap_mirror.py`) has the same launch logic. `test_gap_mirror_parity.py` checks a whole launch against the real node, tick by tick, plus an LB release in mid-launch and a blocked grid. These are car 2's numbers, measured 2026-10-30 with `eval_gap.py --seeds 4` and `--set enable_launch_boost=false`, car 2's model and limits.
 
-- **The start itself.** On car 1's course (`car1_course_2026_10_26`) from standstill, the launch car is 0.91 m further along at 1.4 s (3.44 m against 2.53 m), and 0.95 m further at 2.0 s.
-- **Over a whole solo lap it costs nothing.** Across 8 indoor tracks × 4 seeds the mean lap is 0.09 s faster, which is within seed noise.
-  - Faster on most: `narrow_1p2` −0.27 s, `car1_course_2026_10_26` −0.21 s, `indoor_tight` −0.14 s.
-  - Slightly slower on two: `asb_sharp` +0.09 s, `asb_10000` +0.07 s.
-  - The point is the lead at the first corner, not the lap time.
-  - Before the car held straight (it steered with the gap logic through the launch), `asb_sharp` was +0.64 s and car 1's course +0.38 s.
-- **No contact.** 32 solo runs, plus 12 two-car runs with the cars 1 m apart nose to tail (launch car against no-launch car, both start orders): no wall or car contact.
+**The start itself.** Distance driven from standstill on seed 12345:
 
-**Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on the car. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
+| Track | at 1.0 s, on / off | at 2.0 s, on / off | at 3.0 s, on / off |
+|---|---|---|---|
+| `room_2026_07_27` (car 2's own SLAM map) | 1.51 / 1.25 m | 3.24 / 3.01 m | 4.46 / 4.54 m |
+| `indoor_tight` | 1.73 / 1.34 m | 4.27 / 4.13 m | 6.46 / 6.17 m |
+| `car1_course_2026_10_26` | 1.74 / 1.31 m | 6.26 / 5.34 m | 10.0 / 9.23 m |
+
+So the gain depends on how long the first straight is. On car 2's room the first corner comes early, so the launch is about 0.25 m ahead and has lost it by 3 s.
+
+**One solo lap, median of 4 seeds.** There was no contact in any of the 72 runs.
+
+| Track | Launch on | Launch off | Difference |
+|---|---|---|---|
+| `room_2026_07_27` | 8.29 s | 7.43 s | **+0.86 s** |
+| `narrow_1p0` (3 of 4 seeds finish, both ways) | 13.98 s | 13.58 s | +0.40 s |
+| `indoor_oval` | 11.30 s | 11.30 s | 0.00 s |
+| `indoor_tight` | 10.62 s | 10.70 s | −0.07 s |
+| `indoor_wide` | 14.18 s | 14.27 s | −0.09 s |
+| `narrow_1p2` | 10.87 s | 11.04 s | −0.17 s |
+| `asb_10000` | 15.91 s | 16.16 s | −0.25 s |
+| `car1_course_2026_10_26` | 11.91 s | 12.29 s | −0.38 s |
+| `asb_sharp` | 16.67 s | 17.32 s | −0.65 s |
+
+The table uses medians because one launch-off run on `narrow_1p2` took 32.6 s, which would swamp a mean. On `narrow_1p0` the car wedges on a different seed each way. With the launch on that wedge comes at 7.7 s, long after the launch ended.
+
+**Why car 2's room is slower.** Holding straight takes the car closer to the wall going into the first corner (0.27 m ahead of the body at 2.0 s, against 0.67 m without the launch).
+
+Most of the cost then comes from the other-car layer, which reads a wall as a moving car and caps the speed at 0 for a moment. With `enable_opponent_awareness=false` the lap is 7.4 s on against 7.2 s off, so the launch itself costs about 0.2 s there.
+
+**Two cars, starting 1 m nose to tail, both start orders.**
+
+| Track | Launch | Runs that finish | Contact |
+|---|---|---|---|
+| `room_2026_07_27`, 4 seeds | off on both cars | **8 of 8** | none |
+| `room_2026_07_27`, 4 seeds | on on both cars | **6 of 8** | none |
+| `room_2026_07_27`, 4 seeds | on one car, off the other | **5 of 8** | none |
+| `indoor_tight`, 2 seeds | on one car, off the other | 4 of 4 | none |
+| `car1_course_2026_10_26`, 2 seeds | on one car, off the other | 4 of 4 | none |
+
+In the room, the unfinished runs are one car stopped about 3 m into the lap (0.2 laps).
+
+In the one run traced, the launch ends up with the nose inside the forward reserve after the first corner, and the car sits in `creep` commanding about 0 m/s for the rest of the run. Nothing hits anything, but on the floor a person would have to rescue it.
+
+**So on car 2's room, or any course with a corner soon after the start, think about `launch_boost:=false`.** On every track, whichever car started in front finished first: at 1 m nose to tail the launch car never passed anyone.
+
+<details>
+<summary>The stopping limit at full speed (read this before step 3 of the car test)</summary>
+
+The braking limit can only slow the car for what it can see, and it only looks `swept_clearance_max_length` (3 m) ahead. Beyond that the path counts as clear.
+
+Stopping from 5 m/s takes about 5.4 m: 5 × 0.25 s of delay (`braking_latency_sec`), plus 5² / (2 × 3 m/s²) of braking (`max_braking_decel`). That is longer than the 3 m it looks. This limit exists without the launch too, but the launch reaches high speed sooner.
+
+A one-off check on a straight ending in a wall, with a 0.3 s lag on speeding up:
+
+- **If the car really brakes at 5 m/s² or better:** it stops with the same margin from every distance tried up to 10 m, launch on or off.
+- **If it really brakes at only 3 m/s²:** the launch runs past the padded front of the body by 0.15 m with a wall 5 m ahead, where the ramped start stops cleanly. From 6 m and more, both run past it by about 0.2 m.
+
+Car 2's real braking from 5 m/s has never been measured, which is why step 2 comes before step 3.
+
+</details>
+
+**Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on car 2. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
 
 ## See also
 
@@ -1446,3 +1517,103 @@ The simulator's copy (`tools/f1tenth_sim/gap_mirror.py`) has the same launch log
 - [simulator.md](simulator.md) — the no-ROS simulator these numbers come from.
 - [gap-follow-improvement-plan.md](gap-follow-improvement-plan.md) — the original diagnosis that led here.
 - [steering-laws.md](steering-laws.md) — the other October 2026 change, to the map-based `pure_pursuit` controller.
+
+## Speed on the real course (2026-10-30)
+
+> **Who this is for:** anyone racing `gap_follow` on the 50 m course of 2026-10-30, or wondering why it used to stop mid-lap.
+> **Read first:** [Validation](#validation). This changes how the car steers and how fast it goes, so the same bring-up order applies.
+> **You'll be able to:** pick the right setup for one car or several, say what was wrong, and judge the evidence.
+> **Time:** 10 minutes.
+
+**None of this has been driven on the floor.** The numbers below come from replaying that day's recordings and from the simulator. The 15 s lap the team wanted has not been reached: the best simulated lap is about 19 s.
+
+### Which setup to use
+
+| You are running | Command | Simulated lap on this course |
+|---|---|---|
+| Other cars on the track | `ros2 launch gap_follow gap_follow_launch.py` | 21.3-22.1 s |
+| One car, against the clock | `ros2 launch gap_follow gap_follow_launch.py time_trial:=true` | 18.8-19.3 s |
+
+**Never use `time_trial:=true` with another car on the track.** It turns [opponent awareness](#several-cars-at-once) off, and its aim did much worse with two cars in the simulator: 0 of 12 runs finished on `room_2026_07_27`, with wall contacts.
+
+### What was wrong
+
+**The car stopped mid-lap because it took pieces of wall for other cars.** With one car on the track, the tracker reported 94 "moving cars" in 410 s of driving, and the ones checked against the map sat on or near a mapped wall. The follow limit then asked for 0 m/s, and held that for 1 s after the piece of wall went out of view.
+
+Pressing LB again did not fix it. Most stops ended by themselves after about 1 s, and the stop usually ended while the driver was reaching for the button.
+
+**The new rule:** something off the car's own steering arc can slow it to 0.5 m/s (`opponent_follow_floor`) but cannot stop it, and is not remembered once it is gone. A car really ahead is on the arc, so it still gets the full follow law, down to zero. Whatever the car would actually hit still stops it, through the braking limit, the time-to-collision brake and the clearance stops, because those read the laser scan directly.
+
+**The braking check looked too short a distance ahead.** It treated any path clear for 3 m as fully clear, at any speed. The model says the car needs about 5.6 m to stop from 5 m/s, and the real car took 3.4 m from 5.41 m/s (run `20261030-175124`). `swept_clearance_max_length` is now 5 m.
+
+**Fallback gaps aimed at the wall.** At a blind bend no gap is 2 m deep, so the car takes a wider, shallower fallback gap. Its midpoint can point at the outer wall, which wedged the simulated car against the wall at this course's bottom-right bend. The real car flickered between the two kinds of gap at the same bend. `aim_depth_bias_fallback: 1.0` aims a fallback gap at its deepest beam instead.
+
+### Results
+
+Solo: 10 tracks, 12 seeds, both directions, at two grip levels, so 480 runs per row. These ran on the plain calibration, before the simulator was fitted to the floor. Of its two friction levels, 0.42 matched the real grip curve best and 0.55 flattered the car.
+
+On the measured floor profile of 2026-10-31 ([sim-calibration.md](sim-calibration.md#speed-on-the-calibrated-floor)) the new default laps this course in 20.71 s and `time_trial:=true` in 18.10 s, from a standing start, 60 laps each.
+
+| Setup | Finish | Runs with wall contact | This course: finish, lap |
+|---|---|---|---|
+| Shipped before 2026-10-30 | 369 | 54 | 30 of 48, 20.4-22.6 s |
+| **New default** | 459 | 1 | 48 of 48, 21.3-22.1 s |
+| **`time_trial:=true`** | 453 | 0 | 48 of 48, 18.8-19.3 s |
+
+Most of the runs that do not finish, in every row, are on `room_2026_07_27`, where they stop without contact.
+
+Two cars on the new default: 12 seeds at each of three speed mixes (equal, 3.0 and 3.5 m/s, 2.5 and 3.5 m/s). No wall contact and no car-to-car contact in any of the 180 runs.
+
+| Track | New default, finished of 36 | Shipped, finished of 36 |
+|---|---|---|
+| `course_2026_10_30` | 36 | not measured: the old code has no copy of this track |
+| `car1_course_2026_10_26` | 36 | 36 |
+| `indoor_wide` | 36 | 36 |
+| `narrow_1p2` | 36 | 35 |
+| `room_2026_07_27` | 32 | 32 |
+
+Replaying the six single-car `gap_follow` recordings of that day (410 s), where every "moving car" is false:
+
+| Measure | Shipped | New |
+|---|---|---|
+| Time with the follow limit under 0.4 m/s | 45.8 s | 2.1 s |
+| Episodes of 0.3 s or more | 33 | 2 (longest 1.1 s) |
+| Time under any follow limit | 83 s | 39 s |
+
+### What this evidence does not show
+
+- **It has never been driven.** Follow the [Validation](#validation) order.
+- **The false "cars" are reduced, not gone.** They still slow the car, about 39 s of those 410 s. That is why one car against the clock should use `time_trial:=true`.
+- **No recording has two cars in it**, so recognising a real car has only been measured in the simulator.
+- **The simulator is not the floor.** Its plain calibration gives 5.4 m/s² of grip. The real car follows the request up to about 2.5 m/s², then rolls off: asking 3 gets 2.6, asking 5.5 gets 3.4, asking 10 gets about 4.2.
+- **Team A's runs did not touch a wall.** An earlier version of this page said its `disparity_extender` spent 9.2 of 85 s within 5 cm of a mapped wall. That measure used a padded body box against map walls that stand about 6 cm proud of the real ones, and the people watching saw no contact. Its best pace was about 17.6 s per lap.
+- **The simulator was not fitted to this floor** when these results were made. [sim-calibration.md](sim-calibration.md) has the fitted version, and the speed sweep on it.
+
+<details>
+<summary>How the real numbers were measured, and what was tried and rejected (safe to skip)</summary>
+
+Every run of the day was located against the rebuilt map `data/racerbot_auto/20261030-185036-fixed` by matching each scan to it. That gives true position and speed, independent of the wheels. The course line is 50.74 m.
+
+| Driver | Real lap or pace |
+|---|---|
+| `gap_follow`, mapping at the 3.5 m/s cap | 20.6-20.9 s |
+| `gap_follow`, 5 m/s, opponent awareness on | 21.5-26 s |
+| Team A `disparity_extender`, max 3.0 | 19.2-20.5 s |
+| Team A `disparity_extender`, max 5.5-6.0 | about 17.6-17.8 s |
+| Team A `ftg` | 18.6-19.8 s |
+
+**Where the time goes.** A perfect speed profile on the path `gap_follow` really drove would run about 16.9 s at 3 m/s² of grip, against 20.6 s actual, so speed planning loses more than the line does. On the center of the course, 15 s needs about 4 m/s² of grip. A line that cuts corners with 32 cm of margin is 47 m long and needs about 2.5-3 m/s².
+
+**Rejected, each with a measurement behind it:**
+
+- A motion proof from free space: a car must enter space a laser ray passed through, or leave space that is now clear. It removed 93 of 94 false cars in replay, but the follower then wedged behind a real leader (1 of 8 on this course).
+- The same proof as a tier, with unproven movers limited to the car's own path. It kept 30.5 s of the near-zero time in replay.
+- Using the gyro for the tracker's heading: about the same stalls. Narrowing the tracker's association gate: no better.
+- `max_braking_decel` above 3.0. Every recorded stop fits 4.0, but laps got slower because arriving faster made the path worse.
+- A time filter on the corner speed limit: at most 0.3 s gained, and failures at low grip.
+- `steering_gain` 0.7 or a lower `steering_gain_speed_ref`: faster on short tracks, and `levine_blocked` fell to 1 of 6 and 0 of 6.
+- Sweeps with 3 seeds: one made `steering_gain` 0.7 look like a clear winner, and 6 seeds overturned it.
+
+**`pure_pursuit` on this map** was also simulated: 28.6-30.5 s on the map's line, and 21.9-23.8 s on the cut line, where several runs failed. Its safety net caps it at 1 m/s on "avoid" ticks. It is not a shortcut to 15 s without more work, and that harness may differ from the real node.
+
+</details>

@@ -37,7 +37,7 @@ Edit [`config/gap_follow.yaml`](config/gap_follow.yaml), **not** `gap_follow_nod
 The car drives at the **lowest** of several speed caps, so raise the cap that is binding. The comment block at the top of the YAML lists them in order: usually `corner_speed`, then `max_lateral_accel` in tight corners, then `max_speed` on straights. Two rules:
 
 - Keep `corner_speed <= corner_speed_wide <= max_speed`. If that ordering breaks, the node exits at startup.
-- Don't raise `max_braking_decel` to go faster. It is the braking the car *assumes* it has, so raising it makes the car drive faster than it can stop. `max_acceleration` is only how fast a speed command may rise (5.0 on car 1 since 2026-10-27), and never limits braking.
+- Don't raise `max_braking_decel` to go faster. It is the braking the car *assumes* it has, so raising it makes the car drive faster than it can stop. `max_acceleration` is only how fast a speed command may rise (5.0 since 2026-10-27, from car 1's race defaults), and never limits braking.
 
 Test any increase wheels-off first, then at low speed in open space.
 
@@ -275,9 +275,8 @@ is also what the standard F1TENTH follow-the-gap reference uses.
 
 $\delta$ is then clipped to `max_steering_angle`. **This default changed
 from `0.4189 rad` (~24°) to `0.26 rad` (~15°)**, matching `pure_pursuit`,
-and on car 1 the shipped config went to `0.33 rad` (19°) on 2026-10-22, from
-car 1's own circle calibration (`docs/hardware-reference.md`; car 2 uses
-0.349 from its own).
+and the shipped config went to `0.349 rad` (20°) after the 2026-10-16 steering
+calibration (`docs/hardware-reference.md`).
 `0.4189` was never physically achievable symmetrically: this car's servo
 calibration reaches `+0.313 rad` one way and only `-0.263 rad` the other, so
 anything past `0.26` was a command the servo saturated on one side and not
@@ -316,9 +315,9 @@ speed = min(desired_speed, self.last_commanded_speed + self.max_acceleration * d
 
 `min_speed` floors only the curvature ceiling, never the clearance one — the
 car must always be allowed to brake below its cruising floor when something
-is close. With the default `max_lateral_accel: 1.0` and car 1's `0.33 rad`
-steering clamp, the curvature ceiling falls to about `1.03 m/s` at full lock
-(`sqrt(1.0 * 0.36 / tan(0.33))`; it was about `1.16 m/s` at 0.26 rad); the clearance ceiling starts biting below
+is close. With the default `max_lateral_accel: 1.0` and the `0.349 rad`
+steering clamp, the curvature ceiling falls to about `0.99 m/s` at full lock
+(`sqrt(1.0 * 0.36 / tan(0.349))`; it was about `1.16 m/s` at 0.26 rad); the clearance ceiling starts biting below
 roughly `0.92m` of forward room.
 
 ### 9. Bound how fast a command may change
@@ -328,7 +327,7 @@ Both final commands are rate-limited against the previous one
 change at the servo or the motor:
 
 - steering slews at most `max_steering_rate` (`2.0 rad/s` in the shipped
-  YAML since 2026-10-20, i.e. the full `±0.33` envelope in about 0.33 s;
+  YAML since 2026-10-20, i.e. the full `±0.349` envelope in about 0.35 s;
   the node's own default is `1.0`);
 - speed may only *rise* at `max_acceleration`. Falling is never rate-limited
   — braking is always allowed to be immediate.
@@ -472,13 +471,13 @@ apex, only change the car's pace approaching one.
 | `corner_speed_wide` | `1.4` m/s (shipped YAML: `2.714`) | Ceiling `corner_speed` may rise to on a sensed-wide corner |
 | `enable_corner_setup` | `true` (shipped YAML: `false`, since 2026-10-27) | On the approach to a turn in a corridor, move toward the outside wall so the car turns in late. See [docs/gap-follow.md](../../docs/gap-follow.md#corner-setup) |
 | `enable_cornering_anticipation` / `anticipation_near_depth` | `false` / `2.5` m | Extra speed cap from near/far gap-bearing disagreement (see below) — ships off, measured to over-brake in open rooms |
-| `max_steering_angle` | `0.33` rad (19°) on car 1 | Hard command clamp. Car 1's check circles reached ~0.39–0.40 rad at full stick (2026-10-21); 0.33 leaves margin for gain error. Must fit `vesc.yaml`'s servo clip |
+| `max_steering_angle` | `0.349` rad (20°) | Hard command clamp. Both sides reach ~25° since the 2026-10-16 calibration; 20° leaves margin for gain error |
 | `steering_gain` | `1.0` | Steering per radian of gap bearing, before the `max_steering_angle` clip. `1.0` points the wheels at the gap. Raise only if the car is slow to leave a wall; too high weaves |
-| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.5` (raised 2026-10-26 from a map run's grip, `20261026-194514`; `2.0` from 2026-10-19; not yet run on the floor at 2.5, see [validation](../../docs/gap-follow.md#validation)) |
+| `max_lateral_accel` | `1.0` m/s² | Cornering speed ceiling: $v \le \sqrt{a_{lat}/\|\kappa\|}$. Shipped YAML: `2.5` (car 1 since 2026-10-26, from its run `20261026-194514`; car 2 since 2026-10-29; `2.0` from 2026-10-19; not yet run on the floor at 2.5), see [validation](../../docs/gap-follow.md#validation) |
 | `max_braking_decel` | `3.0` m/s² | **Safety-critical.** Braking authority the car *assumes it has* when deciding how fast it may drive for the clearance it can see. Set above real capability and it drives faster than it can stop. Not the same knob as `pure_pursuit`'s identically named command slew rate — don't copy that value here |
 | `max_acceleration` | `3.0` m/s² (shipped YAML: `5.0`, since 2026-10-27) | Cap on how fast a speed *command* may rise; braking is never limited |
 | `max_steering_rate` | `1.0` rad/s | Cap on how fast a steering command may slew. Shipped YAML: `2.0` (simulator-validated only) |
-| `enable_steering_damping` | `false` (shipped YAML: `true`, since 2026-10-27) | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn off with `gap_follow_launch.py steering_damping:=false`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
+| `enable_steering_damping` | `false` (shipped YAML on car 2: `false` until its BNO085 is mounted and calibrated, [car1-vs-car2.md](../../docs/car1-vs-car2.md#imu); car 1 ships `true`) | Adds `-steering_damping_gain × yaw rate` to the steering request, using the gyro on `/imu/data`. Used only while `/imu/status` says `ok` and the sample is fresh; otherwise it adds zero. Turn on with `gap_follow_launch.py steering_damping:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#steering-damping-gyro) |
 | `steering_damping_gain` | `0.0` s (shipped YAML: `0.10`, since 2026-10-27) | Gain for the term above, in seconds. Refused at startup if negative or not finite |
 | `imu_topic` / `imu_status_topic` / `imu_timeout_sec` | `/imu/data` / `/imu/status` / `0.1` s | The gyro samples, their verdict, and how old a sample may be before the term turns off. `imu_timeout_sec` is refused at startup unless positive |
 | `enable_adaptive_grip` | `false` | Raises or cuts the lateral limit behind the corner speed caps, from the gyro's grip ratio, starting at `max_lateral_accel`. Used only while the gyro is trusted; otherwise the limit is `max_lateral_accel`. Turn on with `gap_follow_launch.py adaptive_grip:=true`. See [docs/gap-follow.md](../../docs/gap-follow.md#adaptive-grip-imu) |
@@ -507,16 +506,13 @@ apex, only change the car's pace approaching one.
 ### Turning circle vs. course width — a hard geometric limit
 
 `max_steering_angle` is bounded by what the steering can physically reach
-both ways. On car 1 (`servo = -0.83*delta + 0.366`, clip 0.05–0.75, measured
-2026-10-21, `docs/hardware-reference.md`) full stick is 0.38 rad and both sides
-reach it; the config uses 0.33 rad (19°) for margin, a **minimum turn radius
-of 1.05 m** on the 0.36 m wheelbase. (Before 2026-10-22 it was 0.26 rad,
-1.35 m. Car 2 has its own servo and uses 0.349 rad.) Raising it past what both sides reach makes
+both ways. Since the 2026-10-16 circle calibration (`servo = -0.78*delta +
+0.5904`, clip 0.15–0.95, `docs/hardware-reference.md`) that is about 25° each
+side; the config uses 0.349 rad (20°) for margin, a **minimum turn radius of
+0.99 m** on the 0.36 m wheelbase. (Before, the unmeasured `-1.2135` gain and
+0.85 clip left ±0.26 rad, 1.35 m.) Raising it past what both sides reach makes
 the car silently under-steer one way; `racerbot_launch`'s
 `test_steering_limits_fit_servo.py` refuses a limit the servo clips.
-
-> **Car 1:** 0.33 is not yet validated on car 1 — wheels off the ground
-> first, then low speed.
 
 On a 1.0 m course that is the binding constraint on what the car can drive:
 
