@@ -2,11 +2,28 @@
 
 from pathlib import Path
 
-from . import guards, identity, paths
+from . import guards, hardware, identity, paths, profile
 
 
 class MissingCalibrationError(RuntimeError):
     """A required car calibration is absent."""
+
+
+def launch_car_id(cars_dir: Path | None = None) -> str:
+    car_id = identity.current_car_id()
+    message = hardware.contradiction(
+        profile.load_profile(car_id, cars_dir), profile.all_profiles(cars_dir),
+        hardware.usb_ids_present())
+    if message:
+        raise hardware.CarHardwareError(f'{message} Refusing to start.')
+    return car_id
+
+
+def car_params(launch_config_name: str, shared_default: str, config_name: str, car_id: str) -> list:
+    from launch.substitutions import LaunchConfiguration
+
+    layered(shared_default, config_name, car_id)
+    return [LaunchConfiguration(launch_config_name), *overlay_files(config_name, car_id)]
 
 
 def overlay_files(config_name: str, car_id: str | None = None,

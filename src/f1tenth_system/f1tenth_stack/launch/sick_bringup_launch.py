@@ -29,9 +29,12 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+# racerbot: car overlays (docs/car1-vs-car2.md)
+from racerbot_car.layers import car_params, launch_car_id
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     joy_teleop_config = os.path.join(
         get_package_share_directory('f1tenth_stack'),
         'config',
@@ -77,11 +80,13 @@ def generate_launch_description():
 
     ld = LaunchDescription([joy_la, vesc_la, sensors_la, mux_la])
 
+    joy_params = car_params('joy_config', joy_teleop_config, 'joy_teleop.yaml', car_id)
+    vesc_params = car_params('vesc_config', vesc_config, 'vesc.yaml', car_id)
     joy_node = Node(
         package='joy',
         executable='joy_node',
         name='joy',
-        parameters=[LaunchConfiguration('joy_config')]
+        parameters=joy_params
     )
     # joy_teleop is deliberately NOT started here, same as bringup_launch.py:
     # its default profile publishes /teleop continuously, and /teleop
@@ -91,19 +96,19 @@ def generate_launch_description():
         package='vesc_ackermann',
         executable='ackermann_to_vesc_node',
         name='ackermann_to_vesc_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     vesc_to_odom_node = Node(
         package='vesc_ackermann',
         executable='vesc_to_odom_node',
         name='vesc_to_odom_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     vesc_driver_node = Node(
         package='vesc_driver',
         executable='vesc_driver_node',
         name='vesc_driver_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     sick_node = Node(
         package='sick_scan_xd',
