@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip('launch', reason='ROS launch is needed; source the workspace to run wiring tests')
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'src/racerbot_car'))
+sys.path.insert(0, str(ROOT / 'src/gap_follow'))
 from racerbot_car import hardware, identity
 from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
 from gap_follow.speed_overrides import mapping_speed_overrides
