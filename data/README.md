@@ -26,6 +26,11 @@ Folder names are the run's start time, `YYYYMMDD-HHMMSS`. Any tool still takes
 
 ## Saving runs to GitHub
 
+Run `tools/dev/setup_clone.sh` once per clone to install the commit hook. The
+hook rejects staged files over 95 MiB, and `tools/save_runs.sh` refuses more
+than 1.5 GiB of staged files to keep pushes below GitHub's limit. Data stays in
+plain git; do not use Git LFS.
+
 After a session on the car, with every recorder stopped:
 
 ```bash
