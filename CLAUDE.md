@@ -10,6 +10,8 @@ ROS2 Jazzy workspace for SFU Racerbot's **two roboracer/F1TENTH cars**, `rb1` (c
 
 This is a physical robot that can hurt itself, people, or property if driving code is wrong — treat any change to a node that can publish `/drive` with corresponding care (see "Safety model" below).
 
+In paths below, `<id>` means `rb1` or `rb2`; `calibration/`, `tuning/` and `imu/` are relative to that car's profile directory. Neither car currently has a tuning overlay directory; create it only for a justified override. Timestamped data and `metadata/` paths are run outputs, not files required in a fresh checkout. Submodule paths require the pinned submodule checkout. `docs/car-profiles.md` is pending from the companion documentation branch; the implemented identity and overlay contract is also in `src/racerbot_car/README.md`.
+
 **`docs/` is the primary source of truth and is unusually thorough — read the relevant doc before making non-trivial changes rather than inferring behavior from code alone.** Start with `docs/architecture.md` (node/topic graph, safety model) before writing or touching any driving code. Full index in [README.md](README.md).
 
 ## Build, test, run
@@ -144,16 +146,16 @@ Every node that can publish `/drive`, `/ackermann_cmd`, or `/commands/motor|serv
 
 ## Package anatomy (local `ament_python` packages)
 
-Every local package (`gap_follow`, `pure_pursuit`, `racerbot_launch`) follows the same shape — see `docs/concepts.md#anatomy-of-a-package` for the full breakdown:
+Local ROS packages such as `gap_follow`, `pure_pursuit` and `racerbot_launch` follow this shape; pure-Python support packages such as `racerbot_car` need no ROS node or launch file. See `docs/concepts.md#anatomy-of-a-package` for the full breakdown:
 ```
 src/<pkg>/
-├── package.xml            # deps: rclpy always; sensor_msgs/ackermann_msgs/nav_msgs as needed
+├── package.xml            # deps: rclpy for Python ROS nodes; message packages as needed
 ├── setup.py / setup.cfg   # ament_python build, registers console_script entry points
 ├── resource/<pkg>         # empty marker file, required by ament_python
 ├── <pkg>/                 # importable module; ROS-dependent node + any framework-agnostic logic split out
 ├── launch/<pkg>_launch.py
 ├── config/<pkg>.yaml      # tune behavior here, not in code — every knob is a declared ROS parameter
-└── test/                  # only for logic with no rclpy dependency (see racing_math.py, protocol.py)
+└── test/                  # ROS-free logic tests and isolated-domain ROS node tests (see above)
 ```
 New packages go under `src/`, one per feature — don't add files into an existing package unless genuinely extending its purpose.
 
