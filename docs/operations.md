@@ -439,7 +439,7 @@ Requires a saved map and working localization for this track — both sections a
 
    ```bash
    ros2 launch pure_pursuit waypoint_recorder_launch.py \
-       output_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
+       output_file:=/home/racerbotcar-2/racerbot-ws/src/pure_pursuit/waypoints/my_track_raw.csv
    ```
 
 4. Hold LB and drive one clean lap by hand, finishing roughly back where you started.
@@ -505,7 +505,7 @@ It **refuses to write the file** if the resulting line needs more steering than 
 
    ```bash
    ros2 launch racerbot_launch race_launch.py \
-       waypoints_file:=/home/racerbotcar-1/racerbot-ws/src/pure_pursuit/waypoints/my_track_profiled.csv
+       waypoints_file:=/home/racerbotcar-2/racerbot-ws/src/pure_pursuit/waypoints/my_track_profiled.csv
    ```
 
 4. Give it a **2D Pose Estimate** seed in RViz, same as any other time you start localization.
@@ -536,7 +536,7 @@ Power down the VESC and battery **last**, after the ROS nodes have stopped. Doin
 
 Group membership (`dialout`, `input`) only applies to sessions started *after* the group was added. Open a fresh terminal, or run `newgrp dialout && newgrp input` in the current one.
 
-**Servo position shows `0.4` and nothing seems to be happening**
+**Servo position shows `0.5304` and nothing seems to be happening**
 
 That's neutral — dead center — not zero-as-in-broken. See the formula in [hardware-reference.md](hardware-reference.md#vesc-motor--steering-controller).
 
@@ -548,4 +548,4 @@ This is the safety model working as designed. If you follow [Running autonomy](#
 
 **The dashboard's camera panel says "camera offline" even though the camera and stream nodes are definitely running**
 
-The page reaches the camera through the site and the car's `rb1-cam-origin` tunnel route, so check that hop: `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb1` on the car lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).
+The page reaches the camera through the site and the car's `rb2-cam-origin` tunnel route, so check that hop: `ros2 run web_dashboard remote_check --site https://dashboard.sfuracerbot.ca --car rb2` on the car lists port 9090 and the route. See [web-dashboard.md](web-dashboard.md#if-the-site-cant-reach-the-car).

@@ -4,7 +4,7 @@
 > **Read first:** nothing.
 > **What's in it:** one entry per problem: what is wrong, the evidence, and the suggested fix.
 
-Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 2 is [Racerbot-Car-2-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-2-Workspace) at `779c060`. When you fix one, delete its entry in the same commit; the resolved note below retains the simulator collision history.
+This list was written on car 1 ([Racerbot-Car-1-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace), checked at `881c409`) and ported to car 2 on 2026-10-24 with the rest of car 1's changes. Entries were re-checked on car 2 where they could be without the car running, and say so; the rest still describe car 1. When you fix one, delete its entry in the same commit. The 2026-10-29 port of car 1's Part B-1 racing work brought car 1's resolved simulator entry below.
 
 ## Contents
 
@@ -18,7 +18,7 @@ Each entry was checked against car 1 at `881c409` unless it says otherwise. Car 
 
 ### Two nodes still declare the pre-October 0.26 rad steering default
 
-`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.33 and 0.30, so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
+`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.349 and 0.30 on car 2 (0.33 and 0.30 on car 1), so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
 
 **Fix:** match the declared defaults to the YAMLs, or read them from `docs/hardware-reference.md`'s numbers, and correct the racing-autonomy sentence. Check which node tests rely on the declared default first.
 
@@ -54,7 +54,9 @@ Wheelbase 0.36 m, width 0.30 m and the LiDAR offset 0.26 m were tape-measured on
 
 ## Setup on the car
 
-### The install is a plain build, while the docs say "always `--symlink-install`"
+### The install is a plain build, while the docs say "always `--symlink-install`" (car 1)
+
+Not on car 2: its last build has `symlink_install=True` and `install/gap_follow` holds an `.egg-link` (2026-10-24). On car 1:
 
 `CLAUDE.md` and `docs/concepts.md` say every build uses `--symlink-install`, so YAML and launch edits in `src/` take effect without a rebuild. The packages in `install/` were built without it: `install/<pkg>/lib/python3.12/site-packages/` holds `<pkg>-0.1.0-py3.12.egg-info` copies (gap_follow, pure_pursuit, race_diagnostics, racerbot_doctor, imu_bridge), and `log/latest_build/logger_all.log` shows `symlink_install=False`. Editing `src/gap_follow/config/gap_follow.yaml` and relaunching therefore changes nothing until that package is rebuilt. `docs/steering-laws.md` makes the same promise ("No rebuild needed").
 
@@ -62,9 +64,9 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 **Fix:** rebuild once with `rm -rf build install && colcon build --symlink-install --parallel-workers 1`, then confirm `ros2 launch gap_follow gap_follow_launch.py` still starts. If `PackageNotFoundError` comes back, record the exact steps here and correct `CLAUDE.md` and `docs/concepts.md`.
 
-### `osqp` is not installed, so MPC cannot start
+### `osqp` is not installed on car 1, so MPC cannot start there
 
-`python3 -c "import osqp"` fails on car 1 (2026-10-24). `docs/steering-laws.md`, "Installing osqp for MPC", says "On the car it was installed with", a line ported from car 2. `race_launch.py steering_law:=mpc` refuses to start until it is installed. The README's quick start doesn't mention it.
+On car 2 `import osqp` works (2026-10-24). `python3 -c "import osqp"` fails on car 1 (2026-10-24). `docs/steering-laws.md`, "Installing osqp for MPC", says "On the car it was installed with", a line ported from car 2. `race_launch.py steering_law:=mpc` refuses to start until it is installed. The README's quick start doesn't mention it.
 
 **Fix:** `pip install --user --break-system-packages osqp==1.1.3`, check `numpy` stays at 1.26.4, and add the step to the README's setup.
 
@@ -78,16 +80,9 @@ An earlier session recorded that `--symlink-install` breaks `ros2 run` with `imp
 
 ## Cross-car drift
 
-These differences between the two repos are not hardware differences, so one of the two is behind. They are not in `docs/car1-vs-car2.md` because nothing about car 1's hardware requires them.
+Differences between the two repos that are not hardware differences, so one of the two is behind. They are not in `docs/car1-vs-car2.md` because no hardware requires them.
 
-| What | Car 1 | Car 2 |
-|---|---|---|
-| `gap_follow_launch.py max_speed:=` | Present (`gap_follow/launch_speed.py`) | Missing |
-| `map_course` IMU options (`imu`, `gyro_odom`, `fused_speed`) | Present | Missing |
-| `map_course record_bag` default | `true` | `false` |
-| `imu_bridge`'s `vehicle_state_node` (fused speed, measured steering, gyro odometry) | Present | Missing |
-
-**Fix:** decide per row whether car 2 should take car 1's version, and port it there.
+Car 2 took every row of car 1's list (`max_speed:=`, the `map_course` IMU options, `record_bag:=true`, `imu_bridge`) in the 2026-10-24 port, so none are left. The one remaining difference in that area, `map_course imu:=false` by default on car 2, exists because car 2 has no BNO085 yet, so it is in `docs/car1-vs-car2.md` instead.
 
 ## Resolved
 
