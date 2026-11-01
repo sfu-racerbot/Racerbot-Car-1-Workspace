@@ -25,6 +25,7 @@ def repo(tmp_path):
     (tmp_path / 'cars/machines.yaml').write_text('{}\n')
     for car in ('rb1', 'rb2'):
         (tmp_path / 'cars' / car).mkdir()
+        (tmp_path / 'cars' / car / 'car.yaml').write_text('{}\n')
         folder = tmp_path / 'data' / car / 'racerbot_runs'
         folder.mkdir(parents=True)
         (folder / 'run.txt').write_text(car)

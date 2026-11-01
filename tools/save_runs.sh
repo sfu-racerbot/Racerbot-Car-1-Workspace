@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Commit and push the runs saved in data/ (see data/README.md).
+# Commit and push this car's runs in data/<car>/ (see data/README.md).
 #
-#   tools/save_runs.sh                 # commit + push everything new in data/
+#   tools/save_runs.sh                 # commit + push this car's data
 #   tools/save_runs.sh --no-push       # commit only
 #   tools/save_runs.sh --skip-idle     # leave runs that never moved uncommitted
 #
@@ -9,7 +9,7 @@
 # recorder (both flagged in auto_record.yaml), are listed before committing.
 # They are committed unless --skip-idle is given. Nothing is ever deleted.
 #
-# Commits only data/ -- whatever else is uncommitted in the workspace is left
+# Commits only data/<car>/ and data/README.md -- other workspace changes are left
 # alone. Refuses, without committing anything, if:
 #   * a recorder or mapping run is still writing (a half-written bag has no
 #     metadata.yaml and cannot be replayed), or a finished run is still being
@@ -31,6 +31,28 @@ done
 
 ws="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ws"
+
+if [[ -d src/racerbot_car/racerbot_car ]]; then
+    car="$(python3 -c 'import sys; sys.path.insert(0, "src/racerbot_car"); from racerbot_car.identity import current_car_id; print(current_car_id())')" || {
+        echo "Cannot resolve this car. Set RACERBOT_CAR to a known car id." >&2
+        exit 1
+    }
+else
+    car="${RACERBOT_CAR:-}"
+fi
+if [[ ! "$car" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Cannot resolve this car. Set RACERBOT_CAR to a known car id." >&2
+    exit 1
+fi
+car_data="data/$car"
+# Include tracked deletions even if the entire car folder has been removed.
+paths=()
+if [[ -d "$car_data" ]] || [[ -n "$(git ls-files -- "$car_data")" ]]; then
+    paths+=("$car_data")
+fi
+if [[ -f data/README.md ]] || git ls-files --error-unmatch data/README.md >/dev/null 2>&1; then
+    paths+=(data/README.md)
+fi
 
 if pgrep -f 'ros2 bag record' >/dev/null || pgrep -f auto_map_race_node >/dev/null; then
     echo "A run is still recording (ros2 bag record / auto_map_race_node)." >&2
@@ -57,9 +79,13 @@ while IFS= read -r info; do
     if grep -qE '^(  moved: false|superseded: true)$' "$info"; then
         idle+=("$(dirname "$info")")
     fi
-done < <(git ls-files --others --exclude-standard -- data | grep '/auto_record\.yaml$' || true)
+done < <(git ls-files --others --exclude-standard -- "$car_data" | grep '/auto_record\.yaml$' || true)
 
-git add -- data
+if (( ! ${#paths[@]} )); then
+    echo "No new runs in $car_data/ -- nothing to commit."
+    exit 0
+fi
+git add -- "${paths[@]}"
 if (( ${#idle[@]} )); then
     echo "Runs where the car never moved, or stubs:"
     printf '  %s\n' "${idle[@]}"
@@ -70,13 +96,13 @@ if (( ${#idle[@]} )); then
         echo "Committing them too. To leave them out: tools/save_runs.sh --skip-idle"
     fi
 fi
-if git diff --cached --quiet -- data; then
-    echo "No new runs in data/ -- nothing to commit."
+if git diff --cached --quiet -- "${paths[@]}"; then
+    echo "No new runs in $car_data/ -- nothing to commit."
     exit 0
 fi
 
-git diff --cached --stat -- data | tail -1
-git commit -q -m "data: runs saved $(date +%Y-%m-%d)" -- data
+git diff --cached --stat -- "${paths[@]}" | tail -1
+git commit -q -m "data: runs saved $(date +%Y-%m-%d)" -- "${paths[@]}"
 git log --oneline -1
 
 if (( push )); then

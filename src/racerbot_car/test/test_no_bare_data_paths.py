@@ -1,5 +1,6 @@
 """Task 7 contract: executable code and config must name a car in data paths."""
 from pathlib import Path
+import os
 import re
 
 
@@ -21,7 +22,7 @@ def test_no_bare_data_paths():
             if not path.is_file():
                 continue
             if path.suffix not in {'.py', '.yaml', '.sh'}:
-                if path.suffix or path.parent.name != 'scripts':
+                if path.suffix or not (path.parent.name == 'scripts' or os.access(path, os.X_OK)):
                     continue
             for number, line in enumerate(path.read_text().splitlines(), 1):
                 if BARE.search(line):

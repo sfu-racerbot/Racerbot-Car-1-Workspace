@@ -402,7 +402,7 @@ def test_diff_reports_missing_include():
 
 def test_resolve_args_data_placeholder(tmp_path):
     entry = {'args': ['run:={data:racerbot_auto}/x']}
-    assert resolve_args(entry, 'rb1', str(tmp_path)) == [f'run:={tmp_path}/data/racerbot_auto/x']
+    assert resolve_args(entry, 'rb1', str(tmp_path)) == [f'run:={tmp_path}/data/rb1/racerbot_auto/x']
     (tmp_path / 'data/rb1/racerbot_auto').mkdir(parents=True)
     assert resolve_args(entry, 'rb1', str(tmp_path)) == [f'run:={tmp_path}/data/rb1/racerbot_auto/x']
 

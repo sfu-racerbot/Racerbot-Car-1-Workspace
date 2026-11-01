@@ -432,8 +432,8 @@ def load_matrix(path):
 def resolve_args(entry, car, ws_root, *, matrix_dir=None):
     def replace(match):
         kind = match.group(1)
-        local = os.path.join(ws_root, 'data', car, kind)
-        return local if os.path.isdir(local) else os.path.join(ws_root, 'data', kind)
+        from racerbot_car.paths import data_dir, workspace_root
+        return str(Path(ws_root) / data_dir(kind, car).relative_to(workspace_root()))
     args = entry.get('args', []) + entry.get('args_by_car', {}).get(car, [])
     if matrix_dir is None and any('{matrix_dir}' in arg for arg in args):
         raise ValueError('matrix_dir is required for {matrix_dir} arguments')
