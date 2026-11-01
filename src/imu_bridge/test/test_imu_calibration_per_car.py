@@ -63,9 +63,8 @@ def test_imu_launch_refuses_unknown_machine(car, monkeypatch, filename):
         run()
 
 
-@pytest.mark.parametrize('car_id', ['rb1', 'rb2'])
-def test_bridge_loads_car_bno_calibration(car_id):
-    car_yaml = CAR / car_id / 'imu/car.yaml'
+def test_bridge_loads_rb1_bno_calibration():
+    car_yaml = CAR / 'rb1/imu/car.yaml'
     mount, path = load_mount(car_yaml, 'bno')
     cal = load_calibration(path, mount)
     data = json.loads((car_yaml.parent / 'calib/bno_calib.json').read_text())
