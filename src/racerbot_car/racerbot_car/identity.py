@@ -101,4 +101,5 @@ def resolve_car_id(env: Mapping[str, str], serial: str | None,
 def current_car_id() -> str:
     directory = paths.cars_dir()
     ids = known_car_ids(directory)
-    return resolve_car_id(os.environ, read_serial(), load_machines(directory / 'machines.yaml', ids), ids)
+    return resolve_car_id(os.environ, read_serial(SERIAL_PATH),
+                          load_machines(directory / 'machines.yaml', ids), ids)

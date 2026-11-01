@@ -145,5 +145,29 @@ def test_current_car_id_uses_env_serial_and_cars_dir(tmp_path, monkeypatch):
     (tmp_path / 'machines.yaml').write_text('"456": rb2\n')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path))
     monkeypatch.setenv('RACERBOT_CAR', 'rb2')
-    monkeypatch.setattr(identity, 'read_serial', lambda: '456')
+    monkeypatch.setattr(identity, 'read_serial', lambda path: '456')
     assert identity.current_car_id() == 'rb2'
+
+
+@pytest.fixture
+def current_car_fixture(tmp_path, monkeypatch):
+    cars = tmp_path / 'cars'
+    for car in ('rb1', 'rb2'):
+        (cars / car).mkdir(parents=True)
+        (cars / car / 'car.yaml').touch()
+    (cars / 'machines.yaml').write_text('"456": rb2\n')
+    serial = tmp_path / 'serial'
+    serial.write_text('456')
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(serial))
+
+
+def test_current_car_id_from_serial_without_override(current_car_fixture, monkeypatch):
+    monkeypatch.delenv('RACERBOT_CAR', raising=False)
+    assert identity.current_car_id() == 'rb2'
+
+
+def test_current_car_id_conflicting_override_refused(current_car_fixture, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    with pytest.raises(identity.CarMismatchError, match='rb2'):
+        identity.current_car_id()
