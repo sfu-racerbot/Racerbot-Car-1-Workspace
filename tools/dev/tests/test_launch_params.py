@@ -489,7 +489,7 @@ def test_allow_scope_is_per_car(tmp_path):
     allow.write_text(f'`rb2 {lines[0]}`', encoding='utf-8')
     result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
     assert result.returncode == 1
-    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n== listed but not found\n'
+    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n'
     allow.write_text(f'`both {lines[0]}`\n`both {lines[1]}`', encoding='utf-8')
     result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
     assert result.returncode == 0

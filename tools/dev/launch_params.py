@@ -446,6 +446,24 @@ def resolve_args(entry, car, ws_root, *, matrix_dir=None):
             for arg in args]
 
 
+def load_allowed_differences(path, car):
+    """Return scoped diff lines from single-backtick spans outside fences."""
+    allowed = set()
+    in_fence = False
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if re.match(r'^\s*```', line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for match in re.finditer(r'(?<!`)`([^`\n]+)`(?!`)', line):
+            span = match.group(1)
+            parsed = re.match(r'^(rb1|rb2|both) ([+~\-] .+)$', span)
+            if parsed and parsed.group(1) in (car, 'both'):
+                allowed.add(parsed.group(2))
+    return allowed
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -465,7 +483,11 @@ def main(argv=None):
     diff = sub.add_parser('diff')
     diff.add_argument('a')
     diff.add_argument('b')
+    diff.add_argument('--allow')
+    diff.add_argument('--car', choices=['rb1', 'rb2'])
     options = parser.parse_args(argv)
+    if options.command == 'diff' and options.allow and not options.car:
+        parser.error('--allow requires --car')
     if options.command == 'capture-one':
         if bool(options.file) == bool(options.package) or bool(options.package) != bool(options.launch):
             parser.error('specify --file or --package with --launch')
@@ -528,6 +550,8 @@ def main(argv=None):
     names = {p.stem for folder in (a, b) for p in folder.glob('*.json')}
     names.update(p.name[:-10] for folder in (a, b) for p in folder.glob('*.error.txt'))
     changed = False
+    allowed = load_allowed_differences(options.allow, options.car) if options.allow else None
+    found = set()
     for name in sorted(names):
         print('== ' + name)
         errors = [(side, folder / (name + '.error.txt')) for side, folder in [('A', a), ('B', b)] if (folder / (name + '.error.txt')).exists()]
@@ -540,8 +564,20 @@ def main(argv=None):
             changed = True
         else:
             lines = diff_captures(json.loads((a / (name + '.json')).read_text()), json.loads((b / (name + '.json')).read_text()))
-            print('\n'.join(lines)) if lines else None
-            changed |= bool(lines)
+            if allowed is None:
+                print('\n'.join(lines)) if lines else None
+                changed |= bool(lines)
+            else:
+                found.update(line for line in lines if line in allowed)
+                unexpected = [line for line in lines if line not in allowed]
+                print('\n'.join(unexpected)) if unexpected else None
+                changed |= bool(unexpected)
+    if allowed is not None:
+        missing = sorted(allowed - found)
+        if missing:
+            print('== listed but not found')
+            print('\n'.join(missing))
+        changed |= bool(missing)
     return int(changed)
 
 
