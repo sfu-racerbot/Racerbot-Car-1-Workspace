@@ -169,3 +169,26 @@ def test_apply_overlay_scale(tmp_path):
     result = teleop_yaml.apply(path, 0.4, tmp_path / 'backup')
     assert path.read_text() == text.replace('scale: 0.38', 'scale: 0.4')
     assert Path(result['backup']).read_text() == text
+
+
+def test_editor_on_the_real_rb1_overlay(tmp_path):
+    import difflib
+    import shutil
+
+    from racerbot_car.guards import check_calibration_overlay
+    from racerbot_car.paths import cars_dir
+
+    source = cars_dir() / 'rb1' / 'calibration' / 'joy_teleop.yaml'
+    target = tmp_path / 'joy_teleop.yaml'
+    shutil.copyfile(source, target)
+    original = target.read_text(encoding='utf-8')
+    scale = teleop_yaml.read_scale(original) + 0.01
+    teleop_yaml.apply(target, scale, tmp_path / 'backups', target_is_overlay=True)
+    edited = target.read_text(encoding='utf-8')
+
+    assert teleop_yaml.read_scale(edited) == pytest.approx(scale, abs=1e-6)
+    changes = [line for line in difflib.ndiff(original.splitlines(), edited.splitlines())
+               if line.startswith(('- ', '+ '))]
+    assert len(changes) == 2 and changes[0].startswith('- ') and changes[1].startswith('+ ')
+    teleop_yaml.verify(original, edited, scale)
+    assert check_calibration_overlay(target, 'joy_teleop.yaml') == []
