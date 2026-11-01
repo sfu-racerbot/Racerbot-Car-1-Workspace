@@ -10,7 +10,8 @@ CALIBRATION_KEYS = {
         '/**': {key: 'required' for key in (
             'speed_to_erpm_gain', 'steering_angle_to_servo_gain',
             'steering_angle_to_servo_offset', 'servo_min', 'servo_max')},
-        'vesc_to_odom_node': {'speed_to_erpm_gain': 'required'},
+        'vesc_to_odom_node': {'speed_to_erpm_gain': 'required',
+                              'speed_to_erpm_offset': 'optional'},
     },
     'sensors.yaml': {'urg_node': {key: 'optional' for key in (
         'serial_port', 'ip_address', 'ip_port')}},

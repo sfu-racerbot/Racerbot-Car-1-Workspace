@@ -31,16 +31,18 @@ def test_default_teleop_target_is_car_overlay(cars):
     assert OdomCalibrationNode._resolve_config('', 'joy_teleop.yaml') == (cars / 'joy_teleop.yaml').resolve()
 
 
-def test_unknown_car_makes_apply_unavailable(cars, monkeypatch, caplog):
+def test_unknown_car_makes_apply_unavailable(cars, monkeypatch):
     monkeypatch.delenv('RACERBOT_CAR')
-    assert OdomCalibrationNode._resolve_config('', 'vesc.yaml') is None
-    assert 'RACERBOT_CAR' in caplog.text
+    warnings = []
+    assert OdomCalibrationNode._resolve_config('', 'vesc.yaml', warnings.append) is None
+    assert len(warnings) == 1 and 'RACERBOT_CAR' in warnings[0]
 
 
-def test_missing_overlay_makes_apply_unavailable(cars, caplog):
+def test_missing_overlay_makes_apply_unavailable(cars):
     (cars / 'vesc.yaml').unlink()
-    assert OdomCalibrationNode._resolve_config('', 'vesc.yaml') is None
-    assert 'vesc.yaml' in caplog.text
+    warnings = []
+    assert OdomCalibrationNode._resolve_config('', 'vesc.yaml', warnings.append) is None
+    assert len(warnings) == 1 and 'vesc.yaml' in warnings[0]
 
 
 def test_explicit_path_still_wins(cars, tmp_path, monkeypatch):

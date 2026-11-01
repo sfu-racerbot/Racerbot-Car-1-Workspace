@@ -40,6 +40,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -58,6 +59,7 @@ from sensor_msgs.msg import Joy
 from std_msgs.msg import Float64
 from vesc_msgs.msg import VescStateStamped
 import yaml
+from racerbot_car.paths import cars_dir
 
 REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / 'src' / 'f1tenth_system' / 'f1tenth_stack' / 'config'
@@ -253,7 +255,8 @@ class Stack:
             command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
     def bringup(self):
-        vesc = ['--ros-args', '--params-file', str(self.vesc_yaml)]
+        vesc = ['--ros-args', '--params-file', str(CONFIG / 'vesc.yaml'),
+                '--params-file', str(self.vesc_yaml)]
         self.start('ackermann_to_vesc', ['ros2', 'run', 'vesc_ackermann', 'ackermann_to_vesc_node',
                                          *vesc, '-r', '__node:=ackermann_to_vesc_node'])
         self.start('vesc_to_odom', ['ros2', 'run', 'vesc_ackermann', 'vesc_to_odom_node',
@@ -280,6 +283,7 @@ class Stack:
 
     def teleop(self):
         self.start('joy_teleop', ['ros2', 'run', 'joy_teleop', 'joy_teleop', '--ros-args',
+                                  '--params-file', str(CONFIG / 'joy_teleop.yaml'),
                                   '--params-file', str(self.teleop_yaml),
                                   '-r', '__node:=joy_teleop'])
 
@@ -364,21 +368,33 @@ def set_stick_scale(path, value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--port', type=int, default=8095)
+    parser.add_argument('--car', default=os.environ.get('RACERBOT_CAR'),
+                        help='car ID (defaults to RACERBOT_CAR)')
     parser.add_argument('--keep', action='store_true', help='keep the temp directory')
     parser.add_argument('--browser', metavar='CHROMIUM',
                         help='also click through a session in this Chromium '
                              '(needs `pip install playwright`)')
     args = parser.parse_args()
+    if not args.car:
+        parser.error('specify --car or set RACERBOT_CAR')
+    if not re.fullmatch(r'rb[0-9]+', args.car):
+        parser.error('invalid car ID: ' + args.car)
+    overlays = cars_dir() / args.car / 'calibration'
+    for name in ('vesc.yaml', 'joy_teleop.yaml'):
+        if not (overlays / name).is_file():
+            parser.error(f'calibration overlay not found: {overlays / name}')
+    os.environ['RACERBOT_CAR'] = args.car
 
     tmp = Path(tempfile.mkdtemp(prefix='odom_cal_e2e_'))
     vesc_yaml = tmp / 'vesc.yaml'
-    shutil.copy(CONFIG / 'vesc.yaml', vesc_yaml)
+    shutil.copy(overlays / 'vesc.yaml', vesc_yaml)
     original_vesc = vesc_yaml.read_text()
     teleop_yaml = tmp / 'joy_teleop.yaml'
-    shutil.copy(CONFIG / 'joy_teleop.yaml', teleop_yaml)
+    shutil.copy(overlays / 'joy_teleop.yaml', teleop_yaml)
     wizard_cfg = yaml.safe_load(WIZARD_CONFIG.read_text())
     params = wizard_cfg['odom_calibration_node']['ros__parameters']
     params.update({'port': args.port, 'vesc_yaml_path': str(vesc_yaml),
+                   'calibration_paths_are_overlays': True,
                    'joy_teleop_yaml_path': str(teleop_yaml),
                    'report_directory': str(tmp / 'reports')})
     wizard_yaml = tmp / 'odom_calibration.yaml'
@@ -454,15 +470,20 @@ def run(check, wizard, car, stack, vesc_yaml, teleop_yaml, original_vesc, shared
     check('the removed range-check capture is refused', status >= 400, str(status))
 
     print('\n[steering 1] the 2026-10-10 settings: the clamp is found from settings alone')
+    # Reproduce the historical scenario after checking the selected car's live values.
+    gain, offset = -0.78, 0.5904
+    set_yaml_value(vesc_yaml, 'steering_angle_to_servo_gain', str(gain))
+    set_yaml_value(vesc_yaml, 'steering_angle_to_servo_offset', str(offset))
+    set_yaml_value(vesc_yaml, 'servo_min', '0.15')
     set_yaml_value(vesc_yaml, 'servo_max', '0.85')
     stack.restart_bringup(car)
     set_stick_scale(teleop_yaml, START_SCALE)
     stack.restart_teleop()
     wait_for(lambda: wizard.state()['live_servo_limits'][1] == 0.85
+             and abs(wizard.state()['live_parameters']['steering_angle_to_servo_offset'] - offset) < 1e-9
              and abs((wizard.state()['live_stick_scale'] or 0) - START_SCALE) < 1e-9, 40)
     wizard.act('new_session', mode='steering', replace_existing=True)
     clamp = wizard.state()['clamp_check']
-    gain, offset = shared['steering_angle_to_servo_gain'], shared['steering_angle_to_servo_offset']
     right_reach = (0.85 - offset) / gain
     check('clamp check names servo_max cutting the right side',
           any('servo_max cuts the right side' in f for f in clamp['findings']),
@@ -707,7 +728,8 @@ def run(check, wizard, car, stack, vesc_yaml, teleop_yaml, original_vesc, shared
     check('odometry gain written only to vesc_to_odom_node',
           abs(document['vesc_to_odom_node']['ros__parameters']['speed_to_erpm_gain']
               - movement['suggested_speed_to_erpm_gain']) < 1e-6
-          and document['/**']['ros__parameters']['speed_to_erpm_gain'] == 4614.0)
+          and document['/**']['ros__parameters']['speed_to_erpm_gain']
+          == shared['speed_to_erpm_gain'])
     stack.restart_bringup(car)
     synced = wait_for(lambda: not wizard.state()['pending_restart'], 30)
     check('vesc_to_odom_node runs the new gain after restart', synced)
