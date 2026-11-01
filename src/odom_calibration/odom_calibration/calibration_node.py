@@ -28,7 +28,8 @@ import tornado.ioloop
 import tornado.web
 import tornado.websocket
 import yaml
-from racerbot_car.layers import effective_values, layered
+from racerbot_car.identity import CarMismatchError, UnknownCarError
+from racerbot_car.layers import MissingCalibrationError, effective_values, layered
 
 from odom_calibration import calibration_math
 from odom_calibration import steering_chain
@@ -695,8 +696,13 @@ class OdomCalibrationNode(Node):
         try:
             params = effective_values(layered(str(self.joy_teleop_yaml_path),
                                               'joy_teleop.yaml'), 'joy_teleop')
-            return params[STICK_SCALE_PARAMETER]
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+            value = params[STICK_SCALE_PARAMETER]
+            document = {'joy_teleop': {'ros__parameters': {
+                teleop_yaml.PROFILE: {'axis_mappings': {
+                    teleop_yaml.MAPPING: {'scale': value}}}}}}
+            return teleop_yaml.read_scale(yaml.safe_dump(document))
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError,
+                MissingCalibrationError, UnknownCarError, CarMismatchError) as exc:
             self.get_logger().warning(
                 f'Cannot read the steering scale from {self.joy_teleop_yaml_path}: {exc}')
             return None
