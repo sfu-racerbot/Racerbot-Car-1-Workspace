@@ -36,11 +36,13 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import yaml
+from racerbot_car.paths import data_dir
 
 ROOT = Path(__file__).resolve().parents[2]
 GAP_FOLLOW_SRC = ROOT / 'src' / 'gap_follow'
@@ -51,7 +53,6 @@ from gap_follow import gap_logic  # noqa: E402
 
 GRIP_RATIO_TAU = gap_logic.GRIP_RATIO_TAU_SEC
 NODE_CONFIG = GAP_FOLLOW_SRC / 'config' / 'gap_follow.yaml'
-RUNS_DIR = Path.home() / '.ros' / 'racerbot_runs'
 CACHE = 'grip_replay.npz'
 REPORT = 'grip_replay.txt'
 
@@ -347,11 +348,15 @@ def report_lines(run_name, result, summary, base, params, compare_fixed) -> list
     return lines
 
 
-def resolve_run(name) -> Path:
+def resolve_run(name, car=None) -> Path:
     run_dir = Path(name).expanduser()
     if run_dir.exists():
         return run_dir
-    guess = RUNS_DIR / name
+    if run_dir.is_absolute() or len(run_dir.parts) > 1:
+        raise FileNotFoundError(f'run {name}: no such directory')
+    if not car:
+        raise ValueError('Run-name lookup requires --car or RACERBOT_CAR; alternatively give an explicit run path')
+    guess = data_dir('racerbot_runs', car) / name
     if guess.exists():
         return guess
     raise FileNotFoundError(f'run {name}: no such directory (tried {run_dir} and {guess})')
@@ -380,7 +385,9 @@ def main(argv=None) -> int:
     where the adaptive limit exceeded V."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('runs', nargs='+', metavar='RUN',
-                    help='run directory, or a name under ~/.ros/racerbot_runs/')
+                    help='run directory, or a name under data/<car>/racerbot_runs/')
+    ap.add_argument('--car', default=os.environ.get('RACERBOT_CAR'),
+                    help='car id for run-name lookup (default: RACERBOT_CAR)')
     ap.add_argument('--set', dest='overrides', action='append', default=[],
                     metavar='NAME=VALUE', help='override a parameter from gap_follow.yaml')
     ap.add_argument('--compare-fixed', dest='compare_fixed', type=float, default=None,
@@ -393,7 +400,10 @@ def main(argv=None) -> int:
     base = params['max_lateral_accel']
     compare = [] if args.compare_fixed is None else [args.compare_fixed]
     for run in args.runs:
-        run_dir = resolve_run(run)
+        try:
+            run_dir = resolve_run(run, args.car)
+        except (ValueError, FileNotFoundError) as exc:
+            ap.error(str(exc))
         data = load_replay(run_dir)
         result = replay(data['drive'], data['gyro'], data['odom'], params)
         summary = summarize(result, base)

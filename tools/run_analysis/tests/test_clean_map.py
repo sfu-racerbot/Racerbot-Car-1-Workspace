@@ -100,10 +100,10 @@ def test_reproduces_the_shipped_car1_course_map():
     # change-detector (not an oracle): the map clean_map.py made on 2026-10-27,
     # which became the simulator's car 1 course. The run's cached SLAM arrays
     # (analysis/slam.npz) load without ROS.
-    run = os.path.join(WS, 'data', 'racerbot_runs', '20261026-194514')
-    shipped = os.path.join(WS, 'data', 'racerbot_auto', '20261026-194514-clean', 'map.pgm')
+    run = os.path.join(WS, 'data', 'rb1', 'racerbot_runs', '20261026-194514')
+    shipped = os.path.join(WS, 'data', 'rb1', 'racerbot_auto', '20261026-194514-clean', 'map.pgm')
     if not os.path.isfile(os.path.join(run, 'analysis', 'slam.npz')):
-        pytest.skip('data/racerbot_runs/20261026-194514/analysis/slam.npz is not in this checkout')
+        pytest.skip('data/rb1/racerbot_runs/20261026-194514/analysis/slam.npz is not in this checkout')
     from PIL import Image
     from run_analysis import slam_bag
     d = slam_bag.load(run)

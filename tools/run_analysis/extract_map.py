@@ -2,10 +2,10 @@
 """Save the last /map in a run's bag as a map_server map (.pgm + .yaml, plus a .png).
 
     python3 tools/run_analysis/extract_map.py <run_dir>/bag <out_prefix>
-    # e.g. ... data/racerbot_runs/20261026-194514/bag /tmp/live_194514
+    # e.g. ... data/rb1/racerbot_runs/20261026-194514/bag /tmp/live_194514
     #      -> /tmp/live_194514.pgm / .png / .yaml
 
-The live maps in data/racerbot_runs/20261026-*/live_map/ were made this way
+The live maps in data/rb1/racerbot_runs/20261026-*/live_map/ were made this way
 (2026-10-26 session; kept here 2026-10-31). The map is what slam_toolbox last
 published live, not re-optimized. Needs ROS sourced (rosbag2_py, rclpy), numpy, Pillow.
 """

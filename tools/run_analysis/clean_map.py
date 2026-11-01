@@ -3,7 +3,7 @@
 
     python3 tools/run_analysis/clean_map.py <run_dir> <out_dir>
 
-Made data/racerbot_auto/20261026-194514-clean/, which became the simulator's
+Made data/rb1/racerbot_auto/20261026-194514-clean/, which became the simulator's
 car 1 course (tools/f1tenth_sim/maps/car1_course_2026_10_26_*). Written in a
 2026-10-27 session for that one run; generalised here to any run with a /map
 and a SLAM pose in its bag (read through slam_bag.load, cached in analysis/).
