@@ -50,6 +50,7 @@ def test_run_metadata_records_no_car_without_failing(tmp_path, monkeypatch):
     source.write_text('recorded')
     meta = rm.write_run_metadata(tmp_path / 'run', {}, [source])
     assert yaml.safe_load((meta / 'car.yaml').read_text()) == {'car_id': None, 'overlays': []}
+    assert 'unresolved: no Jetson serial was found' in (meta / 'car_id.txt').read_text()
     assert (meta / 'files/source.txt').read_text() == 'recorded'
 
 
