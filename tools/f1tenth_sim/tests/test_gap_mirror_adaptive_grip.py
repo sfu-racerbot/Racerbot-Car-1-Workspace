@@ -222,7 +222,7 @@ def test_a_gyro_that_drops_out_restarts_the_low_pass_as_well_as_the_limit():
 def test_a_yaml_from_before_the_feature_loads_with_it_off(tmp_path):
     # oracle: LEGACY_VALUES -- the values that reproduce the behaviour from
     # before the parameters existed, i.e. the feature off.
-    text = yaml.safe_load(gap_mirror.NODE_CONFIG.read_text())
+    text = {'gap_follow_node': {'ros__parameters': gap_mirror.node_params()}}
     for name in ADAPTIVE_KEYS:
         text['gap_follow_node']['ros__parameters'].pop(name)
     path = tmp_path / 'old_gap_follow.yaml'
