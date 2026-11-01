@@ -34,8 +34,11 @@ def test_layered_only_existing_overlays(tmp_path):
 
 def test_layered_raises_when_required_key_missing(tmp_path):
     write(tmp_path / 'rb1/calibration/vesc.yaml', {'/**': block(servo_max=1)})
-    with pytest.raises(MissingCalibrationError, match='servo_min'):
+    with pytest.raises(MissingCalibrationError, match='servo_min') as exc:
         layered('shared', 'vesc.yaml', 'rb1', tmp_path)
+    assert 'rb1' in str(exc.value)
+    assert 'vesc_to_odom_node.speed_to_erpm_gain' in str(exc.value)
+    assert str(tmp_path / 'rb1/calibration/vesc.yaml') in str(exc.value)
 
 
 def test_layered_raises_when_calibration_overlay_absent(tmp_path):
