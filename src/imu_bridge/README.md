@@ -89,6 +89,17 @@ The node's `car_yaml` parameter selects the mount file; when empty, it uses
 Relative calibration paths prefer the mount file's own directory, then the code root.
 Each recorded run copies that car's `car.yaml` and calibration JSONs into
 `metadata/files/`, and records the car ID in `metadata/car_id.txt`.
+
+To check selection without starting hardware, use a terminal at the workspace
+root with ROS sourced and run the launch-capture regression:
+
+```bash
+RB_WS=$PWD rb python3 -m pytest src/imu_bridge/test/test_imu_calibration_per_car.py -q -p no:cacheprovider
+```
+
+Expect all tests to pass. The capture checks that `vehicle_state_launch.py`
+passes `cars/rb1/imu/car.yaml`; both IMU launches must refuse an unknown machine.
+
 - [ ] **For the EKF only**, install robot_localization once:
   ```bash
   sudo apt install ros-jazzy-robot-localization
