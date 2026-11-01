@@ -48,6 +48,48 @@ Old guard -> replacement (all names below are test functions).
 Additional independent historical oracles: test_rb1_calibration_matches_car1_repo
 and test_rb2_calibration_matches_car2_repo. Historical YAML is read from git,
 never used as a live calibration file.
+
+Mutation evidence (Task 12d, ROS_DOMAIN_ID=69). Every row was applied alone,
+the selected tests failed, the break was reverted, and the same selection
+passed. Counts exclude deselected tests; rb1/rb2 cases are counted separately.
+Paths below abbreviate package subdirectories. Car files are under
+racerbot_car/cars; launch filenames are in their owning package's launch/.
+
+| Break | Selection in this file unless noted | Failed | Passed after revert |
+|---|---|---|---|
+| Swap cars/rb1 and cars/rb2 car.yaml lidar blocks | -k lidar | 6 | 6 |
+| Swap cars/rb1 and cars/rb2 calibration/vesc.yaml files | -k 'vesc_steering or calibration_matches or odometry_gain' | 5 | 5 |
+| camera_launch.py: RealSense branch selects webcam | -k camera_launch_selects | 1 (rb2) | 2 |
+| racerbot_doctor/car.py: spec_for always returns RB1 | -k doctor | 3 (rb2) | 6 |
+| docs/hardware-reference.md rb2 IP .10 -> .11 | -k 'lidar_profile or doctor_lidar_matches' | 2 (rb2) | 4 |
+| Swap car.yaml camera blocks | -k 'doctor_camera or camera_launch_selects' | 4 | 4 |
+| dashboard_launch.py: include RealSense instead of dashboard | -k rb1_boot | 1 | 1 |
+| tools/dev/setup_clone.sh: add RealSense build | -k rb1_setup | 1 | 1 |
+| .gitmodules: replace RealSense submodule path | -k realsense_launch_and_driver | 1 | 1 |
+| Swap car.yaml dashboard_site values | -k dashboard_profile | 2 | 2 |
+| tools/systemd/web-dashboard.service: start bare dashboard | -k web_dashboard_service | 1 | 1 |
+| tools/systemd/x11vnc-follow.sh: fixed display :1 | -k x11vnc_follows | 1 | 1 |
+| tools/systemd/x11vnc.service: run workspace script | -k x11vnc_runs | 1 | 1 |
+| Swap calibration/joy_teleop.yaml full-stick scales | -k steering_limits_match | 2 | 2 |
+| imu_bridge/launch/vehicle_state_launch.py: remove --no-dyncal argument | -k bno_is_read | 1 | 1 |
+| imu_bridge/imu_bridge_node.py: remove BNO restart timer | -k imu_bridge_restarts | 1 | 1 |
+| map_course_launch.py: imu defaults false | -k map_course_runs | 2 | 2 |
+| map_course_launch.py: gyro_odom defaults false | -k maps_on_the_gyro | 1 | 1 |
+| vehicle_state_launch.py: bno defaults false | -k vehicle_state_launch_uses | 2 | 2 |
+| imu_bridge/config/vehicle_state.yaml: bno_x_offset 0.36 -> 0.324 | -k vehicle_state_geometry | 2 | 2 |
+| no_lidar_bringup_launch.py: replace auto_record include | -k every_bringup | 1 | 1 |
+| gap_follow/config/gap_follow.yaml: damping false | -k gap_follow_steering_damping | 2 | 2 |
+| gap_follow/config/gap_follow.yaml: swept length 5 -> 3 | -k keeps_car_2s_course | 1 | 1 |
+| gap_follow/config/gap_follow.yaml: impact stop true | -k imu_features_ship | 1 | 1 |
+| gap_follow/config/gap_follow.yaml: remove CAR 1'S VALUES label | -k stay_labelled | 1 | 1 |
+| racerbot_sim/sim_imu.py: remove CAR 1'S NOISE label | -k stay_labelled | 1 | 1 |
+| tools/run_analysis/grip_replay.py: omit car directory from run lookup | -k grip_replay | 2 | 2 |
+| rb2 calibration/vesc.yaml: command gain +10% (4614 -> 5075.4) | imu_bridge/test/test_imu_calibration_per_car.py::test_rb2_imu_car_yaml_agrees_with_rb2_calibration | 1 | 1 |
+| racerbot_doctor/car.py: exchange both cars' complete specs | -k doctor | 6 | 6 |
+
+Final verification: launch/car/doctor suites: 682 passed, only the explicitly
+expected domain-69-vs-79 assertion failed. IMU calibration plus gap_follow:
+1344 passed. No mutation remains in the working tree.
 """
 
 import importlib.util
