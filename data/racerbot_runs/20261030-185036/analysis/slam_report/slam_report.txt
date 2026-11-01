@@ -1,0 +1,30 @@
+Setup:
+  odom frame: parameter odom_imu, TF odom_imu
+  /odom distance: 277.03 m; moving speed mean/max: 2.54 / 3.74 m/s
+Heading drift:
+  /odom vs SLAM: final 119.64 deg, max 146.20 deg, RMS rate 20.23 deg/s
+  /odom/imu vs SLAM: final -6.21 deg, max 13.94 deg, RMS rate 4.94 deg/s
+  /odom vs /odom/imu: final 127.45 deg, max 142.10 deg, RMS rate 16.39 deg/s
+Corrections and loop closures:
+  updates 464, loop closures unknown (no launch log), max move 1.80 m, max turn 9.68 deg, jumps >0.3 m 22, jumps >1.5 m 3, jumps near closures unknown
+Laps:
+  no closed lap messages
+Map consistency:
+  overall: 45.8%
+Scan drops:
+  /rosout drops: 47; CPU bins (10 s):
+  1793411439.8: 4 drops, CPU mean/max 11.91 / 20.47 %
+  1793411449.8: 4 drops, CPU mean/max 24.39 / 33.43 %
+  1793411459.8: 4 drops, CPU mean/max 30.05 / 33.56 %
+  1793411469.8: 4 drops, CPU mean/max 33.37 / 47.25 %
+  1793411479.8: 4 drops, CPU mean/max 30.12 / 34.55 %
+  1793411489.8: 3 drops, CPU mean/max 32.90 / 44.90 %
+  1793411499.8: 4 drops, CPU mean/max 30.18 / 33.80 %
+  1793411509.8: 4 drops, CPU mean/max 34.85 / 42.23 %
+  1793411519.8: 4 drops, CPU mean/max 31.33 / 35.76 %
+  1793411529.8: 4 drops, CPU mean/max 32.78 / 45.20 %
+  1793411539.8: 4 drops, CPU mean/max 31.99 / 36.65 %
+  1793411549.8: 4 drops, CPU mean/max 33.63 / 41.86 %
+  1793411559.8: 0 drops, CPU mean/max 29.74 / 29.74 %
+Wheel vs scan-matched distance:
+  wheel 276.41 m, SLAM 274.40 m, wheel/SLAM ratio 1.01
