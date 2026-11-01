@@ -13,6 +13,7 @@ from racer_imu.calibration import ImuCalibration
 from racerbot_car import identity
 
 CAR = Path(__file__).resolve().parents[3] / 'src/racerbot_car/cars/rb1/imu/car.yaml'
+RB2_CAR = CAR.parents[2] / 'rb2/imu/car.yaml'
 
 
 def test_calib_resolves_next_to_car_yaml(tmp_path, monkeypatch):
@@ -47,6 +48,15 @@ def test_loaded_bno_calibration_values_match_file():
     cfg = frames.load_config(CAR)
     cal = ImuCalibration.load_or_identity(cfg.resolve(cfg.imus['bno'].extra['calib']))
     data = json.loads((CAR.parent / 'calib/bno_calib.json').read_text())
+    for key in ('A_inv', 'acc_bias', 'gyro_bias'):
+        np.testing.assert_array_equal(getattr(cal, key), data[key])
+
+
+def test_loaded_rb2_bno_calibration_values_match_file(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb2')
+    cfg = frames.load_config(frames.default_config_path())
+    cal = ImuCalibration.load_or_identity(cfg.resolve(cfg.imus['bno'].extra['calib']))
+    data = json.loads((RB2_CAR.parent / 'calib/bno_calib.json').read_text())
     for key in ('A_inv', 'acc_bias', 'gyro_bias'):
         np.testing.assert_array_equal(getattr(cal, key), data[key])
 
