@@ -45,6 +45,7 @@ def test_output_directory_resolves_per_car(tmp_path, monkeypatch, car, explicit)
     # Task 7 default; explicit overrides remain usable on either car.
     monkeypatch.setenv('RACERBOT_CAR', car)
     monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    monkeypatch.setenv('HOME', str(tmp_path))
     requested = tmp_path / 'override'
     args = ['--ros-args', '-p', 'drive_topic:=/test_only/drive']
     if explicit:

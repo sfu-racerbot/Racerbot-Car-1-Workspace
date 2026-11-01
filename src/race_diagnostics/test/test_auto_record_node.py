@@ -51,6 +51,8 @@ def test_output_directory_resolves_per_car(tmp_path, monkeypatch, car, explicit)
     from race_diagnostics.auto_record_node import AutoRecordNode
     monkeypatch.setenv('RACERBOT_CAR', car)
     monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    # Also contain the legacy ~/ default when this test catches a regression.
+    monkeypatch.setenv('HOME', str(tmp_path))
     requested = tmp_path / 'override'
     args = ['--ros-args']
     if explicit:
