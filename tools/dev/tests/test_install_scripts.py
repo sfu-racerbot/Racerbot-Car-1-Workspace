@@ -17,10 +17,12 @@ CAR2 = 'src/racerbot_launch/systemd/install.sh'
 UDEV = 'tools/udev/install.sh'
 
 
-def run_installer(script, car, *args):
+def run_installer(script, car, *args, cars_dir=None):
     env = os.environ.copy()
     env.pop('RACERBOT_CAR', None)
     env.pop('RACERBOT_CARS_DIR', None)
+    if cars_dir is not None:
+        env['RACERBOT_CARS_DIR'] = str(cars_dir)
     if car is not None:
         env['RACERBOT_CAR'] = car
     return subprocess.run(['bash', str(ROOT / script), '--dry-run', *args],
@@ -54,10 +56,17 @@ def test_car2_systemd_install_refuses_on_rb1():
     assert 'tools/systemd' in result.stderr
 
 
-def test_install_scripts_refuse_without_a_car():
+def test_install_scripts_refuse_without_a_car(tmp_path):
+    # Even on a Jetson, no serial is recognized in this isolated registry.
+    (tmp_path / 'machines.yaml').write_text('{}\n')
+    for car in ('rb1', 'rb2'):
+        directory = tmp_path / car
+        directory.mkdir()
+        (directory / 'car.yaml').write_text(
+            (ROOT / 'src/racerbot_car/cars' / car / 'car.yaml').read_text())
     for script in (CAR1, CAR2, UDEV):
         args = () if script == UDEV else ('testuser', '/tmp/test-workspace')
-        result = run_installer(script, None, *args)
+        result = run_installer(script, None, *args, cars_dir=tmp_path)
         assert result.returncode != 0, script
         assert 'RACERBOT_CAR' in result.stderr, (script, result.stderr)
 
@@ -74,7 +83,7 @@ def test_udev_dry_run_installs_hokuyo_only_on_a_serial_lidar_car():
 
 
 def test_no_hard_coded_car_home_paths():
-    # git grep -I inspects tracked text only, without opening binary assets.
+    # git grep -I ignores binary matches and searches tracked files.
     # Calibration JSON preserves its recording location; the map catalog keeps
     # import-command provenance; the bridge test records observed process lines.
     exclusions = (
@@ -94,6 +103,8 @@ def test_car2_installed_units_targets_exist():
     unit = (ROOT / 'src/racerbot_launch/systemd/racerbot-dashboard.service').read_text()
     starts = [line for line in unit.splitlines() if line.startswith('ExecStart=')]
     assert len(starts) == 1
+    assert 'Environment=RACERBOT_WS=@WORKSPACE@' in unit
+    assert 'source "$${RACERBOT_WS}/install/setup.bash"' in starts[0]
     assert 'ros2 launch racerbot_launch dashboard_launch.py' in starts[0]
     assert (ROOT / 'src/racerbot_launch/launch/dashboard_launch.py').is_file()
     assert (ROOT / 'src/web_dashboards/car/systemd/foxglove-bridge.sh').is_file()
