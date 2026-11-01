@@ -57,6 +57,23 @@ to read the values after applying the car's overlays. `repo_root()` locates the
 source checkout containing shared configs; `paths.workspace_root()` locates the
 data workspace and can point elsewhere.
 
+## Tuning overlays
+
+Algorithm tuning is shared by default. For a physically motivated difference,
+put a ROS parameter file at `cars/ID/tuning/FILENAME`, using the shared file's
+node block and parameter names. Put a non-empty `# why:` comment immediately
+above every overridden parameter, including each leaf of a nested parameter.
+
+Calibration keys belong in the calibration overlay, not tuning. The safety
+switches `enable_deadman`, `enable_ttc` and `enable_swept_clearance` can only be
+set to `true`; `deadman_button` cannot be overridden.
+
+Speed, braking, minimum closing speed and timeout ceilings cannot be raised
+above their shared values. Clearance, vehicle size and time-to-collision
+threshold floors cannot be lowered.
+The exact parameter lists are in [`guards.py`](racerbot_car/guards.py).
+An invalid overlay stops launch and reports the offending keys.
+
 ## Launch wiring
 
 The `f1tenth_stack` bringup and teleop (manual driving) launch files call
