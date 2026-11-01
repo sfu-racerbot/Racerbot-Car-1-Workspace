@@ -122,6 +122,22 @@ def test_other_subprocess_refused():
         capture(str(FIXTURES / 'forbidden_launch.py'), [])
 
 
+def test_os_fork_refused():
+    # oracle: OS process creation is refused before the fixture can fork.
+    original = os.fork
+    with pytest.raises(CaptureError, match='^launch-time process creation not allowed by the oracle: fork$'):
+        capture(str(FIXTURES / 'fork_launch.py'), [])
+    assert os.fork is original
+
+
+def test_os_spawn_refused():
+    # oracle: even a harmless true process must not be created by capture.
+    original = os.spawnlp
+    with pytest.raises(CaptureError, match='^launch-time process creation not allowed by the oracle: spawnlp$'):
+        capture(str(FIXTURES / 'spawn_launch.py'), [])
+    assert os.spawnlp is original
+
+
 def test_shutdown_handler_recorded_never_run():
     result = capture(str(FIXTURES / 'shutdown_launch.py'), [])
     assert node(result, '/safe')['executable'] == 'exe'

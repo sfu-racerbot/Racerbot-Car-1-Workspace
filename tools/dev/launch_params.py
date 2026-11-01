@@ -197,6 +197,11 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
     def call(args, *unused, **kwargs):
         return guarded_argv(args)
 
+    def forbid_process(name):
+        def forbidden(*args, **kwargs):
+            refuse(f'launch-time process creation not allowed by the oracle: {name}')
+        return forbidden
+
     class Popen:
         def __init__(self, args, *unused, **kwargs):
             self.returncode = guarded_argv(args)
@@ -300,6 +305,9 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
                 (subprocess, 'check_output', check_output), (subprocess, 'call', call),
                 (os, 'system', call)]:
             stack.enter_context(patch.object(owner, attr, replacement))
+        for name in dir(os):
+            if name in ('fork', 'forkpty', 'posix_spawn', 'posix_spawnp') or name.startswith(('spawn', 'exec')):
+                stack.enter_context(patch.object(os, name, forbid_process(name)))
         for cls in (GroupAction, IncludeLaunchDescription, OpaqueFunction):
             original = cls.execute
             def propagate(self, context, original=original):
