@@ -59,9 +59,14 @@ _UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _u
 
 def load_machines(path: Path, known_ids: set[str]) -> dict[str, str]:
     with path.open() as stream:
-        data = yaml.load(stream, Loader=_UniqueLoader)
-    if data is None:
-        return {}
+        loader = _UniqueLoader(stream)
+        try:
+            node = loader.get_single_node()
+            if node is None:
+                return {}
+            data = loader.construct_document(node)
+        finally:
+            loader.dispose()
     if not isinstance(data, dict):
         raise ValueError(f'{path}: expected a mapping')
     for serial, car_id in data.items():

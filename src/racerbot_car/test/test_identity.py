@@ -78,6 +78,16 @@ def test_machines_empty_file_is_empty(tmp_path):
     assert machines(tmp_path, '') == {}
 
 
+def test_machines_comments_only_is_empty(tmp_path):
+    assert machines(tmp_path, '  # comment\n\n # another\n') == {}
+
+
+@pytest.mark.parametrize('document', ['~\n', 'null\n'])
+def test_machines_explicit_null_rejected(tmp_path, document):
+    with pytest.raises(ValueError, match='mapping'):
+        machines(tmp_path, document)
+
+
 def test_machines_non_mapping_rejected(tmp_path):
     with pytest.raises(ValueError, match='mapping'):
         machines(tmp_path, '- rb1\n')
