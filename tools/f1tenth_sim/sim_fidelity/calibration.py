@@ -55,9 +55,8 @@ class Provenance(Enum):
 
 
 # --------------------------------------------------------------------------
-# Raw constants copied from this car's committed configuration files. Every
-# derived value below is computed from these rather than hard-coded, so that
-# re-deriving after a config change is a matter of updating one number.
+# Configuration-derived fields are resolved at call time. Only simulator
+# measurements and upstream constants remain fixed in this module.
 # --------------------------------------------------------------------------
 
 # VESC values are resolved by calibration_for_car(), never during import.
@@ -314,7 +313,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "steering_rate_max": (
         Provenance.DERIVED,
-        "vesc.yaml throttle_interpolator max_servo_speed 3.2 rad/s",
+        "selected car's effective vesc.yaml throttle_interpolator max_servo_speed, rad/s",
     ),
     "steering_servo_gain": (
         Provenance.MEASURED,
@@ -338,7 +337,7 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
         "by clamping the speed command, not through gym's v_max -- see "
         "vehicle_parameters()",
     ),
-    "speed_min": (Provenance.DERIVED, "vesc.yaml speed_min, same conversion"),
+    "speed_min": (Provenance.DERIVED, "negative of the converted speed_max (symmetric envelope)"),
     "lidar_beams": (
         Provenance.SPEC,
         "Hokuyo UST-10LX: 1081 steps of 0.25 deg over 270 deg, and "
