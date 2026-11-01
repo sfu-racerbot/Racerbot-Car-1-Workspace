@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** One repo, "Racerbot Car Workspace", that runs car 1 (`rb1`) and car 2 (`rb2`). It keeps the latest and best version of every feature, test and tool from both car repos. The only things that differ per car are its hardware/calibration profile, its explicit tuning overrides and its data folder.
+**Goal:** One repo, this one renamed to `Racerbot-Car-Workspace`, that runs car 1 (`rb1`) and car 2 (`rb2`). It keeps the latest and best version of every feature, test and tool from both car repos. The only things that differ per car are its hardware/calibration profile, its explicit tuning overrides and its data folder (plain git, no LFS).
 
 **Architecture:**
 - A new pure-Python package `racerbot_car` works out which car it's running on. It reads the Jetson's serial number, refuses to start if the machine is unknown, and refuses if the plugged-in hardware contradicts the profile.
@@ -10,7 +10,7 @@
 - The car 2 history comes in through one `--allow-unrelated-histories` merge. Each file is merged three-way, with car 1 at `ffbfac0` (the commit car 2 last ported from) as the base.
 - Behaviour is proven unchanged by an "effective launch parameters" oracle. It captures what every launch file would start, and with which parameters, in each old repo. The merged repo is diffed against both captures, and only a list of behaviour changes that the team lead approved is allowed to differ.
 
-**Tech Stack:** ROS 2 Jazzy, ament_python, launch / launch_ros, PyYAML, pytest, git + git-lfs, GitHub (`sfu-racerbot` org, Free plan).
+**Tech Stack:** ROS 2 Jazzy, ament_python, launch / launch_ros, PyYAML, pytest, git, GitHub (`sfu-racerbot` org, Free plan), opencode (`openai/gpt-6.1-terra`) for implementers.
 
 **Spec:** this document's "Design" section and the decisions below. The earlier one-page draft of this plan is superseded.
 
@@ -18,33 +18,24 @@
 
 ## Decisions (team lead, 2026-10-31)
 
-1. One repo for both cars, renamed **Racerbot Car Workspace**. The car 1 repo is the one that stays (but see Q1).
+1. **One repo for both cars:** this repo, renamed on GitHub to `Racerbot-Car-Workspace`. Car 2's history comes in through the merge. `Racerbot-Car-2-Workspace` is archived after cutover.
 2. The merge keeps the **latest and best features and tools** from both repos. Car 2 has had a lot of gap_follow and SLAM work. Both cars' Claude sessions have added tests and tools, and all of them are kept.
 3. **Per-car tuning is allowed.** It is stored in git so the dev box can read it.
-4. **Run and log data move to Git LFS**, in per-car folders.
+4. **Data stays in plain git, with no LFS** (team lead, 2026-10-31, reversing the earlier LFS decision). It goes in per-car folders `data/<id>/`, and bags stay split at 50 MB, under GitHub's 100 MB file limit. History is not rewritten, so nothing is force-pushed.
 5. **Car 2's hardware:** Ethernet Hokuyo UST-10LX at `192.168.0.10`, RealSense D435i, dashboard id `rb2`.
 6. **Both cars:** the BNO085 is on Jetson I2C, and the geometry is the same (same chassis).
-7. **When:** both repos were declared final on 2026-10-31.
+7. **Car 2's newer code is taken for both cars:** gap_follow (`aim_depth_bias`, 5 m swept look-ahead, `opponent_follow_floor`, `time_trial`), SLAM and map_course on the gyro, the four-state speed filter, `auto_record`, the tools. On car 1 it is tested in the simulator **with car 1's simulator settings** (Task 13 step 3) before car 1 drives it.
+8. **The dashboard:** a PR to `sfu-racerbot/web-dashboards` is approved, so a live-tuning save goes to the file that holds the key (Task 15).
+9. **Boot services:** car 2 already has its own Cloudflare tunnel, dashboard service, remote desktop and SSH, and they stay as they are. The repo keeps car 1's `tools/systemd` set for car 1 and car 2's `racerbot_launch/systemd/racerbot-dashboard.service` for car 2 (Task 16).
+10. **Neither car runs or pushes over the weekend of 2026-10-31,** so both `main`s stay put while the work is under way. Task 20 still re-checks.
+11. **Execution:** as in "Execution" at the end. Implementers may be opencode `openai/gpt-6.1-terra` (OpenAI subscription) or one Claude Haiku at max effort.
+12. **When:** both repos were declared final on 2026-10-31. Car 2's SSH key access was granted the same day.
 
-## Open questions
+## Remaining questions
 
-Answered in chat; each answer gets recorded here before the task it blocks starts.
-
-- **Q1. History and LFS (blocks Tasks 18 and 20).** Both repos already hold their bags in plain git history: car 1 has 1.67 GB, car 2 about 1.1 GB. LFS only covers files committed after it's switched on. The options:
-  - **(A)** Rename and keep the history. LFS for new files only. Every future clone still downloads about 2.8 GB of old bags.
-  - **(B)** Rename, rewrite the history into LFS, and force-push `main`. Every clone (cars, dev box, worktrees, other sessions' branches) must re-clone.
-  - **(C)** Create a new repo with the rewritten history, push it once, and archive both old repos read-only. Same re-clone cost as (B), but nothing is overwritten, and the old repos stay as a complete fallback.
-
-  **Recommended: (C).**
-- **Q2. LFS budget (blocks Task 20).** GitHub Free gives 10 GiB of LFS storage and 10 GiB of download bandwidth a month, then $0.07/GiB-month and $0.0875/GiB downloaded, but only if an org admin sets a budget. With the default $0 budget, LFS is blocked for the rest of the month. GitHub can't delete individual LFS objects; storage only shrinks by deleting the repo. At about 2.8 GB now plus about 2 GB a week, 10 GiB runs out in roughly a month. **Recommended:** an org admin sets a monthly LFS budget (e.g. $10), and `save_runs.sh` skips runs where the car never moved, by default.
-- **Q3. Car 2 SSH (blocks Task 9).** The dev box key `~/.ssh/id_ed25519.pub` must be authorized for `racerbotcar-2@racerbotcar-2.tetra-rainbow.ts.net`.
-- **Q4. Car 2's newer driving behaviour on car 1 (blocks Task 13's approval).**
-  - The changes: car 2's gap_follow (`aim_depth_bias`, 5 m swept look-ahead, `opponent_follow_floor`, `time_trial`), its four-state speed filter, the `auto_record` timings, the SLAM gyro tuning, and map_course on the gyro.
-  - **Recommended:** take them as shared defaults on both cars, validated in the simulator and then wheels-up and on the floor on car 1 before racing. The alternative is keeping car 1's old values as `rb1` tuning overrides until car 1 is floor-tested.
-- **Q5. Dashboard live-tuning save (blocks Task 15).** A small change to `sfu-racerbot/web-dashboards` would let a node's save target be a list of files, with a value saved to the last file that already holds the key. The fallback, with no submodule change: saves always go to the shared file.
-- **Q6. Boot services (blocks Task 16).** Car 1's `tools/systemd` set (dashboard, x11vnc/noVNC remote desktop, SSH) would go on both cars and replace car 2's `racerbot-dashboard.service`. Does car 2 have its own Cloudflare tunnel (`rd-rb2` / `ssh-rb2`)?
-- **Q7. Data commits during the work.** The cars may keep running `save_runs.sh`. At cutover, any new commits on either `main` must be data-only (checked by script) and get merged in. **No code commits to either `main` until cutover.**
-- **Q8. Execution method.** See "Execution" at the end.
+- **Q9.** Car 2's IMU config (`~/imu-calibration/config/car.yaml`, uncommitted on car 2) says `wheelbase: 0.33`, but the shared geometry is 0.36, tape-measured on car 2. **Default:** `cars/rb2/imu/car.yaml` gets 0.36, listed as a car 2 behaviour change (IMU estimator).
+- **Q10.** Car 2's `cloudflared.service` carries its tunnel token inline in `ExecStart`, in a world-readable unit file. Car 1 moved its token to `/etc/cloudflared/token` (`--token-file`). **Default:** the car 2 hand-off prompt (Task 21) offers the same move, done by the car 2 session with sudo.
+- **Q11.** Car 2's hostname is `localhost.localdomain`. Nothing here depends on it, because identity comes from the serial. **Default:** leave it, and mention it in the car 2 hand-off.
 
 ---
 
@@ -93,7 +84,20 @@ Answered in chat; each answer gets recorded here before the task it blocks start
 - **Tests:** car 1 has 2,832 `def test` in 208 files, car 2 has 3,304 in 222. 194 files are on both sides, 14 only on car 1 and 28 only on car 2.
 - **Data in git (plain):** car 1 `data/` 1.67 GB (bags split at 50 MB; one `analysis/run.npz` is 46 MB), car 2 about 1.1 GB.
 - **Car 1's Jetson** (read-only check): hostname `racerbot-car1`, serial `1421723021900`, clean at `ae7ceeb`, no git-lfs, 382 GB free. `~/.ros/racerbot_runs` holds only 15 `replay-odom_imu` experiments, whose source runs are already in `data/`, so they are not imported.
-- **Car 2's Jetson:** not yet surveyed (Q3).
+- **Car 2's Jetson** (read-only survey, 2026-10-31):
+  - **Identity:** serial `1423025035537`, user `racerbotcar-2` (groups include `input`, `video`, `i2c`, `dialout`), hostname `localhost.localdomain`.
+  - **Checkout:** clean at `9c2c2ed`. Every worktree branch is pushed or merged, and the only dirt is submodule state.
+  - **IMU calibration exists only on the car:** in `~/imu-calibration` (`0d99cd2`), the modified `config/car.yaml`, the untracked `calib/bno_calib.json` and `tools/bno_i2c_bridge.py`, plus `calib/vesc_calib.json`. Copied read-only to `~/racerbot-merge/car2-imu/`.
+  - **Two bridges:** car 2's `bno_i2c_bridge.py` is a different implementation from car 1's in-tree one (457 differing lines).
+  - **Units:**
+    - `racerbot-dashboard.service` runs `ros2 launch racerbot_launch dashboard_launch.py` with `RACERBOT_WS=/home/racerbotcar-2/racerbot-ws`
+    - `foxglove-bridge.service` runs `src/web_dashboards/car/systemd/foxglove-bridge.sh`
+    - `x11vnc` (`/usr/local/bin/x11vnc-autodisplay.sh`), `novnc` and `cloudflared` are outside git
+
+    **The merge must keep `dashboard_launch.py` and that submodule path working on car 2.**
+  - **udev:** `99-vesc.rules` and the RealSense rules, no Hokuyo rule.
+  - **Other state:** no git-lfs, 165 GB free. `~/.ros/racerbot_auto` duplicates what's in git; `~/.ros/racerbot_replays` (3.2 GB) is derived experiments and isn't imported.
+- **Repo size with no LFS:** about 2.8 GB of bags in history, plus up to about 2 GB per racing week. GitHub strongly recommends staying under 5 GB and rejects a single push over 2 GB. `save_runs.sh` pushes after every session, so its pushes stay small. The merge push carries car 2's history (about 0.45 GB as GitHub stores it), well under the limit.
 - **Hard-coded paths:**
   - `~/racerbot-ws/data/racerbot_*` appears in about 20 launch defaults, node defaults and YAMLs across `race_diagnostics`, `racerbot_launch`, `pure_pursuit`, `racerbot_sim`, `tools/run_analysis`
   - `/home/racerbotcar-1` appears in `waypoint_recorder.yaml`, `waypoint_recorder_node.py`, `waypoint_recorder_launch.py`, `tools/systemd/install.sh`, `.vscode/settings.json`
@@ -106,7 +110,7 @@ Answered in chat; each answer gets recorded here before the task it blocks start
 - **Build on the dev box** with `RB_WS=<ws> rb colcon build --symlink-install --packages-skip range_lib`. Also skip `realsense2_camera realsense2_camera_msgs realsense2_description` if librealsense is missing. On a Jetson, add `--parallel-workers 1`.
 - **`racerbot_car` imports no `rclpy`,** so it works unsourced, like `drive_intent`.
 - **Car ids** match `^rb[0-9]+$`. Today they are `rb1` and `rb2`.
-- **Git:** never push or force-push `main` of any existing repo, and never merge. Work goes on branch `unify/main` in this repo, through draft PRs. Cutover (Task 20) follows the team lead's Q1 answer.
+- **Git:** never push or force-push `main`, never rewrite history, and never merge a PR. Work goes on branch `unify/main` in this repo, through a draft PR. At cutover the team lead merges the PR, and the repo is renamed (Task 20).
 - **Never edit `src/racerbot_a`** (team A's repo). Pin it only.
 - **Car 1 hardware facts stay true for `rb1`:**
   - USB-serial Hokuyo UST-30LX at `/dev/sensors/hokuyo` (USB `15d1:0000`, `cdc_acm`)
@@ -133,10 +137,7 @@ Answered in chat; each answer gets recorded here before the task it blocks start
    - Zero-diff `launch_params` gates (Tasks 5 and 13).
 3. **A car 2 deletion or omission could silently drop a car 1 feature,** such as `test_record_run_shutdown.py` or the `record_run.py` shutdown fix from car 1's PR #9. Tests: the ledger has to cover 100% of hunks, each with a decision (Task 10). The merged test-function count is at least the union of both sides (Task 11).
 4. **A tuning overlay could loosen a safety limit, or carry a mistyped key that does nothing.** Tests: the guard rules with deny cases for every rule (Task 14).
-5. **A car without git-lfs would commit bags as plain git.** Tests:
-   - `save_runs.sh` refuses without LFS.
-   - `git check-attr filter` reports `lfs` for the bag, npz, pgm and png paths of both cars.
-   - A pre-commit guard rejects any staged blob over 10 MB under `data/` that isn't an LFS pointer (Task 17).
+5. **A car could commit a file over GitHub's 100 MB limit, or the other car's data.** The first makes every later push from that car fail until someone rewrites the commit. Tests: the pre-commit guard rejects any staged file over 95 MB. `save_runs.sh` stages only `data/<this car>/`, and refuses when the staged total is over 1.5 GB, staying under GitHub's 2 GB push limit (Task 17).
 6. **A test that reads one YAML value could pass on `rb1` values only.** Tests: every config-reading test that a calibration key affects runs once per car (Task 5 step 4, Task 12).
 
 ---
@@ -175,9 +176,9 @@ src/racerbot_car/cars/
 ### Data
 
 - **Folders:** `data/<id>/{racerbot_runs,racerbot_auto,racerbot_sim,imu_calibration}/`, resolved by `racerbot_car.paths.data_dir(kind)`. Nothing else may spell out a data path.
-- **`save_runs.sh`:** commits only `data/<this car>/`, and refuses without git-lfs.
-- **LFS** holds `*.mcap`, `*.db3`, `*.npz`, `*.pgm`, `*.png`, `*.jpg` under `data/`.
-- **What each machine downloads by default:** each car skips the other car's data (`lfs.fetchexclude=data/<other>/**`). The dev box skips all of `data/**` and fetches runs on demand.
+- **`save_runs.sh`:** commits only `data/<this car>/`.
+- **Plain git, no LFS.** Bags stay split at 50 MB, as both cars do today.
+- **Every clone has both cars' data,** so the dev box can analyse any run without fetching anything.
 
 ---
 
@@ -195,7 +196,7 @@ src/racerbot_car/cars/
 | `src/racerbot_doctor/racerbot_doctor/{car,checks,cli,live}.py` | car-independent specs; both ladders; car id + overrides in the report |
 | `src/race_diagnostics/race_diagnostics/run_metadata.py` | records car id, overlay files and hashes |
 | `src/racerbot_launch/test/test_car_profiles.py` (replaces `test_car1_hardware_config.py`) | both cars' hardware facts |
-| `tools/save_runs.sh`, `.gitattributes`, `tools/dev/setup_clone.sh`, `tools/dev/hooks/pre-commit` | LFS |
+| `tools/save_runs.sh`, `tools/dev/setup_clone.sh`, `tools/dev/hooks/pre-commit` | per-car data commits; size guards |
 | `docs/car-profiles.md` (new; replaces `docs/car1-vs-car2.md`), `CLAUDE.md`, `README.md`, `docs/{git-setup,hardware-reference,operations,launchstart,run-diagnostics,web-dashboard}.md` | docs |
 
 ---
@@ -424,21 +425,10 @@ Open a draft PR `unify/main` → `main` titled "Unified workspace, phase 2: car 
 
 ### Task 9: Car 2 survey over SSH (read-only)
 
-**Blocked by Q3.** Output: `docs/superpowers/plans/unify-car2-survey.md`.
-
-- [ ] **Step 1:** Over SSH, read-only:
-  - hostname and serial (`tr -d '\0' < /proc/device-tree/serial-number`)
-  - the checkout: `git -C ~/racerbot-ws status --short`, `git log -1`, and the ahead/behind counts against `origin/main`
-  - `ls ~/imu-calibration`, `git -C ~/imu-calibration status --short`, and copies of `config/car.yaml` and `calib/*.json` (`scp` into `~/racerbot-merge/car2-imu/`)
-  - `systemctl list-unit-files | grep -E 'racerbot|dashboard|vnc|cloudflared|foxglove'`
-  - `ls /etc/udev/rules.d`
-  - `id`
-  - `nmcli -t con show`
-  - `lsusb`
-  - `git lfs version`, `df -h ~`
-  - `du -sh ~/.ros/racerbot_* ~/racerbot-ws/data/*`
-- [ ] **Step 2:** Record anything uncommitted or unpushed on car 2. Raise it with the team lead before continuing, because it would be lost at cutover.
-- [ ] **Step 3:** Add `"<serial>": rb2` to `machines.yaml` (committed in Task 12).
+- [x] **Done 2026-10-31.** The results are in the Inventory ("Car 2's Jetson").
+  - The only thing uncommitted on car 2 is its IMU calibration in `~/imu-calibration`. It's copied to `~/racerbot-merge/car2-imu/` and goes into `cars/rb2/imu/` in Task 12, with Q9's wheelbase fix.
+  - `machines.yaml` gets `"1423025035537": rb2` in Task 12.
+- [ ] **Before Task 11:** re-run `git status` on car 2, read-only, to confirm nothing new appeared since the survey.
 
 ### Task 10: The hunk ledger, and the behaviour-change list
 
@@ -460,6 +450,8 @@ Open a draft PR `unify/main` → `main` titled "Unified workspace, phase 2: car 
   - `imu_bridge/vehicle_state.py` (car 2's four-state filter)
   - `gap_follow/config/gap_follow.yaml` (car 2's comments that keep features off)
   - `auto_map_race_node.py`
+  - the two `bno_i2c_bridge.py` implementations: car 1's in-tree copy against car 2's uncommitted one in `~/racerbot-merge/car2-imu/`. Pick one for both cars on the code. Check the `$B,...` line format, the timestamp handling (car 2 subtracts the report delay), `--no-dyncal`, and the tests in `tools/imu_calibration/tests`. List it as a behaviour change for the car that switches bridge; that car confirms it wheels-up.
+  - car 2's racer_imu `car.yaml` (Q9: `wheelbase` 0.33 → 0.36)
 - [ ] **Step 3:** A check in `hunk_ledger.py --verify` exits non-zero if any row has an empty `decision`, or if the ledger's hunk set differs from a freshly generated one.
 - [ ] **Step 4:** Collect every row that changes what a car does (any `feature`, `skipped` or `removal` row that touches a driving, SLAM or recording node) into `unify-behaviour-changes.md`, grouped by car: "what changes on rb1" and "what changes on rb2". **The team lead approves this file (Q4) before Task 13's gate.**
 - [ ] **Step 5:** Commit the ledger and the tool.
@@ -504,12 +496,13 @@ Open a draft PR `unify/main` → `main` titled "Unified workspace, phase 2: car 
 
 - [ ] **Step 1:** Build the merged worktree. Capture with `--car rb1` → `cap/p3-rb1`, and with `--car rb2` → `cap/p3-rb2`.
 - [ ] **Step 2:** Diff `ref/rb1` against `cap/p3-rb1`, and `ref/rb2` against `cap/p3-rb2`, each with `--allow docs/superpowers/plans/unify-behaviour-changes.md`. The tool reads the backticked `node key old -> new` lines from that file. **Expected:** no unlisted difference. Each listed one appears exactly as written.
-- [ ] **Step 3:** Run the simulator validation for both cars:
-  - `RACERBOT_CAR=<id> rb python3 tools/f1tenth_sim/run_validation.py --workers 2` (or the current CLI of that tool)
-  - the `racerbot_sim` launch tests under each car
-
-  Compare against the old repos' results recorded the same way.
-- [ ] **Step 4:** The team lead approves `unify-behaviour-changes.md` (Q4). Record the approval in the file with the date.
+- [ ] **Step 3: Simulator A/B for car 1 (decision 7).** Car 2's newer code runs under **car 1's simulator settings**: car 1's servo map and steering limits (0.38 full stick, 0.33 autonomy, 0.30 planner), car 1's `speed_to_erpm` and grip (car 1's `sim_fidelity/calibration.py` values), and car 1's course map `car1_course_2026_10_26`. It is compared against car 1's old code, from `~/racerbot-merge/ref-car1`, under the same settings.
+  - Run `tools/f1tenth_sim/eval_gap.py` (single car) and `eval_gap_multi.py` (opponent) at `--workers 2`, with the same seeds, laps and maps, once per code version. The independent verdicts are `sim_fidelity`'s chassis-vs-distance-transform contact check and the car-to-car overlap check, **never gym's collision flag**.
+  - **Pass:** zero contacts for the merged code, and lap time no worse than the old code's by more than the run-to-run spread measured over 5 seeds. Any contact, or a slower lap, goes to the team lead with the traces before car 1 drives.
+  - Also run car 2's settings against car 2's old code the same way, so car 1's features coming into car 2 (the few the ledger lists) are covered too.
+  - Run the `racerbot_sim` launch tests with `RACERBOT_CAR=rb1` and with `rb2`.
+  - Results go into `unify-behaviour-changes.md` with the commands used.
+- [ ] **Step 4:** The team lead approves `unify-behaviour-changes.md`, and the approval is recorded in the file with the date. On car 1, the floor order still applies after cutover (Task 21).
 
 ---
 
@@ -547,58 +540,54 @@ Open a draft PR `unify/main` → `main` titled "Unified workspace, phase 2: car 
 
 ### Task 15: Dashboard live tuning saves to the right file (`web-dashboards` repo)
 
-**Blocked by Q5.** It's a separate PR in `sfu-racerbot/web-dashboards`.
+Approved (decision 8). It's a separate PR in `sfu-racerbot/web-dashboards`, opened as a draft for the team lead to merge.
 
 **Interfaces:** in `dashboard_node.py`, a `tuning_config_files` entry may be one `<package>/<path>` (today's form) or a list of them, separated by `|` (a ROS string-array element). The save writes each value into the **last** file in the list that already holds that key under the node's block, and otherwise into the first. Its tests live in `car/ros/web_dashboard/test/`. They need a single-file case that is unchanged, a key-in-overlay case, a key-in-shared-only case, and a key-in-neither case. The existing `tuning.py` contract tests in this repo (`test_*_live_tuning.py`) still pass.
 
 - [ ] **Steps:** failing tests in web-dashboards → implement → pass → mutation proof → PR there → once merged, bump the pin here → `web_dashboard_rb1.yaml` / `_rb2.yaml` list `<pkg>/config/<file>|racerbot_car/cars/<id>/tuning/<file>` → `test_web_dashboard_rb*_config.py` checks that every listed file exists.
-- **Fallback if Q5 is "no":** keep single-file entries pointing at the shared configs, and add a doc note: "a value this car overrides in `cars/<id>/tuning/` must be changed there".
+- **Until that PR is merged:** single-file entries keep pointing at the shared configs.
 
 ### Task 16: Boot services and udev rules for both cars
 
-**Blocked by Q6.** **Files:**
-- Modify: `tools/systemd/install.sh` (reads `current_car_id()` and the profile's `hostnames`; uses `$HOME` and `$USER`, never `/home/racerbotcar-1`) and `tools/udev/install.sh` (installs `99-hokuyo.rules` only on cars with a serial LiDAR)
-- Remove: `src/racerbot_launch/systemd/racerbot-dashboard.service` (car 2), after its behaviour is checked against `tools/systemd/web-dashboard.service`
-- Fix the `/home/racerbotcar-1` paths in `waypoint_recorder.{yaml,launch.py}`, `waypoint_recorder_node.py` and `.vscode/settings.json` (`~` or a `data_dir`-style resolver)
-- Test: `tools/dev/tests/test_install_scripts.py`. Static: no file outside `docs/` and `data/` contains `/home/racerbotcar-`. `install.sh --dry-run` prints car-specific unit names for `RACERBOT_CAR=rb1` and `rb2`.
+Decision 9: car 2's installed boot services stay exactly as they are. **Files:**
+- Keep both sets of units in the repo, labelled per car:
+  - `tools/systemd/` (car 1: `web-dashboard.service`, `x11vnc.service`, `x11vnc-follow.sh`, `novnc.service`, `install.sh`)
+  - `src/racerbot_launch/systemd/` (car 2: `racerbot-dashboard.service` and its pair)
+- Modify `tools/systemd/install.sh`: it refuses unless `current_car_id()` is `rb1`, and names car 2's units for `rb2`. It uses `$HOME` and `$USER`, never `/home/racerbotcar-1`.
+- Modify `tools/udev/install.sh`: installs `99-hokuyo.rules` only on cars whose profile has a serial LiDAR. Car 2's existing rules (`99-vesc`, RealSense) are left alone.
+- **Must keep working for car 2's installed units:** `ros2 launch racerbot_launch dashboard_launch.py` with `RACERBOT_WS` set, and `src/web_dashboards/car/systemd/foxglove-bridge.sh`. A test checks both still exist and that `dashboard_launch.py` resolves `rb2` from car 2's serial.
+- Fix the `/home/racerbotcar-1` paths in `waypoint_recorder.{yaml,launch.py}`, `waypoint_recorder_node.py` and `.vscode/settings.json` (`~` or a `data_dir`-style resolver).
+- Test: `tools/dev/tests/test_install_scripts.py`. Static: no file outside `docs/` and `data/` contains `/home/racerbotcar-`. `install.sh --dry-run` refuses under `RACERBOT_CAR=rb2`. `test_car2_installed_units_targets_exist`.
 
 - [ ] **Steps:** failing tests → implement → pass → mutation proof → commit.
 
 ---
 
-## Phase 5: Git LFS
+## Phase 5: Data commits in plain git
 
-### Task 17: The LFS setup that every clone uses
+### Task 17: Per-car `save_runs.sh` and size guards
 
-**Files:** Create `.gitattributes`, `tools/dev/setup_clone.sh` and `tools/dev/hooks/pre-commit`. Modify `tools/save_runs.sh` and `data/README.md`. Test: `tools/dev/tests/test_lfs_setup.py`.
+**Files:** Create `tools/dev/setup_clone.sh` and `tools/dev/hooks/pre-commit`. Modify `tools/save_runs.sh` (merged from both cars' versions) and `data/README.md`. Test: `tools/dev/tests/test_data_commits.py`.
 
 **Interfaces:**
-- `.gitattributes`: `data/**/*.mcap`, `data/**/*.db3`, `data/**/*.npz`, `data/**/*.pgm`, `data/**/*.png`, `data/**/*.jpg`, each with `filter=lfs diff=lfs merge=lfs -text`
-- `setup_clone.sh`:
-  - `git lfs install --local`
-  - `git config core.hooksPath tools/dev/hooks`
-  - on a car: `git config lfs.fetchexclude 'data/<other ids>/**'`
-  - on an unknown machine (the dev box): `git config lfs.fetchexclude 'data/**'`
-  - prints how to fetch one run: `git lfs pull --include 'data/rb1/racerbot_runs/<ts>/**'`
-- `pre-commit`: rejects any staged blob under `data/` over 10 MB that isn't an LFS pointer, and names the file
-- `save_runs.sh`: exits 2 with "git-lfs is not installed: sudo apt install git-lfs" when `git lfs version` fails; stages only `data/$(car)/`; keeps `--skip-idle` and the idle report. The default for idle runs follows Q2.
+- `setup_clone.sh`: `git config core.hooksPath tools/dev/hooks`, and prints the car id this machine resolves to (or "dev box: set RACERBOT_CAR for the simulator").
+- `pre-commit`: rejects any staged file over 95 MB (GitHub's hard limit is 100 MB) and names the file and its size.
+- `save_runs.sh`:
+  - stages only `data/$(car id)/`
+  - refuses when the staged total is over 1.5 GB (GitHub refuses a push over 2 GB), and says to run it once per session
+  - keeps both cars' existing behaviour: `--skip-idle`, the idle and stub report, `--no-push`, refusing while a recorder runs
+  - **no LFS**
 
-- [ ] **Step 1: Failing tests,** in a temp repo with real git-lfs (skipped with a clear reason if git-lfs isn't installed in the container; install it there in this step):
-  - `test_check_attr_lfs_for_bag_paths` (`git check-attr filter data/rb1/racerbot_runs/x/bag/bag_0.mcap` → `lfs`; also for `rb2` and for npz/pgm/png)
-  - `test_check_attr_not_lfs_for_metadata_yaml`
-  - `test_pre_commit_rejects_large_plain_blob`, `test_pre_commit_allows_lfs_pointer`
-  - `test_save_runs_refuses_without_lfs` (PATH without git-lfs)
-  - `test_setup_clone_fetchexclude_on_car` and `test_setup_clone_fetchexclude_on_dev_box`
-- [ ] **Steps 2–5:** fail → implement → pass → mutation proof (drop the `*.mcap` line; the check-attr test fails) → commit.
+- [ ] **Step 1: Failing tests,** in a temp git repo:
+  - `test_pre_commit_rejects_96mb_file`, `test_pre_commit_allows_50mb_file`
+  - `test_save_runs_stages_only_this_car` (`data/rb2/x` stays unstaged under `RACERBOT_CAR=rb1`)
+  - `test_save_runs_refuses_over_push_limit` (a 1.6 GB sparse file total, faked with `truncate`)
+  - `test_save_runs_refuses_while_recorder_running` (carried over from the cars' existing tests, if present)
+- [ ] **Steps 2–5:** fail → implement → pass → mutation proof (raise the hook limit to 200 MB, and the 96 MB test must fail) → commit.
 
-### Task 18: History rewrite, dry run (only if Q1 = B or C)
+### Task 18: (dropped)
 
-- [ ] **Step 1:** `git clone --mirror /home/bryan/racerbot-ws ~/racerbot-merge/mirror-dry`, then fetch `unify/main` into it.
-- [ ] **Step 2:** `git lfs migrate import --everything --include="*.mcap,*.db3,*.npz,*.pgm,*.png,*.jpg" --include-ref=refs/heads/unify/main`. Use path-limited includes: `data/**`, plus the same patterns under `tools/f1tenth_sim/maps/` only if the team lead wants maps in LFS. **Default: `data/**` only.**
-- [ ] **Step 3: Verify.**
-  - For the tip, list every path with its blob. Non-LFS paths must be byte-identical to `unify/main`. For every LFS pointer, the pointer's `oid` must equal the sha256 of the original blob.
-  - Script: `tools/dev/unify/verify_migration.py`. Exit 0 required.
-- [ ] **Step 4:** Record the resulting sizes (`du -sh` of the pack and of `lfs/objects`) in `unify-car2-survey.md`, for the Q2 budget.
+There's no history rewrite, because data stays in plain git (decision 4). The number is kept so the other references stay valid.
 
 ---
 
@@ -618,7 +607,7 @@ Use the `novice-docs` and `racerbot-docs-voice` skills.
 - [ ] **`docs/car1-vs-car2.md`:** reduced to a two-column hardware table that points at the profile files, plus a "these used to be ported" note linking to `car-profiles.md`.
 - [ ] **`CLAUDE.md`:** rewritten for both cars. The safety model, test quality and known non-obvious facts stay word for word where still true. "Car 1 vs car 2" becomes "two cars, one workspace". The porting instructions are removed. The package table gains `racerbot_car`.
 - [ ] **The other docs:**
-  - `README.md`, `docs/git-setup.md` (repo name, LFS, Addition 7)
+  - `README.md`, `docs/git-setup.md` (repo name, how car 2's history came in, Addition 7)
   - `docs/hardware-reference.md` (one section per car, shared geometry)
   - `docs/operations.md`, `docs/launchstart.md` (`data/<id>/` paths; `RACERBOT_CAR` for the simulator and the dev box)
   - `docs/run-diagnostics.md`, `docs/web-dashboard.md`, `data/README.md`
@@ -637,38 +626,34 @@ Use the `novice-docs` and `racerbot-docs-voice` skills.
   - `hunk_ledger.py --verify`
   - the test-count check
   - mark the draft PR ready
-- [ ] **Step 3: Publish per Q1, with explicit go-ahead from the team lead at this step:**
-  - **(A):** the team lead merges the PR. A GitHub admin renames the repo to `Racerbot-Car-Workspace`.
-  - **(B):** run Task 18 on the real mirror. The team lead force-pushes `main`, or explicitly authorizes the push, then the repo is renamed.
-  - **(C):** an admin creates `sfu-racerbot/Racerbot-Car-Workspace` (public, like today). Run Task 18 on a fresh mirror, then `git push` the migrated `unify/main` as `main` and `git lfs push --all`. No force push is needed. Archiving the two old repos happens only after Task 21.
+- [ ] **Step 3: Publish, with the team lead's go-ahead at this step.**
+  - The team lead merges the PR into `main`. It's a normal merge, with no force push.
+  - Then the repo is renamed. This is an outward-facing change, so it's confirmed first: `gh api -X PATCH repos/sfu-racerbot/Racerbot-Car-1-Workspace -f name=Racerbot-Car-Workspace`. GitHub redirects the old URL.
 
-  Q2's budget must already be set.
+### Task 21: Move each car onto the merged repo
 
-### Task 21: Move each car onto the new repo
+Car 1 first, then car 2. There's one paste-ready prompt per car for the Claude Code session on that car, following the standing hand-off procedure. History isn't rewritten, so neither car re-clones.
 
-Car 1 first, then car 2. One paste-ready prompt per car for the Claude Code session on that car, per the standing hand-off procedure:
-
-1. `sudo apt install git-lfs`.
-2. Clone into `~/racerbot-ws-new`, then `tools/dev/setup_clone.sh`, `git submodule update --init --recursive`.
-3. Copy over untracked local state:
-   - `src/racerbot_a`'s `COLCON_IGNORE` (if still needed)
-   - the hand-built `range_libc` Python module (rebuilt WITH_CUDA per the memory note)
-   - `/etc/cloudflared` stays where it is
-4. Swap directories: `~/racerbot-ws` → `~/racerbot-ws-old`, and `~/racerbot-ws-new` → `~/racerbot-ws`.
-5. `colcon build --symlink-install --parallel-workers 1`.
-6. Full suites, sourced and on an isolated domain, comparing collected counts.
-7. `ros2 run racerbot_doctor doctor` must print the right car id and serial, with no contradiction.
-8. `tools/systemd/install.sh` and `tools/udev/install.sh`.
-9. Wheels off the ground with LB held, then the floor at low speed, then race speed. A person holds LB throughout.
-
-Car 2 also removes `racerbot-dashboard.service` and retires `~/imu-calibration` (its files are already in `cars/rb2/imu`).
-
-**Under (A),** steps 1–4 become `git remote set-url origin …` + `git pull`.
+- **Car 1:**
+  - `git remote set-url origin https://github.com/sfu-racerbot/Racerbot-Car-Workspace.git && git pull --ff-only && git submodule update --init --recursive`
+  - Leave `src/realsense-ros` uninitialised. It's car 2's driver, and it can't build without librealsense.
+- **Car 2:**
+  - `git remote set-url origin https://github.com/sfu-racerbot/Racerbot-Car-Workspace.git && git fetch && git merge --ff-only origin/main`. This fast-forwards, because car 2's `9c2c2ed` is the merge commit's second parent.
+  - Then `git submodule update --init --recursive`.
+  - Car 2's `~/imu-calibration` is retired, since its files are now in `cars/rb2/imu`. Leave the directory on disk until car 2 has driven.
+- **Both cars:**
+  1. Run `tools/dev/setup_clone.sh`.
+  2. Build: `colcon build --symlink-install --parallel-workers 1`. The hand-built `range_libc` Python module is unaffected, because the workspace directory stays the same.
+  3. Run the full suites, sourced, on an isolated domain, comparing collected counts against `grep -c '^def test'`.
+  4. `ros2 run racerbot_doctor doctor` must print the right car id and serial, report no contradiction, and list the car's tuning overrides.
+  5. Car 1 runs `tools/systemd/install.sh` and `tools/udev/install.sh`. Car 2's units stay untouched; check that `racerbot-dashboard.service` and `foxglove-bridge.service` restart cleanly.
+  6. Car 2 offers the token move (Q10).
+  7. Hardware order: wheels off the ground with LB held, then the floor at low speed, then race speed. A person holds LB throughout. **Car 1 drives car 2's newer gap_follow and SLAM code only after Task 13's simulator A/B passed.**
 
 ### Task 22: Retire the old setup
 
-- [ ] Archive the old repos (C), done by a GitHub admin.
-- [ ] Update memory notes: unified workspace, the new repo URL, `RACERBOT_CAR` on the dev box, `RB_WS`.
+- [ ] Archive `Racerbot-Car-2-Workspace` read-only, done by a GitHub admin with the team lead's go-ahead. Only after both cars have driven on the merged repo.
+- [ ] Update memory notes: unified workspace, the new repo URL, `RACERBOT_CAR` on the dev box.
 - [ ] Delete `tools/dev/unify/` and the `refs/car2/main` ref.
 - [ ] Remove `~/racerbot-merge` after both cars have run on the floor.
 
@@ -683,5 +668,5 @@ Car 2 also removes `racerbot-dashboard.service` and retires `~/imu-calibration` 
   - Task 13 and the Phase gates
   - Task 19 docs
   - every SSH and cutover step
-- **Implementers:** at most one Claude Haiku at max effort at a time, or free opencode models, on mechanical tasks with disjoint files: Tasks 2, 3, 4, 7 (code part), 14 (guards), 16, 17. Each gets its task text and the Global Constraints. The controller reviews every diff inline before the next task starts.
-- **Order:** Tasks 1–8 need nothing from the team lead. Task 9 needs Q3. Task 13's approval needs Q4. Task 15 needs Q5, Task 16 needs Q6, and Tasks 18 and 20 need Q1 and Q2.
+- **Implementers:** opencode `openai/gpt-6.1-terra` (OpenAI subscription), free opencode models, or at most one Claude Haiku at max effort at a time. They work on mechanical tasks with disjoint files: Tasks 2, 3, 4, 7 (code part), 14 (guards), 15 (web-dashboards), 16, 17. Each gets its task text and the Global Constraints. The controller reviews every diff inline before the next task starts, and runs the gates itself.
+- **Order:** Phases 1–3 run in order. Task 13's approval and Task 20's merge and rename need the team lead. Everything else proceeds on the decisions above.
