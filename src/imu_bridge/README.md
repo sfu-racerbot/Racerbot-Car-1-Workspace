@@ -81,7 +81,7 @@ An **EKF** (extended Kalman filter) combines two imperfect sensors into one bett
 
 - [ ] **The VESC's IMU must be switched on.** It was measured on 2026-08-19 sending all zeros because it was off in VESC Tool; it has been on, and working, since the October 2026 tests (see [docs/localization.md](../../docs/localization.md)). It was calibrated through the imu-calibration repo in September 2026, which means it works over that repo's own serial driver. This node prints a warning every 5 s if it still sees all zeros.
 - [ ] **Car 1: the BNO085 must answer on I2C.** It is wired to the Jetson's 40-pin header (pin 1 3.3 V, pin 3 SDA, pin 5 SCL, pin 6 GND), which is I2C bus 7. Working when `i2cdetect -y -r 7` shows `4a` in its grid. Only the `-r` form works on this Jetson. A `Remote I/O error` on every address means SDA and SCL are swapped. Your user must be in group `i2c` (`id` lists it).
-- [ ] **Select the car's IMU calibration.** On a development machine, set `RACERBOT_CAR=rb1`; the car itself can use its Jetson serial. For car 1, check that `src/racerbot_car/cars/rb1/imu/car.yaml` exists. Both IMU launches resolve the car and pass this path explicitly. The node **refuses to start** if the selected file is missing, because using another mount would produce incorrect axes.
+- [ ] **Select the car's IMU calibration.** On a development machine, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2`; each car can use its Jetson serial. Check `src/racerbot_car/cars/<id>/imu/car.yaml` and the adjacent `calib/*.json` for the selected car. The IMU launches pass the mount file as `car_yaml`. The node **refuses to start** if the selected file is missing, because using another mount would produce incorrect axes. Calibration tools are in `tools/imu_calibration/`.
 
 `racer_imu_root` locates the driver code and I2C bridge in `tools/imu_calibration/`.
 The node's `car_yaml` parameter selects the mount file; when empty, it uses
@@ -399,7 +399,7 @@ gyro_car = R @ (gyro - (gyro_bias - radians(device_offsets.gyro_deg_s))) - start
 - `A_inv`, `acc_bias`, `gyro_bias` come from `calib/<imu>_calib.json`. That's an ellipsoid fit of the accelerometer over 12 static poses, and the gyro mean while still.
 - `device_offsets` is the part of the bias the VESC already subtracts itself (VESC Tool → App Settings → IMU). `acc_bias`/`gyro_bias` are always the **total** bias, so only the remainder is removed and nothing is corrected twice. A file without `device_offsets` means the device removes nothing.
 - `R = Rz(yaw) · Ry(pitch) · Rx(roll)` from `imus.<imu>.rpy_deg` in `car.yaml`. This is Z-Y-X order, like ROS/tf, and maps sensor axes to car axes.
-- The calib path in `car.yaml` is relative to the repo root, the parent of `config/`.
+- The calib path in `car.yaml` is resolved relative to the mount file first, then the calibration code root.
 - A missing calib file gives an identity calibration. The node logs `identity (no calibration file)`, and the mount rotation is still applied. A file that exists but is malformed (missing key, non-3×3 or non-finite `A_inv`) stops the node instead.
 
 This must stay identical to `racer_imu.calibration.ImuCalibration.apply` followed by `racer_imu.frames` rotation. `test_matches_racer_imu_on_its_real_calibration_file` checks it against the real repo whenever it's present:

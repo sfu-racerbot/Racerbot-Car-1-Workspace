@@ -11,11 +11,11 @@ The doctor selects hardware checks from the running car's [profile](../racerbot_
 
 ## Highlights
 
-- **One command, every device:** VESC (motor controller), Hokuyo LiDAR, F710 gamepad, RealSense camera, the bringup nodes, and your terminal's ROS setup.
+- **One command, every device:** VESC (motor controller), Hokuyo LiDAR, F710 gamepad, camera, bringup nodes and terminal ROS setup. Car 1 has a UVC webcam; car 2 has a RealSense.
 - **Answers "I'm holding LB and the car doesn't move".** With `teleop_launch.py` running, a *Drive path* section follows the command hop by hop: `/joy` → `/teleop` → `/ackermann_cmd` → `/commands/motor/speed`. It names the first hop that goes quiet.
   It also says whether LB was held during the sample, and whether the VESC was actually told to move.
 - **Tells "not plugged in" apart from "driver didn't load".** Each device is checked layer by layer: USB or Ethernet link → Linux kernel driver → device file and permissions → ROS driver process → message rate → message content. The report stops at the **first** broken layer, so you know where to look.
-- **Read-only, so it's safe to run any time, even with bringup up.** It never publishes on a topic, never opens the VESC's serial port or the camera, and doesn't connect to the LiDAR while `urg_node` is using it. A test scans the package source and fails if any of that is ever added.
+- **Read-only, so it's safe to run any time, even with bringup up.** It never publishes or opens a tty, camera or input node, and doesn't connect to car 2's LiDAR while `urg_node` is using it. A test scans the package source and fails if any of that is ever added.
 - **Every failure comes with a fix line**: the actual command or physical action, e.g. `nmcli connection up hokuyo` or "flip the X/D switch on the back to X".
 - **Reads the battery** (3S LiPo) from the VESC's own voltage measurement, and tells "battery off" (VESC alive on USB power only) apart from "battery low".
 - **Works before bringup, too.** With nothing running it checks all the hardware layers and reports the ROS layers as "not running", which is not a failure.
@@ -47,6 +47,10 @@ ros2 run racerbot_doctor doctor --car rb2 --no-live
 **Working when:** the LiDAR section starts with `Ethernet link` and the camera section checks the RealSense. Missing hardware can still produce `FAIL` or `WARN` findings.
 
 `--car` overrides automatic identity selection. Without it, the doctor uses the Jetson serial or `RACERBOT_CAR`. If neither resolves a car, it exits 2 with instructions; an unknown `--car` also exits 2 and lists the known IDs.
+
+For either car, the syntax is `ros2 run racerbot_doctor doctor [--car rb1|rb2]`. The CLI calls `current_car_id()` or uses `--car`, then builds the checks with `spec_for(load_profile(car))` ([`cli.py`](racerbot_doctor/cli.py), [`car.py`](racerbot_doctor/car.py)).
+
+The first line is `Car <id> (serial <serial or none>), tuning overrides: none` when there are no overrides. Otherwise the header ends at `tuning overrides:` and each following override is `  <file>: <block>.<key> = <value>  # <why>` ([`cli.py`](racerbot_doctor/cli.py)).
 
 To check the ROS side as well (topic rates, the battery, VESC faults), start bringup first in another terminal, then run the doctor:
 
@@ -91,7 +95,7 @@ Each line has a status:
 | `INFO` | Nothing wrong, just worth knowing: usually "bringup isn't running, so I stopped here". |
 | `SKIP` | Not checked, and the line says why. |
 
-Here's an example. It was captured on 2026-10-01 with bringup running and the VESC unplugged:
+Here's a car 2 example. It was captured on 2026-10-01 with bringup running and the VESC unplugged:
 
 ```
 VESC
@@ -121,10 +125,10 @@ Hardware addresses and device paths come from `src/racerbot_car/cars/ID/car.yaml
 | Device | Layers, bottom → top |
 |---|---|
 | **VESC** | USB `0483:5740` present → `cdc_acm` kernel driver made a `/dev/ttyACM*` → `/dev/sensors/vesc` points at it and you can read/write it (`dialout` group) → no other program has the port open → `vesc_driver_node` running → `/sensors/core` ≥ 25 Hz → `fault_code` 0 → battery |
-| **LiDAR** (USB) | USB `15d1:0000` present → `cdc_acm` made a `/dev/ttyACM*` → `/dev/sensors/hokuyo` points at it and you can read/write it (`99-hokuyo.rules`) → no program other than `urg_node` has the port open → `urg_node_driver` running → `/scan` ≥ 30 Hz → at least one beam has a return (`WARN` under 50 %) |
+| **LiDAR** (rb1 USB) | USB `15d1:0000` present → `cdc_acm` made a `/dev/ttyACM*` → `/dev/sensors/hokuyo` points at it and you can read/write it (`99-hokuyo.rules`) → no program other than `urg_node` has the port open → `urg_node_driver` running → `/scan` ≥ 30 Hz → at least one beam has a return (`WARN` under 50 %) |
 | **LiDAR** (rb2 Ethernet) | Interface `enP8p1s0` present with carrier → host IP `192.168.0.15/24` → ping `192.168.0.10` → TCP port `10940` probe, only while `urg_node_driver` is down → driver running → `/scan` ≥ 30 Hz → scan content as above |
 | **Joystick** | F710 receiver present **in XInput mode** (`c21f`; DirectInput `c219` fails with "flip the switch") → `xpad` made `/dev/input/js*` → you can read **both** `js*` and `event*` (`input` group; `joy_node` uses `event*`, see below) → `joy_node` running → `/joy` ≥ 5 Hz |
-| **Camera** | some USB device bound to `uvcvideo` (any make of webcam) → `/dev/video0` exists and you can read/write it (`video` group) → `camera_stream_node` running (`INFO` if not: it's optional, started by `webcam_launch.py`). No rate layer: the stream goes straight to the browser on port 9090, not over a ROS topic |
+| **Camera** (rb1 UVC) | some USB device bound to `uvcvideo` (any make of webcam) → `/dev/video0` exists and you can read/write it (`video` group) → `camera_stream_node` running (`INFO` if not: it's optional, started by `webcam_launch.py`). No rate layer: the stream goes straight to the browser on port 9090, not over a ROS topic |
 | **Camera** (rb2 RealSense) | USB `8086:0b3a` → USB speed ≥ 5000 Mb/s (`WARN` below) → `uvcvideo` created video nodes → `realsense2_camera_node` running → `/camera/camera/color/image_raw` ≥ 8 Hz. Camera failures become `WARN`; a profile without a camera reports `INFO` |
 | **Bringup** | `ackermann_mux`, `ackermann_to_vesc_node`, `vesc_to_odom_node` running → `/odom` ≥ 25 Hz (`INFO`, not `FAIL`, while no servo command has ever been sent: `vesc_to_odom_node` waits for the first one) → `base_link→laser` transform is `0.26 0 0.11` (±1 mm) → `INFO` if something publishes `/teleop` (that blocks autonomy's `/drive`) |
 | **Drive path** | only with `teleop_launch.py` running: `/joy` → `/teleop` → `/ackermann_cmd` → `/commands/motor/speed`, each ≥ 5 Hz (each hop republishes once per `/joy` message) → LB held in at least one `/joy` message (`INFO` if not) → at least one non-zero motor speed command (`WARN` if LB was held but the stick wasn't moved) |
