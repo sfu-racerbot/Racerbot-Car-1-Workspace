@@ -9,12 +9,13 @@ See ``tools/f1tenth_sim/README.md`` for what each fix does and why, and
 ``docs/sim-fidelity-audit.md`` for the measurements that motivated them.
 """
 
-from .calibration import CALIBRATION, CarCalibration, Provenance
+from .calibration import CarCalibration, Provenance, calibration_for_car
 from .grip import GripEnvelope
 from .plant import FidelityPlant, FidelityProfile, PROFILES
 
 __all__ = [
     "CALIBRATION",
+    "calibration_for_car",
     "CarCalibration",
     "Provenance",
     "GripEnvelope",
@@ -22,3 +23,9 @@ __all__ = [
     "FidelityProfile",
     "PROFILES",
 ]
+
+
+def __getattr__(name):
+    if name == 'CALIBRATION':
+        return calibration_for_car()
+    raise AttributeError(name)

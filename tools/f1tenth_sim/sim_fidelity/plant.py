@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .actuation import SteeringServo, TransportDelay
-from .calibration import CALIBRATION, CarCalibration
+from .calibration import CarCalibration, calibration_for_car
 from .grip import GripEnvelope, longitudinal_accel
 from .sensing import OdomSensor, PoseSensor, ScanSensor
 
@@ -112,16 +112,18 @@ DEFAULT_PROFILE = "car"
 
 def env_components(
     profile: FidelityProfile,
-    calibration: CarCalibration = CALIBRATION,
+    calibration: CarCalibration | None = None,
     *,
     legacy_beams: int = 819,
     legacy_wheelbase: float = 0.36,
+    car_id: str | None = None,
 ):
     """Build the gym config pieces this profile needs.
 
     Returns a dict with ``params``, ``control_config``, ``lidar_config`` and
     ``collision_check``, ready to drop into an ``EnvConfig``.
     """
+    calibration = calibration or calibration_for_car(car_id)
     from f1tenth_gym.envs.action import SteerActionType
     from f1tenth_gym.envs.collision_models import CollisionCheckMode
     from f1tenth_gym.envs.dynamic_models import F1TENTH_VEHICLE_PARAMETERS
@@ -228,9 +230,11 @@ class FidelityPlant:
         num_agents: int,
         seed: int,
         control_dt: float,
-        calibration: CarCalibration = CALIBRATION,
+        calibration: CarCalibration | None = None,
         degrade_agents: frozenset[int] = frozenset({0}),
+        *, car_id: str | None = None,
     ):
+        calibration = calibration or calibration_for_car(car_id)
         self.env = env
         self.profile = profile
         self.calibration = calibration
