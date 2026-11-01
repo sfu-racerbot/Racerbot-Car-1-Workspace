@@ -7,7 +7,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from racerbot_car.layers import (MissingCalibrationError, check_block_keys_match,
-                                  effective_values, layered, overlay_files)
+                                  effective_config, effective_values, layered, overlay_files,
+                                  repo_root, shared_config_path)
 
 
 def write(path, data):
@@ -18,6 +19,41 @@ def write(path, data):
 
 def block(**params):
     return {'ros__parameters': params}
+
+
+def test_repo_root_source_tree(monkeypatch):
+    monkeypatch.delenv('RACERBOT_WS', raising=False)
+    root = Path(__file__).resolve().parents[3]
+    assert repo_root() == root
+
+
+def test_repo_root_env_override(tmp_path, monkeypatch):
+    (tmp_path / 'src/racerbot_car').mkdir(parents=True)
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    assert repo_root() == tmp_path
+
+
+def test_shared_config_path_known_and_unknown():
+    assert shared_config_path('vesc.yaml') == repo_root() / 'src/f1tenth_system/f1tenth_stack/config/vesc.yaml'
+    with pytest.raises(KeyError, match='vesc.yaml'):
+        shared_config_path('unknown.yaml')
+
+
+def test_effective_config_rb1_vesc_to_odom_gain():
+    # Five tape runs, 2026-10-21: docs/hardware-reference.md.
+    assert effective_config('vesc.yaml', 'vesc_to_odom_node', 'rb1')['speed_to_erpm_gain'] == -4040.0
+
+
+def test_effective_config_uses_overlay_over_shared(tmp_path, monkeypatch):
+    root = tmp_path / 'checkout'
+    (root / 'src/racerbot_car').mkdir(parents=True)
+    write(root / 'src/gap_follow/config/gap_follow.yaml',
+          {'gap_follow_node': block(max_steering_angle=0.1, arc_guard_max_correction=0.2)})
+    write(tmp_path / 'cars/rb1/calibration/gap_follow.yaml',
+          {'gap_follow_node': block(max_steering_angle=0.3, arc_guard_max_correction=0.2)})
+    monkeypatch.setenv('RACERBOT_WS', str(root))
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path / 'cars'))
+    assert effective_config('gap_follow.yaml', 'gap_follow_node', 'rb1')['max_steering_angle'] == 0.3
 
 
 def test_layered_order_shared_calibration_tuning(tmp_path):

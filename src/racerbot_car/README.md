@@ -52,6 +52,11 @@ The calibration allow-list and required keys are in
 `layered()` refuses to continue; otherwise the node might silently use its
 declared default for that hardware.
 
+Python code can use `effective_config('vesc.yaml', 'vesc_to_odom_node', 'rb1')`
+to read the values after applying the car's overlays. `repo_root()` locates the
+source checkout containing shared configs; `paths.workspace_root()` locates the
+data workspace and can point elsewhere.
+
 ## Launch wiring
 
 The `f1tenth_stack` bringup and teleop (manual driving) launch files call

@@ -1,8 +1,42 @@
 """Resolve car-specific ROS parameter files and their effective values."""
 
+import os
 from pathlib import Path
 
 from . import guards, hardware, identity, paths, profile
+
+SHARED_CONFIGS = {
+    'vesc.yaml': 'src/f1tenth_system/f1tenth_stack/config/vesc.yaml',
+    'sensors.yaml': 'src/f1tenth_system/f1tenth_stack/config/sensors.yaml',
+    'joy_teleop.yaml': 'src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml',
+    'gap_follow.yaml': 'src/gap_follow/config/gap_follow.yaml',
+    'pure_pursuit.yaml': 'src/pure_pursuit/config/pure_pursuit.yaml',
+    'neural_racer.yaml': 'src/neural_racer/config/neural_racer.yaml',
+    'odom_calibration.yaml': 'src/odom_calibration/config/odom_calibration.yaml',
+}
+
+
+def repo_root() -> Path:
+    """Find the config source tree, distinct from paths.workspace_root()'s data root."""
+    override = os.environ.get('RACERBOT_WS')
+    source = Path(__file__).resolve().parents[3]
+    if override and (Path(override) / 'src/racerbot_car').is_dir():
+        return Path(override).resolve()
+    if (source / 'src/racerbot_car').is_dir():
+        return source
+    raise FileNotFoundError(f'No src/racerbot_car in RACERBOT_WS={override!r} or {source}')
+
+
+def shared_config_path(config_name: str) -> Path:
+    """Locate a shared config in the source tree, not the workspace data root."""
+    if config_name not in SHARED_CONFIGS:
+        raise KeyError(f'Unknown config {config_name!r}; known configs: {", ".join(SHARED_CONFIGS)}')
+    return repo_root() / SHARED_CONFIGS[config_name]
+
+
+def effective_config(config_name: str, node_name: str, car_id: str | None = None) -> dict:
+    """Read effective parameters using shared configs from the source tree, not the data root."""
+    return effective_values(layered(str(shared_config_path(config_name)), config_name, car_id), node_name)
 
 
 class MissingCalibrationError(RuntimeError):
