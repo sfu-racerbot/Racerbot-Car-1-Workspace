@@ -3,7 +3,7 @@
 
     python tools/car_view.py                          # live, ports from config/car.yaml
     python tools/car_view.py --sim drift              # simulator (shows ground truth dashed)
-    python tools/car_view.py --replay logs/<run_dir>  # play back a recorded run
+    python tools/car_view.py --replay data/<car>/imu_calibration/<time>  # play back a recorded run
     python tools/car_view.py --sim drift --log        # also record raw + estimates
     python tools/car_view.py --sim drift --snapshot out.png --seconds 15   # headless, save one image
     python tools/car_view.py --vesc /dev/ttyACM0 --drive --log   # drive with the keyboard + log
@@ -106,7 +106,7 @@ def draw_car(ax, cfg, names):
 
 def main():
     ap = add_common_args(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter))
-    ap.add_argument("--replay", default=None, help="run directory under logs/")
+    ap.add_argument("--replay", default=None, help="explicit run directory, e.g. data/<car>/imu_calibration/<time>")
     ap.add_argument("--speed", type=float, default=1.0, help="replay speed factor")
     ap.add_argument("--log", action="store_true")
     ap.add_argument("--no-calib", action="store_true", help="ignore calib/*.json")

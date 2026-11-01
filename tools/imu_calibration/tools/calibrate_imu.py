@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guided IMU calibration. Writes calib/<imu>_calib.json and a raw log under logs/.
+"""Guided IMU calibration. Writes calib/<imu>_calib.json and raw data/<car>/imu_calibration/ logs.
 
 Steps (default: gyro then accel):
   gyro   keep the car perfectly still for --gyro-seconds  -> gyro bias

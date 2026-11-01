@@ -26,7 +26,7 @@ from racer_imu.types import G, ImuSample, WheelSample  # noqa: E402
 
 def main():
     ap = add_common_args(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter))
-    ap.add_argument("--log", action="store_true", help="record raw samples to logs/")
+    ap.add_argument("--log", action="store_true", help="record raw samples to data/<car>/imu_calibration/")
     a = ap.parse_args()
     cfg, sources, sim = setup(a)
     if not sources:
