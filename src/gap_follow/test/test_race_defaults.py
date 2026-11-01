@@ -9,9 +9,16 @@ list of what changed. The values are read from the YAML the car loads
 It also runs in the sourced gap_follow suite, unchanged.
 """
 import os
+import sys
+from pathlib import Path
 
 import pytest
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'racerbot_car'))
+from racerbot_car.identity import known_car_ids  # noqa: E402
+from racerbot_car.layers import effective_config  # noqa: E402
+from racerbot_car.paths import cars_dir  # noqa: E402
 
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config',
                       'gap_follow.yaml')
@@ -45,7 +52,9 @@ def test_the_race_switches_are_set_as_the_table_says():
     assert P['enable_adaptive_grip'] is False
 
 
-def test_the_safety_values_the_race_defaults_left_alone():
+@pytest.mark.parametrize('car', sorted(car for car in known_car_ids(cars_dir())
+                                      if (cars_dir() / car / 'calibration/gap_follow.yaml').is_file()))
+def test_the_safety_values_the_race_defaults_left_alone(car):
     # oracle: spec -- docs/gap-follow.md#race-defaults-2026-10-27 lists none of
     # these as changed. The deadman is the workspace policy in
     # docs/architecture.md, not a tuning knob.
@@ -55,4 +64,7 @@ def test_the_safety_values_the_race_defaults_left_alone():
     assert P['max_braking_decel'] == pytest.approx(3.0, abs=1e-9)  # m/s^2
     assert P['emergency_stop_clearance'] == pytest.approx(0.0, abs=1e-9)  # m
     assert P['forward_stop_clearance'] == pytest.approx(0.20, abs=1e-9)  # m
-    assert P['max_steering_angle'] == pytest.approx(0.33, abs=1e-9)  # rad
+    # docs/gap-follow.md#race-defaults-2026-10-27, car 1.
+    expected = {'rb1': 0.33}
+    assert effective_config('gap_follow.yaml', 'gap_follow_node', car_id=car)['max_steering_angle'] == \
+        pytest.approx(expected[car], abs=1e-9)  # rad
