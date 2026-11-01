@@ -25,6 +25,34 @@ from test_checks import healthy_live, healthy_snap, without  # noqa: E402
 PKG = pathlib.Path(__file__).resolve().parents[1] / 'racerbot_doctor'
 
 
+def test_doctor_lists_overrides_with_reasons(tmp_path, monkeypatch):
+    import shutil
+    from racerbot_car import identity, guards, layers
+    root = pathlib.Path(__file__).resolve().parents[3]
+    shutil.copytree(root / 'src/racerbot_car/cars', tmp_path / 'cars')
+    tuning = tmp_path / 'cars/rb1/tuning/gap_follow.yaml'
+    tuning.parent.mkdir(exist_ok=True)
+    tuning.write_text('gap_follow_node:\n  ros__parameters:\n'
+                      '    # why: different tyres\n    max_speed: 0.1\n')
+    assert guards.check_tuning_overlay(tuning, layers.shared_config_path(tuning.name), tuning.name) == []
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path / 'cars'))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    code, text, _ = _run(['--no-live'], healthy_snap())
+    assert code == 0
+    assert text.splitlines()[:2] == [
+        'Car rb1 (serial none), tuning overrides:',
+        '  gap_follow.yaml: gap_follow_node.max_speed = 0.1  # different tyres']
+
+
+def test_doctor_says_no_overrides_when_none(monkeypatch, tmp_path):
+    from racerbot_car import identity
+    monkeypatch.delenv('RACERBOT_CARS_DIR', raising=False)
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    code, text, _ = _run(['--no-live'], healthy_snap())
+    assert code == 0
+    assert text.splitlines()[0] == 'Car rb1 (serial none), tuning overrides: none'
+
+
 def _run(argv, snap, live=None, sample_exc=None):
     out = io.StringIO()
     calls = {'gather': [], 'sample': []}

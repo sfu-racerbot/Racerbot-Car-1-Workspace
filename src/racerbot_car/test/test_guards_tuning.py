@@ -14,6 +14,16 @@ SHARED = ROOT / 'src/gap_follow/config/gap_follow.yaml'
 OVERLAYS = sorted(CARS.glob('*/tuning/*.yaml'))
 
 
+def test_tuning_overrides_lists_each_key_with_its_why(tmp_path):
+    overlay = tmp_path / 'tuning.yaml'
+    overlay.write_text('node:\n  ros__parameters:\n    # why: grip\n    speed: 0.5\n'
+                       '    group:\n      # why: surface\n      gain: 2\n'
+                       '    missing: true\n')
+    assert guards.tuning_overrides(overlay) == [
+        ('node', 'speed', 0.5, 'grip'), ('node', 'group.gain', 2, 'surface'),
+        ('node', 'missing', True, '')]
+
+
 def check(tmp_path, key, value, why='# why: physical difference', shared=None):
     source = tmp_path / 'shared.yaml'
     source.write_text(yaml.safe_dump({'node': {'ros__parameters': shared or {
