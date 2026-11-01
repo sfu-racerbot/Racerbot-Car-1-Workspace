@@ -153,6 +153,13 @@
   - two `imu_calibration` `test_online` failures that depend on car 1's IMU mount
   - 16 `racerbot_sim` failures under load (re-run alone before treating as real)
 - **The simulator for Task 13** needs `tools/f1tenth_sim/setup.sh`, which installs into `tools/f1tenth_sim/.sim/` only, in each checkout used.
+- **`ffbfac0` is not a safe single merge base.** Car 2 ported car 1 selectively. It skipped, for example, PR #9's `record_run` shutdown fix (`db3e9e9`) and several late gap_follow fixes (`a43c72a`, `3933bf6`, `7095855`, `0c154cb`). Against `ffbfac0`, every car 1 line that car 2 never took looks like "car 2 deleted it", and a "clean" three-way merge would drop it silently. **Tasks 10 and 11 therefore change:**
+  - **Two ledgers:**
+    - forward: `hunk_ledger.py ffbfac0 car2` gives the lines car 2 has that car 1 lacks (`~/racerbot-merge/ledger_car2.tsv`, 800 hunks)
+    - reverse: `hunk_ledger.py car2 ffbfac0` gives the lines car 1 has that car 2 lacks (`ledger_car1_only.tsv`, 795 hunks), plus `ffbfac0..ae7ceeb` (`ledger_car1.tsv`, 121)
+  - **Classification:** each hunk is car hardware (→ overlay or profile-driven code), a feature to keep, or superseded (with the commit that supersedes it).
+  - **Presence check:** after the merge, a script confirms that every "keep" hunk's added lines from **both** ledgers exist in the merged file (whitespace-normalised). A miss fails Task 11.
+  - **Grouping:** both ledgers are grouped by blamed commit (`ledger_by_commit.py`). The reverse ledger's biggest groups are car 1's port and hardware commits (`f03f784`, `0cd347f`, `9fe90a4`, `e0dd8fd`), car 1's IMU work `881c409`, `auto_record` `b21860f`, and the late feature fixes.
 
 ## Review Focus
 
