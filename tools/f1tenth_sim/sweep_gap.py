@@ -22,8 +22,8 @@ import eval_gap  # noqa: E402
 
 
 def _one(job):
-    track, seed, params, timeout, reverse = job
-    return eval_gap.run_track(track, params, seed, timeout, reverse)
+    track, seed, params, timeout, reverse, calibration = job
+    return eval_gap.run_track(track, params, seed, timeout, reverse, calibration)
 
 
 def main(argv=None) -> int:
@@ -38,10 +38,15 @@ def main(argv=None) -> int:
     ap.add_argument("--output")
     ap.add_argument("--reverse", action="store_true",
                     help="drive each track the other way round (right turns)")
+    ap.add_argument("--friction", type=float,
+                    help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(eval_gap.FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     args = ap.parse_args(argv)
     tracks = eval_gap.select_tracks(args.track)
     params = eval_gap.parse_set(args.set)
-    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse)
+    calibration = eval_gap.with_friction(args.friction, eval_gap.with_floor(args.floor))
+    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse, calibration)
             for t in tracks for k in range(args.seeds)]
     for track in tracks:
         eval_gap.track_path(track)  # build layouts once, before forking

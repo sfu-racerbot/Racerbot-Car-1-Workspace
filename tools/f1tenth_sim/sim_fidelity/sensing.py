@@ -94,14 +94,16 @@ class OdomSensor:
     separate error. The 2026-07-27 log had it tracking commanded speed to
     within about 5%."""
 
-    def __init__(self, noise: float, rng: np.random.Generator):
+    def __init__(self, noise: float, rng: np.random.Generator, scale: float = 1.0):
         self.noise = float(noise)
         self.rng = rng
+        self.scale = float(scale)
 
     def update(self, speed: float) -> float:
+        reading = self.scale * float(speed)
         if self.noise <= 0.0:
-            return float(speed)
-        return float(speed + self.rng.normal(0.0, self.noise * max(abs(speed), 0.1)))
+            return reading
+        return float(reading + self.rng.normal(0.0, self.noise * max(abs(speed), 0.1)))
 
 
 def body_acceleration(v0: float, beta0: float, v1: float, beta1: float,
@@ -210,10 +212,14 @@ class ScanSensor:
         delay_ticks: int,
         dropout_rate: float,
         rng: np.random.Generator,
+        noise_per_metre: float = 0.0,
+        self_hits: tuple = (),
     ):
         self.delay = _Delay(delay_ticks)
         self.dropout_rate = float(dropout_rate)
         self.rng = rng
+        self.noise_per_metre = float(noise_per_metre)
+        self.self_hits = tuple(self_hits)
         self.dropped_beams = 0
 
     def reset(self) -> None:
@@ -222,6 +228,11 @@ class ScanSensor:
 
     def update(self, scan: np.ndarray) -> np.ndarray:
         values = np.asarray(scan, dtype=float).copy()
+        if self.noise_per_metre > 0.0:
+            values += self.rng.normal(0.0, 1.0, values.shape) * self.noise_per_metre * values
+        for beam, distance in self.self_hits:
+            if beam < values.size:
+                values[beam] = distance
         if self.dropout_rate > 0.0:
             dropped = self.rng.random(values.shape) < self.dropout_rate
             count = int(np.count_nonzero(dropped))
