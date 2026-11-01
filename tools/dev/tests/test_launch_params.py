@@ -467,10 +467,11 @@ def test_allow_passes_when_every_difference_is_listed(tmp_path):
 def test_allow_fails_on_an_unlisted_difference(tmp_path):
     a, b, lines = diff_directories(tmp_path)
     allow = tmp_path / 'allow.md'
-    allow.write_text(f'`both {lines[0]}`', encoding='utf-8')
+    prefix = '~ /n gain'
+    allow.write_text(f'`both {prefix}`', encoding='utf-8')
     result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
     assert result.returncode == 1
-    assert result.stdout == f'== demo\n{lines[1]}\n'
+    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n== listed but not found\n{prefix}\n'
 
 
 def test_allow_fails_on_a_listed_difference_that_never_occurs(tmp_path):
