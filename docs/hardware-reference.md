@@ -59,7 +59,7 @@ Length remains **0.58 m**, with no bumper-to-bumper measurement. If the publishe
 - Racing lines recorded with the old 0.33 m LiDAR offset are about 0.07 m out along the heading. Re-record them for racing.
 - Odometry (wheel-based motion estimates, see the [glossary](glossary.md)) integrated heading as `speed × tan(steering) / wheelbase` with a wheelbase 10% too short. This overestimated yaw by about 10%. Re-run [odometry calibration](../src/odom_calibration/README.md).
 - At the old 0.26 rad steering limit, minimum turning radius grew from 1.22 m to **1.35 m** (`0.36 / tan(0.26)`). Current car-specific radii are listed below. A longer wheelbase turns wider at the same angle, so an optimizer may correctly reject a formerly accepted course.
-- Saved maps remain usable. The change is where `base_link` sits relative to the scan that built them.
+- Saved maps remain usable. The change is where `base_link` sits relative to the scan (one set of laser range readings, see the [glossary](glossary.md)) that built them.
 
 ## Car 1 (rb1)
 
@@ -135,6 +135,8 @@ ros2 topic echo /sensors/imu/raw --field angular_velocity
 
 Reading or writing the VESC's app configuration (including that servo-output flag) is **not possible from this ROS stack** — `vesc_driver` only implements motor/servo *control* commands (`COMM_SET_SERVO_POS`, `COMM_SET_RPM`, etc.), not the config read/write protocol (`COMM_GET_APPCONF`/`COMM_SET_APPCONF`) that VESC Tool uses. Don't go looking for a `ros2 service`/CLI way to do this — there isn't one here.
 
+<a id="lidar--hokuyo-ust-30lx"></a>
+
 ### LiDAR: Hokuyo UST-30LX
 
 Source: [`rb1/car.yaml`](../src/racerbot_car/cars/rb1/car.yaml) and [`calibration/sensors.yaml`](../src/racerbot_car/cars/rb1/calibration/sensors.yaml). Scan angles and rate settings remain in the shared `sensors.yaml`.
@@ -151,11 +153,15 @@ If `/dev/sensors/hokuyo` doesn't show up after plugging the LiDAR in: `lsusb` sh
 
 No static IP, dedicated NIC, or `nmcli` connection is needed for this car's LiDAR — that's a car 2–specific detail (Ethernet Hokuyo UST-10LX) that doesn't apply here.
 
+<a id="camera--uvc-usb-webcam"></a>
+
 ### Camera: UVC USB webcam
 
 Car 1's [`car.yaml`](../src/racerbot_car/cars/rb1/car.yaml) selects a UVC webcam at `/dev/video0` and dashboard site `rb1`. `ros2 launch racerbot_launch webcam_launch.py` starts `usb_cam_stream` from `src/web_dashboards`; `src/racerbot_launch/config/web_dashboard_rb1.yaml` also holds the stream's device setting.
 
 The package defaults are 1280×720 at 30 FPS, served on port 9090. Use `v4l2-ctl --list-devices` to check enumeration changes. See [USB camera livestream](usb-camera-livestream.md).
+
+<a id="joystick--logitech-f710"></a>
 
 ### Joystick: Logitech F710
 
