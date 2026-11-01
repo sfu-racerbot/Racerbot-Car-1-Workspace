@@ -171,7 +171,7 @@ LiDAR calibration is in each car's `calibration/sensors.yaml`. The profile selec
 | under 10.8 V (3.6 V/cell) | `WARN`: low |
 | over 12.75 V (4.25 V/cell) | `WARN`: more than a full 3S pack. Is a 4S pack fitted? |
 
-Limits: the per-cell figure is the total divided by 3. The VESC can't see individual cells, so one bad cell can hide behind a healthy total. TODO(verify): which car's reading had not been checked against a multimeter when this was written.
+Limits: the per-cell figure is the total divided by 3. The VESC can't see individual cells, so one bad cell can hide behind a healthy total. Car 2's reading had not been checked against a multimeter when this was written.
 
 **Why `js0` being readable isn't enough.** Jazzy's `joy_node` uses SDL2, which opens the gamepad's `/dev/input/event*` device file, not `js0`. On the Jetsons `js0` is world-readable but `event*` is `root:input`, mode `0660`.
 
