@@ -1,0 +1,225 @@
+# Breaks for the run, intent, spot, tracker, trace, pure pursuit and harness tools. Each
+# must make its test fail:
+#   python3 tools/dev/mutation_check.py tools/dev/breaks/session_tools.yaml
+- name: hold too short kept
+  file: tools/run_analysis/run_summary.py
+  old: return [(a, b) for a, b in out if b - a >= min_s]
+  new: return out
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: open hold dropped
+  file: tools/run_analysis/run_summary.py
+  old: |2
+        if start is not None and len(t):
+            out.append((start, t[-1]))
+  new: ''
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: window end excluded
+  file: tools/run_analysis/run_summary.py
+  old: mask |= (t >= a) & (t <= b)
+  new: mask |= (t >= a) & (t < b)
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: gap share over 20 ms
+  file: tools/run_analysis/run_summary.py
+  old: over_50ms=float(np.mean(d > 0.05))
+  new: over_50ms=float(np.mean(d > 0.02))
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: width one side only
+  file: tools/run_analysis/run_summary.py
+  old: return float((r[left] * np.abs(np.sin(a[left]))).min() + (r[right] * np.abs(np.sin(a[right]))).min())
+  new: return float((r[left] * np.abs(np.sin(a[left]))).min())
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: width allows one side
+  file: tools/run_analysis/run_summary.py
+  old: '    if not (left.any() and right.any()):'
+  new: '    if not (left.any() or right.any()):'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: mux window 1 s
+  file: tools/run_analysis/run_summary.py
+  old: k = (ack_t >= t) & (ack_t <= t + 0.1)
+  new: k = (ack_t >= t) & (ack_t <= t + 1.0)
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: mux ignores the value
+  file: tools/run_analysis/run_summary.py
+  old: hit += bool(np.any(np.abs(ack_v[k] - v) <= tolerance))
+  new: hit += bool(np.any(k))
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: second root wins
+  file: tools/run_analysis/run_summary.py
+  old: '                found.setdefault(p.name, p)'
+  new: '                found[p.name] = p'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: parse keeps lists
+  file: tools/run_analysis/intent_report.py
+  old: '    if not isinstance(d, dict) or "state" not in d:'
+  new: '    if not isinstance(d, dict):'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: limiter ignores binding
+  file: tools/run_analysis/intent_report.py
+  old: '    return row["binding"][0] if row["binding"] else row["state"]'
+  new: '    return row["state"]'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: stall needs only speed
+  file: tools/run_analysis/intent_report.py
+  old: '            if abs(odom) < speed and value["speed"] < speed:'
+  new: '            if abs(odom) < speed:'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: stall no minimum
+  file: tools/run_analysis/intent_report.py
+  old: '        if current and current["end"] - current["start"] >= shortest:'
+  new: '        if current:'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: stall ignores LB release
+  file: tools/run_analysis/intent_report.py
+  old: '            if held and not value and current is not None:'
+  new: '            if False:'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: stall never ends by itself
+  file: tools/run_analysis/intent_report.py
+  old: '            if current is not None and odom >= speed:'
+  new: '            if False:'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: toggle low-after off by one
+  file: tools/run_analysis/intent_report.py
+  old: '                        low_after_press=float(t[lifted] - pressed) if lifted < len(t) else math.nan))'
+  new: '                        low_after_press=float(t[lifted - 1] - pressed) if lifted < len(t) else math.nan))'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: toggle accepts press then release
+  file: tools/run_analysis/intent_report.py
+  old: |2-
+            if r_held or not p_held:
+                continue
+  new: |2-
+            if False:
+                continue
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: passes counts samples
+  file: tools/run_analysis/spot.py
+  old: '    return list(zip(edges[::2], edges[1::2]))'
+  new: '    return [(i, i + 1) for i in np.flatnonzero(inside)]'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: scan from base not laser
+  file: tools/run_analysis/spot.py
+  old: '    lx, ly = x + laser_x * math.cos(yaw), y + laser_x * math.sin(yaw)'
+  new: '    lx, ly = x, y'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: scan angle not added to yaw
+  file: tools/run_analysis/spot.py
+  old: np.column_stack([lx + r[ok] * np.cos(yaw + a[ok]), ly + r[ok] * np.sin(yaw + a[ok])])
+  new: np.column_stack([lx + r[ok] * np.cos(a[ok]), ly + r[ok] * np.sin(a[ok])])
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: ego true-speed ignored
+  file: tools/run_analysis/oa_replay.py
+  old: '    speed = true_speed if mode in ("true-speed", "true") else wheel_speed'
+  new: '    speed = wheel_speed'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: ego gyro no floor
+  file: tools/run_analysis/oa_replay.py
+  old: '        steering = math.atan(wheelbase * gyro / max(abs(speed), 0.5))'
+  new: '        steering = math.atan(wheelbase * gyro / max(abs(speed), 1e-3))'
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: ego accepts anything
+  file: tools/run_analysis/oa_replay.py
+  old: |2-
+        if mode not in EGO_MODES:
+            raise
+  new: |2-
+        if False:
+            raise
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: to_map rotation sign
+  file: tools/run_analysis/oa_replay.py
+  old: return pose[0] + c * bx - s * by, pose[1] + s * bx + c * by
+  new: return pose[0] + c * bx + s * by, pose[1] - s * bx + c * by
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: truth path length not net
+  file: tools/run_analysis/oa_replay.py
+  old: return float(np.hypot(*(p[-1] - p[0]))),
+  new: return float(np.sum(np.hypot(*np.diff(p, axis=0).T))),
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: truth mean not median
+  file: tools/run_analysis/oa_replay.py
+  old: float(np.median([wall_distance(x, y) for x, y in p]))
+  new: float(np.mean([wall_distance(x, y) for x, y in p]))
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: braking fit absolute error
+  file: tools/run_analysis/car_measure.py
+  old: error = sum(((stop_distance(v0, delay, gain, top, end_speed) - d) / d) ** 2 for v0, d in stops)
+  new: error = 0.0
+  test: tools/run_analysis/tests/test_session_tools.py
+- name: deficit sign
+  file: tools/f1tenth_sim/trace_deficit.py
+  old: rows.append(dict(at=float(start), lost=float((actual_t[j] - actual_t[i]) - (ideal_t[j] - ideal_t[i])),
+  new: rows.append(dict(at=float(start), lost=float((ideal_t[j] - ideal_t[i]) - (actual_t[j] - actual_t[i])),
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: deficit lateral doubled
+  file: tools/f1tenth_sim/trace_deficit.py
+  old: ideal_v = speed_profile(curvature(path, SPACING, closed=False), SPACING, lateral, braking, accel,
+  new: ideal_v = speed_profile(curvature(path, SPACING, closed=False), SPACING, 2 * lateral, braking, accel,
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: deficit binding ignored
+  file: tools/f1tenth_sim/trace_deficit.py
+  old: counts = collections.Counter(b for b, h in zip(trace["binding"], here) if h and b)
+  new: counts = collections.Counter()
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: trace prefers measured speed
+  file: tools/f1tenth_sim/trace_deficit.py
+  old: speed = "speed_true" if "speed_true" in rows[0] else "speed_meas"
+  new: speed = "speed_meas"
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: stall run never resets
+  file: tools/f1tenth_sim/trace_multi.py
+  old: '        run = run + 1 if v < below else 0'
+  new: '        run = run + 1 if v < below else run'
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: plan ignores lateral
+  file: tools/f1tenth_sim/pure_course.py
+  old: a_lat_max=lateral,
+  new: a_lat_max=99.0,
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: shaper default cap changed
+  file: tools/f1tenth_sim/run_validation.py
+  old: '    def __init__(self, max_speed: float = PURE_MAX_SPEED, max_lateral_accel: float = PURE_MAX_LATERAL_ACCEL):'
+  new: '    def __init__(self, max_speed: float = 5.0, max_lateral_accel: float = PURE_MAX_LATERAL_ACCEL):'
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: shaper ignores its cap
+  file: tools/f1tenth_sim/run_validation.py
+  old: |2-
+            if hard_speed_cap is None:
+                hard_speed_cap = self.max_speed
+  new: |2-
+            if hard_speed_cap is None:
+                hard_speed_cap = PURE_MAX_SPEED
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: detail drops steering
+  file: tools/f1tenth_sim/validate_calibration.py
+  old: '            values = [c.get(k, [])[i] if i < len(c.get(k, [])) else math.nan for k in ("sectors", "sector_cmd", "sector_steer")]'
+  new: '            values = [c.get(k, [])[i] if i < len(c.get(k, [])) else math.nan for k in ("sectors", "sector_cmd", "sector_cmd")]'
+  test: tools/f1tenth_sim/tests/test_session_sim_tools.py
+- name: harness calls exit 2 caught
+  file: tools/dev/mutation_check.py
+  old: |2-
+        if done.returncode == 1:
+            return Outcome(item.name, "caught")
+  new: |2-
+        if done.returncode != 0:
+            return Outcome(item.name, "caught")
+  test: tools/dev/tests/test_mutation_check.py
+- name: harness never restores
+  file: tools/dev/mutation_check.py
+  old: |2-
+        finally:
+            target.write_bytes(original)
+  new: |2-
+        finally:
+            pass
+  test: tools/dev/tests/test_mutation_check.py
+- name: harness applies duplicates
+  file: tools/dev/mutation_check.py
+  old: '    if count != 1:'
+  new: '    if count == 0:'
+  test: tools/dev/tests/test_mutation_check.py
+- name: harness exits 0 always
+  file: tools/dev/mutation_check.py
+  old: '    return 1 if problems else 0'
+  new: '    return 0'
+  test: tools/dev/tests/test_mutation_check.py

@@ -67,7 +67,7 @@ from recognition import (  # noqa: E402
     recognition_counts,
     recognition_delays,
 )
-from sim_fidelity import CALIBRATION, PROFILES  # noqa: E402
+from sim_fidelity import CALIBRATION, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
 CONTROL_DT = eval_gap.CONTROL_DT
@@ -82,8 +82,8 @@ _TRUE_WORDS = ("1", "true", "yes", "on")
 _FALSE_WORDS = ("0", "false", "no", "off")
 
 
-def make_plant(track: str, seed: int, cars: int) -> FidelityPlant:
-    components = env_components(PROFILES[DEFAULT_PROFILE], CALIBRATION)
+def make_plant(track: str, seed: int, cars: int, calibration=CALIBRATION) -> FidelityPlant:
+    components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     config = EnvConfig(
         seed=seed, map_name=eval_gap.track_path(track), params=components["params"],
         num_agents=cars, control_config=components["control_config"],
@@ -95,7 +95,7 @@ def make_plant(track: str, seed: int, cars: int) -> FidelityPlant:
         render_enabled=False)
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
     # Every car is a car under test, so every car gets the real sensor error.
-    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], cars, seed, CONTROL_DT, CALIBRATION,
+    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], cars, seed, CONTROL_DT, calibration,
                          degrade_agents=frozenset(range(cars)))
 
 
@@ -254,7 +254,7 @@ def is_recognised(moving_body, leader_base, tolerance: float = RECOGNITION_TOLER
 
 def run_multi(track: str, params_list: list, seed: int, duration_s: float,
               spacing: float = 3.0, laps_required: float = 2.0, reverse: bool = False,
-              slots=None) -> dict:
+              slots=None, calibration=CALIBRATION) -> dict:
     """One run of every car. The result's ``cars`` entries carry each car's
     stats, ``progress_m`` (its position along the centreline every tick, see
     _Progress.position), ``speed_mps`` (ground-truth speed magnitude in m/s)
@@ -267,7 +267,7 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     slots = tuple(range(cars)) if slots is None else tuple(slots)
     if sorted(slots) != list(range(cars)):
         raise ValueError(f"slots must be a line-up of 0..{cars - 1}, got {slots}")
-    plant = make_plant(track, seed, cars)
+    plant = make_plant(track, seed, cars, calibration)
     line = plant.env.unwrapped.track.raceline
     poses = start_poses(line, cars, spacing, reverse, slots)
     obs, _ = plant.reset(poses)
@@ -790,6 +790,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reverse", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--output", help="write the per-run results as JSON")
+    ap.add_argument("--friction", type=float,
+                    help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     ap.add_argument("--set", action="append", default=[], help="override a parameter for every car")
     ap.add_argument("--car-set", action="append", default=[], metavar="N:name=value",
                     help="override a parameter for car N only (0-based), applied after --set; repeatable")
@@ -804,7 +808,8 @@ def main(argv=None) -> int:
     for t in tracks:
         eval_gap.track_path(t)
     orders = [None, (1, 0)] if args.swap_starts else [None]
-    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order)
+    calibration = with_friction(args.friction, with_floor(args.floor))
+    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order, None, calibration)
             for t in tracks for k in range(args.seeds) for order in orders]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(_job, jobs))
