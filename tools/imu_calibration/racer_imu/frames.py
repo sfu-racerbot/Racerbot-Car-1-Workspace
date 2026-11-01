@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-import os
 import sys
 
 import numpy as np
@@ -30,16 +29,16 @@ def default_config_path() -> Path:
     """The selected car's IMU profile; never borrow another car's mount."""
     repo = ROOT.parent.parent
     profiles = repo / 'src/racerbot_car/cars'
-    car = os.environ.get('RACERBOT_CAR')
-    if not car:
-        sys.path.insert(0, str(repo / 'src/racerbot_car'))
-        from racerbot_car.identity import current_car_id, UnknownCarError, CarMismatchError
-        try:
-            car = current_car_id()
-        except (UnknownCarError, CarMismatchError, OSError, ValueError) as exc:
-            raise FileNotFoundError(
-                f'Expected {profiles}/<car>/imu/car.yaml; set RACERBOT_CAR '
-                f'or pass --config: {exc}') from exc
+    source = str(repo / 'src/racerbot_car')
+    if source not in sys.path:
+        sys.path.insert(0, source)
+    from racerbot_car.identity import current_car_id, UnknownCarError, CarMismatchError
+    try:
+        car = current_car_id()
+    except (UnknownCarError, CarMismatchError, OSError, ValueError) as exc:
+        raise FileNotFoundError(
+            f'Expected {profiles}/<car>/imu/car.yaml; set RACERBOT_CAR '
+            f'or pass --config: {exc}') from exc
     path = profiles / car / 'imu/car.yaml'
     if not path.is_file():
         raise FileNotFoundError(

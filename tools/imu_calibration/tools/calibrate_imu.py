@@ -198,8 +198,10 @@ def main():
         use_sim_paths(cfg)
     if a.imu not in cfg.imus:
         sys.exit(f"unknown IMU '{a.imu}'; car.yaml has {list(cfg.imus)}")
-    out = Path(a.out) if a.out else cfg.resolve(cfg.imus[a.imu].extra.get("calib", f"calib/{a.imu}_calib.json"), for_write=True)
-    cal = ImuCalibration.load_or_identity(out)   # keep results of steps not re-run
+    calibration = cfg.imus[a.imu].extra.get("calib", f"calib/{a.imu}_calib.json")
+    existing = Path(a.out) if a.out else cfg.resolve(calibration)
+    out = Path(a.out) if a.out else cfg.resolve(calibration, for_write=True)
+    cal = ImuCalibration.load_or_identity(existing)   # keep results of steps not re-run
     log = RunLogger(f"calib_{a.imu}", meta={"imu": a.imu, "steps": steps, "sim": bool(a.sim)})
     if a.imu.startswith("vesc"):
         dev = np.any(cal.dev_acc_offset) or np.any(cal.dev_gyro_offset)
