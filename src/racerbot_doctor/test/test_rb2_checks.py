@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'racerbot
 from racerbot_car.profile import load_profile  # noqa: E402
 from racerbot_doctor import car, checks, snapshot  # noqa: E402
 from test_checks import healthy_live, first_bad, layer, statuses, without  # noqa: E402
+from test_checks import PIDS  # noqa: E402
 
 P, W, F, I, S = (snapshot.Status.PASS, snapshot.Status.WARN, snapshot.Status.FAIL,
                   snapshot.Status.INFO, snapshot.Status.SKIP)
@@ -19,14 +20,23 @@ def spec():
 
 def healthy_snap():
     return snapshot.Snapshot(
-        usb=[snapshot.UsbDevice('2-1.1', '8086', '0b3a',
+        usb=[snapshot.UsbDevice('1-2.3', '0483', '5740', drivers=['cdc_acm'],
+                               ttys=['ttyACM0'], speed_mbps=12),
+             snapshot.UsbDevice('1-2.4', '046d', 'c21f', drivers=['xpad'],
+                                joysticks=['js0'], events=['event5'], speed_mbps=12),
+             snapshot.UsbDevice('2-1.1', '8086', '0b3a',
              drivers=['uvcvideo', 'usbhid'], videos=['video0', 'video1'],
-             speed_mbps=5000)],
-        processes=[snapshot.Process(101, ['/ws/urg_node_driver']),
-                   snapshot.Process(102, ['/ws/realsense2_camera_node']),
-                   snapshot.Process(103, ['/ws/joy_node'])],
+              speed_mbps=5000)],
+        processes=[snapshot.Process(pid, [f'/ws/{exe}', '--ros-args'])
+                   for exe, pid in PIDS.items() if exe != car.EXE_CAMERA]
+                  + [snapshot.Process(108, ['/ws/realsense2_camera_node'])],
         ifaces={'enP8p1s0': snapshot.NetIface('enP8p1s0', True, ['192.168.0.15/24'])},
-        lidar_ping=True)
+        vesc_symlink='/dev/ttyACM0', vesc_symlink_rw=True,
+        tty_holders={'/dev/ttyACM0': [PIDS[car.EXE_VESC_DRIVER]]},
+        input_readable={'js0': True, 'event5': True}, lidar_ping=True,
+        env={'ROS_DISTRO': 'jazzy', 'ROS_DOMAIN_ID': '0',
+             'AMENT_PREFIX_PATH': '/ws/install/vesc_driver:/ws/install/'
+             'ackermann_mux:/ws/install/f1tenth_stack:/opt/ros/jazzy'})
 
 
 def live():
@@ -104,7 +114,8 @@ def test_lidar_urg_running_but_no_scans_blames_power():
     sample = live()
     sample.topics['/scan'] = snapshot.TopicStats(0, 3.0)
     bad = first_bad(lidar(healthy_snap(), sample))
-    assert bad.status is F and 'power' in bad.detail
+    assert bad.name == '/scan rate' and bad.status is F
+    assert 'power' in bad.detail
 
 
 def test_camera_missing_is_warn_not_fail():

@@ -155,3 +155,14 @@ def test_nothing_on_the_graph_is_empty_not_an_error():
     assert all(st.count == 0 for st in live.topics.values())
     assert live.laser_tf is None
     assert live.joy_lb_held == 0 and live.motor_nonzero == 0
+
+
+def test_rb2_results_include_camera_topic(fake_car):
+    from racerbot_car.profile import load_profile
+    topics = dict(TOPICS, camera='/test_only/camera')
+    live = sample(0.3, discovery_s=0.5, topics=topics,
+                  spec=car.spec_for(load_profile('rb2')))
+    assert sorted(live.topics) == sorted(
+        ['/sensors/core', '/scan', '/odom', '/joy',
+         '/camera/camera/color/image_raw', '/teleop', '/ackermann_cmd',
+         '/commands/motor/speed', '/commands/servo/position'])
