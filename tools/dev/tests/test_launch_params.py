@@ -66,6 +66,12 @@ def test_rule_param_parsed():
     assert flatten_params([('x:=0.5', False)], '/n') == {'x': 0.5}
 
 
+def test_jazzy_inline_tuple_as_list():
+    # oracle: ROS arrays are JSON lists even when Jazzy emits a Python tuple tag.
+    assert flatten_params([(str(FIXTURES / 'tuple.yaml'), True)], '/demo_node') == {
+        'origin': [1.0, 2.0, 3.0]}
+
+
 def test_condition_false_node_absent(demo):
     assert {n['name'] for n in demo['nodes']} == {'/demo_node', '/ns2/named_node'}
 

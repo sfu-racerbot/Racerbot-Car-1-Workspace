@@ -36,6 +36,15 @@ class CaptureError(RuntimeError):
     """Launch evaluation failed or attempted an unsupported operation."""
 
 
+class ParameterLoader(yaml.SafeLoader):
+    """Read Jazzy's inline tuple parameters as ROS array values."""
+
+
+ParameterLoader.add_constructor(
+    'tag:yaml.org,2002:python/tuple',
+    lambda loader, node: loader.construct_sequence(node, deep=True))
+
+
 def _dotted(values, prefix=''):
     result = {}
     for key, value in values.items():
@@ -49,7 +58,7 @@ def _dotted(values, prefix=''):
 
 def _blocks(path):
     with open(path, encoding='utf-8') as stream:
-        data = yaml.safe_load(stream) or {}
+        data = yaml.load(stream, Loader=ParameterLoader) or {}
     return {key: _dotted(value.get('ros__parameters', {}))
             for key, value in data.items() if isinstance(value, dict)}
 
