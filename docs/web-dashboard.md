@@ -95,7 +95,9 @@ Setting one up from scratch: [web-dashboards/car/README.md](../src/web_dashboard
 
 Edit [`web_dashboard_rb1.yaml`](../src/racerbot_launch/config/web_dashboard_rb1.yaml) for car 1 or [`web_dashboard_rb2.yaml`](../src/racerbot_launch/config/web_dashboard_rb2.yaml) for car 2. The package YAML in the submodule holds generic defaults. [`dashboard_launch.py`](../src/racerbot_launch/launch/dashboard_launch.py) loads the running car's settings, with site ID `rb1` or `rb2`.
 
-The run-delete panel lists the running car's `data/<id>/racerbot_auto` and `data/<id>/racerbot_sim/auto` only. A root inside a git working tree is allowed; demo maps in `src/particle_filter/maps` remain refused by name ([`mapstore.py`](../src/web_dashboards/car/ros/web_dashboard/web_dashboard/mapstore.py)). After deleting a committed run, use `git rm` as well so `tools/save_runs.sh` sees the deletion.
+Car 2's run-delete panel uses `data/rb2/racerbot_auto` and `data/rb2/racerbot_sim/auto`. Car 1's YAML currently lists `~/.ros/racerbot_auto` and `~/.ros/racerbot_sim/auto` instead. The launch loads these settings without replacing the roots ([`dashboard_launch.py`](../src/racerbot_launch/launch/dashboard_launch.py), [`web_dashboard_launch.py`](../src/web_dashboards/car/ros/web_dashboard/launch/web_dashboard_launch.py)).
+
+A root inside a git working tree is allowed; demo maps in `src/particle_filter/maps` remain refused by name ([`mapstore.py`](../src/web_dashboards/car/ros/web_dashboard/web_dashboard/mapstore.py)). After deleting a committed run, use `git rm` as well so `tools/save_runs.sh` sees the deletion.
 
 Then check it before trusting it — **Terminal 1, from `~/racerbot-ws`:**
 
