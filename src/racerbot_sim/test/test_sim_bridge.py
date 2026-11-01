@@ -204,7 +204,8 @@ def test_steering_limits_are_the_measured_full_lock_circles():
     servo 0.178. Right: 1.23 m inner at servo_max 0.95."""
     left = math.atan(0.36 / ((1.02 + 0.27) / 2.0))
     right = math.atan(0.36 / ((1.23 + 0.27) / 2.0))
-    updates = sim_bridge.vehicle_parameter_updates()
+    profile = sim_bridge.resolve_car_profile('rb2')
+    updates = sim_bridge.vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad)
     assert updates['s_max'] == pytest.approx(left, abs=1e-6)     # rad
     assert updates['s_min'] == pytest.approx(-right, abs=1e-6)   # rad
     assert math.degrees(updates['s_max']) == pytest.approx(29.2, abs=0.05)
@@ -218,6 +219,7 @@ def test_simulated_car_reaches_the_shipped_steering_limit_both_ways(package, nod
     the controller's own clamp; one that only steers less on one side is the
     2026-10-10 bug in simulated form."""
     limit = _car_params(package, node)['max_steering_angle']
-    updates = sim_bridge.vehicle_parameter_updates()
+    profile = sim_bridge.resolve_car_profile('rb2')
+    updates = sim_bridge.vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad)
     assert updates['s_max'] >= limit
     assert -updates['s_min'] >= limit

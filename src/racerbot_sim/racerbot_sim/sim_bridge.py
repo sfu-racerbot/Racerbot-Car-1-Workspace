@@ -25,6 +25,8 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from racerbot_car import identity
+from racerbot_car.profile import load_profile
 
 
 def add_sim_python_path(workspace_root=None) -> None:
@@ -65,11 +67,6 @@ CAR_WIDTH = 0.31
 CAR_LENGTH = 0.58
 LIDAR_OFFSET_X = 0.26
 LIDAR_OFFSET_Z = 0.11
-# Full-lock wheel angles, measured with circles 2026-10-16
-# (docs/hardware-reference.md): left at servo 0.178, right at servo_max 0.95.
-# Replaces gym's stock +/-0.4189 rad, which described another car.
-STEERING_MAX_LEFT = math.atan(0.36 / 0.645)     # +0.509 rad, 29.2 deg
-STEERING_MAX_RIGHT = -math.atan(0.36 / 0.750)   # -0.448 rad, 25.6 deg
 INTEGRATOR_DT = 0.005
 # The car's Hokuyo UST-10LX: 1081 beams at 0.25 deg over 270 deg. The older
 # harness uses 819; docs/sim-fidelity-audit.md measured the correction as
@@ -113,6 +110,7 @@ class SimConfig:
     scan_dropout_probability: float = 0.0
     controlled_cars: int = 1
     controlled_start_offsets_m: tuple = ()
+    car: str = ''
 
     def __post_init__(self):
         if type(self.controlled_cars) is not int or self.controlled_cars < 1:
@@ -239,13 +237,21 @@ class DeadReckonedOdometry:
         self.yaw_rate = yaw_rate
 
 
-def vehicle_parameter_updates() -> dict:
+def resolve_car_profile(car: str = ''):
+    """Resolve the node's car parameter, refusing an unidentified simulator."""
+    try:
+        return load_profile(car or identity.current_car_id())
+    except (ValueError, identity.UnknownCarError, identity.CarMismatchError) as exc:
+        raise ValueError(f'car parameter: {exc}; select car or set RACERBOT_CAR') from exc
+
+
+def vehicle_parameter_updates(full_lock_left_rad: float, full_lock_right_rad: float) -> dict:
     """This car's overrides of gym's stock F1TENTH_VEHICLE_PARAMETERS."""
     return dict(
         lf=WHEELBASE / 2.0, lr=WHEELBASE / 2.0,
         width=CAR_WIDTH, length=CAR_LENGTH,
         collision_body_center_x=WHEELBASE / 2.0,
-        s_min=STEERING_MAX_RIGHT, s_max=STEERING_MAX_LEFT,
+        s_min=full_lock_right_rad, s_max=full_lock_left_rad,
     )
 
 
@@ -253,6 +259,7 @@ class SimBridge:
     """One ego car plus zero or more scripted opponents on a closed loop."""
 
     def __init__(self, config: SimConfig):
+        profile = resolve_car_profile(config.car)
         add_sim_python_path()
         import gymnasium as gym
         import f1tenth_gym  # noqa: F401  registers the environment
@@ -282,7 +289,7 @@ class SimBridge:
             base_link_to_lidar_tf=(LIDAR_OFFSET_X, 0.0, 0.0),
         )
         params = F1TENTH_VEHICLE_PARAMETERS.with_updates(
-            **vehicle_parameter_updates())
+            **vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad))
         env_config = EnvConfig(
             seed=config.seed,
             map_name=str(config.track_path),

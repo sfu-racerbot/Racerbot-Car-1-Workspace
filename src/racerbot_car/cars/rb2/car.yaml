@@ -2,6 +2,10 @@
 # Calibration overlays (servo map, erpm gains, steering limits) live next to this
 # file under calibration/, taken from car 2's own configs at the 2026-11 merge.
 name: car 2
+steering:
+  full_lock_rad:
+    left: 0.5090708884223831  # atan(0.36 / 0.645), +0.509 rad: tape-measured full-lock half circles, 2026-10-16, servo 0.178; racerbot_sim/sim_bridge.py and tools/f1tenth_sim/sim_fidelity/calibration.py.
+    right: -0.44751997515716985  # -atan(0.36 / 0.750), -0.448 rad: tape-measured full-lock half circles, 2026-10-16, servo_max 0.95; racerbot_sim/sim_bridge.py and tools/f1tenth_sim/sim_fidelity/calibration.py.
 lidar:
   kind: ethernet              # Hokuyo UST-10LX
   ip: 192.168.0.10

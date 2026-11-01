@@ -1,5 +1,6 @@
 """Load strictly validated car hardware profiles."""
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,8 @@ class CarProfile:
     dashboard_site: str
     hostnames: dict[str, str]
     distinctive_usb_ids: tuple[str, ...]
+    full_lock_left_rad: float
+    full_lock_right_rad: float
 
 
 def _mapping(value, required, optional, path, key):
@@ -77,10 +80,19 @@ def load_profile(car_id: str, cars_dir: Path | None = None) -> CarProfile:
             data = yaml.safe_load(stream)
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise ProfileError(f'{path}: profile: {exc}') from exc
-    data = _mapping(data, {'name', 'lidar', 'camera', 'dashboard_site', 'distinctive_usb_ids'},
+    data = _mapping(data, {'name', 'lidar', 'camera', 'dashboard_site', 'distinctive_usb_ids', 'steering'},
                     {'hostnames'}, path, '')
     name = _string(data['name'], path, 'name')
     dashboard = _string(data['dashboard_site'], path, 'dashboard_site')
+    steering = _mapping(data['steering'], {'full_lock_rad'}, set(), path, 'steering.')
+    locks = _mapping(steering['full_lock_rad'], {'left', 'right'}, set(),
+                     path, 'steering.full_lock_rad.')
+    for side, sign in (('left', 1), ('right', -1)):
+        angle = locks[side]
+        if (type(angle) not in (int, float) or not math.isfinite(angle)
+                or not 0 < sign * angle < 0.8):
+            raise ProfileError(f'{path}: steering.full_lock_rad.{side}: '
+                               'expected finite angle with correct sign and magnitude < 0.8 rad')
 
     lidar = data['lidar']
     _mapping(lidar, {'kind'}, set(lidar) - {'kind'} if isinstance(lidar, dict) else set(), path, 'lidar.')
@@ -126,7 +138,8 @@ def load_profile(car_id: str, cars_dir: Path | None = None) -> CarProfile:
         raise ProfileError(f'{path}: distinctive_usb_ids: expected list')
     ids = tuple(_string(value, path, f'distinctive_usb_ids[{i}]', usb=True)
                 for i, value in enumerate(usb_ids))
-    return CarProfile(car_id, name, laser, cam, dashboard, hostnames, ids)
+    return CarProfile(car_id, name, laser, cam, dashboard, hostnames, ids,
+                      float(locks['left']), float(locks['right']))
 
 
 def all_profiles(cars_dir: Path | None = None) -> list[CarProfile]:

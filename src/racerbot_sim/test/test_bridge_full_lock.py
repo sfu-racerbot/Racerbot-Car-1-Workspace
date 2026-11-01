@@ -11,8 +11,11 @@ sys.path.insert(0, str(ROOT))
 
 
 @pytest.mark.parametrize('car', ['rb1', 'rb2'])
-def test_bridge_models_the_selected_cars_full_lock(car):
+def test_bridge_models_the_selected_cars_full_lock(car, tmp_path):
     from racerbot_sim.sim_bridge import resolve_car_profile, vehicle_parameter_updates
+    from racerbot_sim.gym_bridge_node import GymBridgeNode
+    import rclpy
+    from racerbot_sim import tracks
     profile = resolve_car_profile(car)
     params = vehicle_parameter_updates(profile.full_lock_left_rad, profile.full_lock_right_rad)
     # Independent oracles: docs/hardware-reference.md and rb1/calibration/vesc.yaml.
@@ -20,6 +23,20 @@ def test_bridge_models_the_selected_cars_full_lock(car):
                    else (math.atan(0.36 / 0.645), -math.atan(0.36 / 0.750)))
     assert params['s_max'] == pytest.approx(left, abs=1e-3)  # rad
     assert params['s_min'] == pytest.approx(right, abs=1e-3)  # rad
+    tracks.build('indoor_oval', str(tmp_path))
+    rclpy.init(args=['--ros-args', '-p', f'car:={car}', '-p',
+                     f'track_directory:={tmp_path}', '-p', 'controlled_cars:=2'])
+    node = None
+    try:
+        node = GymBridgeNode()
+        physics = node.bridge.env.unwrapped.sim.vehicle_params
+        assert physics.s_max == pytest.approx(left, abs=1e-3)  # rad, both agents share params
+        assert physics.s_min == pytest.approx(right, abs=1e-3)  # rad
+    finally:
+        if node is not None:
+            node.bridge.close()
+            node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_sim_bringup_passes_the_car_to_the_bridge(monkeypatch):

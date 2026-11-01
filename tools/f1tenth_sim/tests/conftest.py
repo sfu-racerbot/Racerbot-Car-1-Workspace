@@ -13,6 +13,10 @@ CARS = sorted(car for car in known_car_ids(cars_dir())
               if (cars_dir() / car / 'calibration/vesc.yaml').is_file())
 
 
+def profile_text(car, directory=None):
+    return ((directory or cars_dir()) / car / 'car.yaml').read_text()
+
+
 @pytest.fixture(autouse=True, params=CARS)
 def selected_test_car(request, monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', request.param)
@@ -36,7 +40,7 @@ def car_profiles(tmp_path, monkeypatch):
         profile = directory / car
         (profile / 'calibration').mkdir(parents=True)
         (profile / 'tuning').mkdir()
-        (profile / 'car.yaml').write_text('{}\n')
+        (profile / 'car.yaml').write_text(profile_text(car))
         values[car] = {
             'vesc': {key: base[key] for key in (
                 'speed_to_erpm_gain', 'steering_angle_to_servo_gain',
@@ -64,6 +68,9 @@ def car_profiles(tmp_path, monkeypatch):
 
     def clone(source, target):
         values[target] = deepcopy(values[source])
+        (directory / target).mkdir(exist_ok=True)
+        (directory / target / 'car.yaml').write_text(
+            profile_text(source, directory))
         write(target)
 
     for car in values:
