@@ -1,0 +1,6 @@
+/n:
+  ros__parameters:
+    x: 5
+'/**':
+  ros__parameters:
+    x: 1

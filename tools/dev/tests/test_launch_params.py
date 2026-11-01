@@ -67,6 +67,64 @@ def test_rule_param_parsed():
     assert flatten_params([('x:=0.5', False)], '/n') == {'x': 0.5}
 
 
+def rcl_entries(case):
+    return [(str(FIXTURES / 'rcl' / f'case_{case}_{part}.yaml'), True)
+            for part in ('a', 'b')]
+
+
+def test_rcl_semantics_case_1():
+    # oracle: controller's real rclpy/Jazzy measurement, 2026-10-31.
+    assert flatten_params(rcl_entries(1), '/n') == {'x': 2, 'y': 3}
+
+
+def test_rcl_semantics_case_2():
+    # oracle: controller's real rclpy/Jazzy measurement, 2026-10-31.
+    assert flatten_params(rcl_entries(2), '/n') == {'x': 3}
+
+
+def test_rcl_semantics_case_3():
+    # oracle: controller's real rclpy/Jazzy measurement, 2026-10-31.
+    assert flatten_params(rcl_entries(3), '/n') == {'x': 2}
+
+
+def test_rcl_rule_overrides_follow_all_files():
+    # oracle: round-5 model puts all -p rules last, in their own order.
+    first, second = rcl_entries(1)
+    entries = [('x:=9', False), first, ('x:=4', False), second]
+    assert flatten_params(entries, '/n') == {'x': 4, 'y': 3}
+
+
+def test_rcl_unnamed_blocks_preserve_entry_order():
+    # oracle: round-5 model preserves exact keys and their first-appearance order.
+    result = capture(str(FIXTURES / 'rcl/unnamed_launch.py'), [])
+    captured = json.loads(json.dumps(result, sort_keys=True))
+    assert captured['nodes'][0]['name'] is None
+    assert captured['nodes'][0]['params'] == {'x': 1}
+    assert captured['nodes'][0]['blocks'] == [
+        {'key': '/n', 'params': {'x': 5}},
+        {'key': '/**', 'params': {'x': 1}},
+        {'key': 'n', 'params': {'x': 2}},
+    ]
+    assert captured['nodes'][1]['params'] == {'x': 3, 'y': 3}
+    assert captured['nodes'][1]['blocks'] == [
+        {'key': '/**', 'params': {'x': 3, 'y': 3}},
+        {'key': 'n', 'params': {'x': 2}},
+    ]
+
+
+def test_diff_reports_unnamed_block_order_change():
+    # oracle: entry order determines overrides, so a reorder must be visible.
+    a = {'nodes': [record(None, {})], 'processes': []}
+    a['nodes'][0]['executable'] = 'exe'
+    a['nodes'][0]['blocks'] = [
+        {'key': '/**', 'params': {'x': 1}}, {'key': 'n', 'params': {'x': 2}}]
+    b = copy.deepcopy(a)
+    b['nodes'][0]['blocks'].reverse()
+    assert diff_captures(a, b) == [
+        '~ p/exe blocks [{"key": "/**", "params": {"x": 1}}, {"key": "n", "params": {"x": 2}}]'
+        ' -> [{"key": "n", "params": {"x": 2}}, {"key": "/**", "params": {"x": 1}}]']
+
+
 def test_jazzy_inline_tuple_as_list():
     # oracle: ROS arrays are JSON lists even when Jazzy emits a Python tuple tag.
     assert flatten_params([(str(FIXTURES / 'tuple.yaml'), True)], '/demo_node') == {
