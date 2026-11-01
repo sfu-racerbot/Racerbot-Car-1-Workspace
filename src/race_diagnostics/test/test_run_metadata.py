@@ -100,6 +100,27 @@ def test_imu_calibration_files_are_car_yaml_and_every_calib_json(tmp_path):
                      tmp_path / 'calib' / 'vesc_calib.json']
 
 
+def test_vendored_imu_calibration_is_covered_by_the_workspace_state(repo, tmp_path):
+    # oracle: invariant -- a directory inside the workspace repo has no git
+    # state of its own; recording it again would only repeat racerbot-ws's.
+    inside = repo / 'tools' / 'imu_calibration'
+    inside.mkdir(parents=True)
+    assert rm.metadata_repos(repo, inside) == {'racerbot-ws': repo}
+
+
+def test_a_separate_imu_calibration_clone_is_still_recorded(repo, tmp_path):
+    # oracle: spec -- a run records the commit of every repo it ran from
+    # (docs/run-diagnostics.md, metadata/). A clone outside the workspace is one.
+    outside = tmp_path / 'imu-calibration'
+    outside.mkdir()
+    subprocess.run(['git', 'init', '-q', str(outside)], check=True)
+    assert rm.metadata_repos(repo, outside) == {'racerbot-ws': repo, 'imu-calibration': outside}
+    # Not a git checkout at all: still listed, so the run says 'not a git ...'.
+    plain = tmp_path / 'plain'
+    plain.mkdir()
+    assert rm.metadata_repos(repo, plain) == {'racerbot-ws': repo, 'imu-calibration': plain}
+
+
 def test_write_run_metadata_layout(repo, tmp_path):
     (tmp_path / 'imu' / 'config').mkdir(parents=True)
     (tmp_path / 'imu' / 'config' / 'car.yaml').write_text('car: {}\n')
@@ -148,8 +169,7 @@ def test_record_run_writes_metadata_and_snapshots_parameters():
     # IMU calibration files, never lets it stop a run, and starts the
     # parameter snapshot into that folder.
     code = LAUNCH.read_text()
-    assert "'racerbot-ws': find_repo_root(os.path.realpath(__file__))" in code
-    assert "'imu-calibration': racer_imu_root" in code
+    assert 'repos = metadata_repos(find_repo_root(os.path.realpath(__file__)), racer_imu_root)' in code
     assert 'imu_calibration_files(racer_imu_root)' in code
     assert "except Exception as e:  # noqa: BLE001 -- a metadata failure must not stop a run" in code
     assert "executable='snapshot_params'" in code
@@ -162,3 +182,40 @@ def test_staged_edits_are_in_the_diff_too(repo, tmp_path):
     _git(repo, 'add', 'tracked.yaml')
     _, diff = rm.write_git_state(repo, tmp_path / 'out', 'ws')
     assert '+gain: 3650.0' in diff.read_text()
+
+
+def test_team_repos_lists_checked_out_team_submodules_only(tmp_path):
+    # racerbot_a checked out as a submodule (its .git is a gitlink *file*),
+    # racerbot_b registered but never checked out (an empty directory), as
+    # on car 1 (`git submodule status`: '-' for racerbot_b).
+    ws = tmp_path / 'ws'
+    (ws / 'src' / 'racerbot_a').mkdir(parents=True)
+    (ws / 'src' / 'racerbot_a' / '.git').write_text('gitdir: ../../.git/modules/a\n')
+    (ws / 'src' / 'racerbot_b').mkdir()
+    assert rm.team_repos(ws) == {'racerbot_a': ws / 'src' / 'racerbot_a'}
+    (ws / 'src' / 'racerbot_b' / '.git').mkdir()
+    assert rm.team_repos(ws) == {'racerbot_a': ws / 'src' / 'racerbot_a',
+                                 'racerbot_b': ws / 'src' / 'racerbot_b'}
+
+
+def test_team_repos_outside_any_workspace_is_empty(tmp_path):
+    assert rm.team_repos(None) == {}
+    assert rm.team_repos(tmp_path) == {}
+
+
+def test_record_run_records_team_code_and_names_its_nodes_by_prefix():
+    # Static: team A's git state joins the metadata, and every node the
+    # recorder starts takes its name from recorder_node_names(name_prefix),
+    # which is what auto_record matches its own recording against.
+    code = LAUNCH.read_text()
+    assert "repos.update(team_repos(repos['racerbot-ws']))" in code
+    assert 'recorder_node_names(\n' in code
+    assert 'name=diag_name' in code and 'name=snapshot_name' in code
+    assert "bag_record_command(os.path.join(run_dir, 'bag'), bag_name, topics)" in code
+    # ...and that argument really does name the node (recording.py, shared with
+    # auto_record_node.py, which starts the bag itself).
+    from race_diagnostics.recording import bag_record_command
+    command = bag_record_command('/run/bag', 'auto_rosbag2_recorder', ['/scan'])
+    assert command[command.index('--node-name') + 1] == 'auto_rosbag2_recorder'
+    assert command[command.index('-o') + 1] == '/run/bag'
+    assert command[-1] == '/scan'

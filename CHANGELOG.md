@@ -6,7 +6,67 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-10-24 (latest) — Gyro odometry for SLAM; every mapping run recorded and explained
+## 2026-10-29 (latest) — alongside abort, and the simulator interlock's clean-graph window
+
+### gap_follow
+
+- **New: alongside abort** (`opponent_abort_speed_margin: 0.5`). If a pass is refused or abandoned while the other car is alongside, and that car's centre is ahead of this car's, this car's speed is capped 0.5 m/s below the other car's, so it drops back behind. The car behind is the only one that yields, and the cap applies only on scans that see the other car: the follow memory never holds it. Speed only. See `docs/gap-follow.md#several-cars-at-once`, step 4.
+- **New methods:** `OpponentAwareness.follow_law_cap()` (the part the follow memory may hold) and `alongside_cap()`. `follow_cap()` still returns their minimum.
+- **Test functions per file:** `test_opponent_tracking.py` 98, `test_opponent_awareness_node.py` 26, `test_gap_mirror_parity.py` 12.
+
+### racerbot_sim
+
+- **New: `interlock_clear_confirm_sec: 3.0`** in `sim_joy_node` and `gym_bridge_node`. After the 3 s discovery hold, the graph must show no car on every check for 3 s before simulated `/joy`, `/scan` or `/odom` start, and again whenever the car's drivers leave. With the hold alone, a forged `/joy` sometimes got out beside a running `urg_node`. The simulator now starts about 6 s after launch. See `docs/ros-simulator.md`.
+- The interlock ROS test's "no leak" watch is computed from the nodes' own defaults (hold + confirmation + 4 s, so 10 s today). Raising either default lengthens the watch instead of letting the test pass without checking anything.
+- Simulator ROS tests drive `/test_only/...` topics, and `test/conftest.py` fails fast without an isolated ROS domain (`ROS_DOMAIN_ID` non-zero, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`).
+
+## 2026-10-28 — gap_follow other-car layer on by default; follow hold, memory and outline
+
+The other-car layer (`opponent_tracking.py`) now runs by default, with a 1 s follow hold, a 1 s follow memory, the measured 0.31 × 0.58 m outline and a narrow-section refusal. Simulator-validated only: **not yet driven on the car.** The numbers, the rejected designs and the first-run order are in `docs/gap-follow.md#several-cars-at-once`.
+
+### gap_follow
+
+- **Changed shipped default:** `enable_opponent_awareness` false → true (`config/gap_follow.yaml`). `gap_follow_launch.py`'s `opponent_awareness` argument now defaults to `'true'`. Off switch: `opponent_awareness:=false`. Anything other than `true` or `false` stops the launch. The node's own code default stays `False`, so a node started without the YAML behaves as before.
+- **New: follow-cap memory:** `opponent_follow_memory_sec: 1.0`. The follow cap is held for 1 s after its car is lost. Speed only; `0.0` turns it off. The decision log can show `opponent mode=follow_memory`.
+- **New: follow hold:** `opponent_stopped_release_sec: 1.0`. A car confirmed as moving stays followed for 1 s after it drops below 0.3 m/s, then becomes an ordinary obstacle. The hold never enables a pass.
+- **Changed meaning: `opponent_radius`** (0.30 m) is now only the rear cutoff. The other car is the measured 0.31 × 0.58 m rectangle (`opponent_length`, `opponent_width`), placed from its visible face.
+- **New: narrow-section refusal:** a pass is refused, or abandoned, when the room beside the other car is narrower than `car_width + 2 × opponent_passing_margin` (0.61 m shipped). The car follows instead.
+- **Unchanged after the R4 margin sweep:** `opponent_passing_margin` 0.15 m and `opponent_pass_max_steering` 0.10 rad. The evidence is in the YAML comment above them.
+- **Test functions per file** (`grep -c '^def test'`): `test_opponent_tracking.py` 95, `test_opponent_awareness_node.py` 23, `test_gap_mirror_parity.py` 10, `test_gap_follow_launch_steering_damping.py` 11.
+
+### racerbot_launch
+
+- `map_course`, `auto_map_race_launch.py` and `autonomous_mapping_launch.py` start `gap_follow` from the same YAML and turn the other-car layer off for their mapping laps, because mapping is always one car. Each takes an `opponent_awareness` argument that defaults to `false`; `opponent_awareness:=true` turns the layer on.
+
+### Needs on-car validation
+
+- The other-car layer has never run on the floor. Order: wheels off with both cars, then a slow two-car run at `max_speed:=1.0`, with a person holding LB on each controller. If a wall shows as `opponent mode=` with no other car moving, let go of LB, relaunch with `opponent_awareness:=false`, and report the run.
+
+## 2026-10-27 — gap_follow race defaults (not yet driven on the car)
+
+Shipped defaults for a faster `gap_follow` that weaves less. Simulator-validated only: **not yet driven on the car.** The numbers, and how to go back, are in `docs/gap-follow.md#race-defaults-2026-10-27`.
+
+### gap_follow
+
+- **Changed shipped defaults** (`config/gap_follow.yaml`; the launch arguments follow):
+  - `max_speed` 3.5 → 5.0. `min_speed` 1.0 → 1.429, `corner_speed` 1.5 → 2.143, `corner_speed_wide` 1.9 → 2.714, `narrow_corridor_speed` 2.5 → 3.571 (scaled by 5.0/3.5).
+  - `max_acceleration` 3.0 → 5.0. This is the speed ramp, never braking.
+  - `enable_steering_damping` false → true, and `steering_damping_gain` 0.03 → 0.10 s. The `steering_damping` launch argument now defaults to `true`, so a bare launch starts the IMU stack. Without a healthy IMU the term adds exactly zero.
+  - `enable_corner_setup` true → false.
+  - Unchanged: `enable_adaptive_grip` (still off), `max_lateral_accel` (2.5), `max_braking_decel` (3.0), the deadman, the time-to-collision brake and the clearance stops.
+- **Live tuning:** `corner_speed` range 0.1–2.0 → 0.1–2.85 (2.0 × 5.0/3.5), so the shipped value sits inside the panel's range.
+- **Comment fix:** the YAML header and `src/gap_follow/README.md` said `max_acceleration` is the braking the car assumes. That is `max_braking_decel`.
+- **Tests:** `test_race_defaults.py` (new, 7 tests, runs unsourced) pins the table. The old-default tests that changed are listed in the commit message.
+
+### racerbot_launch
+
+- `map_course` and the other mapping launches read the same YAML. Unless `mapping_max_speed:=` is given, mapping laps now run at up to 5.0 m/s.
+
+### Needs on-car validation
+
+- All of the above. Order: wheels off, then the floor at `max_speed:=1.0`. Check the IMU with `ros2 topic echo /imu/status --once` before the first run with steering damping on.
+
+## 2026-10-24 — Gyro odometry for SLAM; every mapping run recorded and explained
 
 For the first IMU mapping test (A/B, `docs/launchstart.md#testing-the-imu-in-mapping-ab`).
 Built and checked off the car: **not yet driven on.**

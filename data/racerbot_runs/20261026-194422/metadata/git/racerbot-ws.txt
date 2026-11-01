@@ -1,0 +1,15 @@
+repository: /home/racerbotcar-1/racerbot-ws
+HEAD: 0265263d203a5d25b2c7177056541cd0f94614fb
+branch: main
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+ M src/racerbot_a
+ M src/range_libc
+
+# git submodule status
+ ec599a1c4f3d4edc5f7d356e2f2990839e56bb7d src/particle_filter (heads/foxy-devel)
++8f7c324a8373f1c218cb144f5e101f47057183ef src/racerbot_a (heads/main)
+-31ae4ef071401045bb0beb6d0bb63befa87293df src/racerbot_b
+ f55480a7044367c219745480b436b8b7117f8282 src/range_libc (heads/humble-devel)
+ d3f510ce1b4be12967064d8251ebcac530921a04 src/transport_drivers (1.2.0)
+ d4e11b4122745af3b79ee1e5f2ce99d7619e7d0d src/web_dashboards (d4e11b4)

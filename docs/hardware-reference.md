@@ -17,7 +17,7 @@ Physical connections, addresses, and config values for this specific car. Everyt
 | | |
 |---|---|
 | Connection | USB, exposed as `/dev/sensors/vesc` (symlink to whatever `/dev/ttyACM*` it enumerates as) |
-| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `MODE=0666` with no group, `SYMLINK+="sensors/vesc"`, so any user can open it without `dialout` or a re-login |
+| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `MODE=0666` with no group, `SYMLINK+="sensors/vesc"`, so any user can open it without `dialout` or a re-login. Copy in the repo: `tools/udev/99-vesc.rules`; `sudo tools/udev/install.sh` installs all of car 1's rules |
 | Firmware | 7.0 (confirmed via `vesc_driver_node`'s connection log) |
 | Group access | Not needed for the VESC (`MODE=0666`). `racerbotcar-1` is in `dialout` anyway (checked 2026-10-24) |
 
@@ -47,11 +47,9 @@ The servo formula: `servo_position = -0.83 × steering_angle + 0.366` (gain fitt
 
 **Servo output must be enabled in the VESC's own firmware config** — this is separate from anything in this repo and isn't visible to `ros2`/`colcon` at all. If a freshly-flashed or reset VESC has steering that does nothing despite `fault_code: 0` and a clean serial connection, check this first. Requires **VESC Tool** (official app, vesc-project.com) connected over USB — which means stopping the ROS bringup first, since only one process can hold the serial port. Full story in [troubleshooting.md](troubleshooting.md).
 
-**The onboard IMU reports all zeros.** Measured 2026-08-19: `/sensors/imu/raw` publishes steadily at **50 Hz**, and every field — all three gyro axes, all three accelerometer axes — is exactly `0.0`. There is no gravity vector on any accelerometer axis, which is the giveaway: a working IMU lying still still reads about 9.81 m/s² somewhere.
+**The onboard IMU works, once it is switched on.** The note measured on 2026-08-19 (on car 2, and copied here) found `/sensors/imu/raw` publishing at 50 Hz with every field exactly `0.0` and no gravity on any axis: the IMU was disabled in the VESC's firmware. It has been turned on in **VESC Tool → App Settings → IMU** (a sample rate of 0 means off), and the team's October 2026 tests show it working on both cars. Like the servo-output flag above, it can only be read in VESC Tool, not from ROS.
 
-So the VESC is answering the driver's IMU poll with an empty packet. That is either a board without the IMU fitted, or an IMU left disabled in the firmware — **VESC Tool → App Settings → IMU**, where a sample rate of 0 means off. Same caveat as the servo-output flag above: it can only be checked in VESC Tool, not from ROS.
-
-This matters more than it looks. The car's heading in `/odom` is integrated from the *commanded* steering angle through a bicycle model, with nothing measuring the actual rotation. A working gyro is the single biggest available improvement to that. See [localization.md](localization.md).
+If it ever reads all zeros again, it has been switched off: `imu_bridge`'s `/imu/status` then reports `fault` with an all-zero reason.
 
 To re-check after changing anything in VESC Tool:
 
@@ -79,7 +77,7 @@ Reading or writing the VESC's app configuration (including that servo-output fla
 | | |
 |---|---|
 | Connection | USB (not Ethernet) — enumerates as `/dev/ttyACM*`, exposed as a stable `/dev/sensors/hokuyo` symlink |
-| udev rule | `/etc/udev/rules.d/99-hokuyo.rules` — matches idVendor `15d1`, idProduct `0000` (Hokuyo Data Flex for USB, URG-Series USB Driver), `MODE=0666`, `SYMLINK+="sensors/hokuyo"` |
+| udev rule | `/etc/udev/rules.d/99-hokuyo.rules` — matches idVendor `15d1`, idProduct `0000` (Hokuyo Data Flex for USB, URG-Series USB Driver), `MODE=0666`, `SYMLINK+="sensors/hokuyo"`. Copy in the repo: `tools/udev/99-hokuyo.rules` (`sudo tools/udev/install.sh`) |
 | Config | `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` sets `serial_port: "/dev/sensors/hokuyo"` (`ip_address`/`ip_port` are commented out — this car doesn't use `urg_node`'s Ethernet mode at all) |
 | Scan rate | ~40Hz, ±180° (`angle_min`/`angle_max`: ±3.14 rad in `sensors.yaml`) |
 | Frame | `laser`, offset from `base_link`: +0.26m forward, +0.11m up, no rotation — **car 2's measurement, assumed for car 1; not yet measured on this chassis** (see [Physical dimensions](#physical-dimensions-used-in-config)) |

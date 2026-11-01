@@ -20,6 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterFile
 import pytest
 import yaml
 
@@ -228,3 +229,152 @@ def test_vehicle_state_launch_hands_publish_odom_tf_to_the_node(publish, expecte
     node = [a for a in actions if isinstance(a, Node) and a.node_executable == 'vehicle_state_node']
     assert len(node) == 1
     assert _node_params(node[0], ctx)['publish_odom_tf'] is expected
+
+
+# ------------------------------------------------------------ SLAM profile
+
+SLAM_GYRO = SRC / 'racerbot_launch' / 'config' / 'slam_gyro.yaml'
+
+
+def test_gyro_odom_loads_the_gyro_slam_profile():
+    # oracle: spec -- A1: the profile is loaded with gyro_odom:=true, from the
+    # installed package, where slam_launch.py will read it.
+    _, ctx = _wired_context(gyro_odom='true')
+    profile = ctx.launch_configurations['slam_profile_file']
+    assert profile.endswith('/slam_gyro.yaml')
+    assert Path(profile).is_file()
+
+
+def test_without_gyro_odom_no_profile_is_set():
+    # oracle: spec -- A1: runs without the gyro keep slam_tracking.yaml's search.
+    _, ctx = _wired_context(gyro_odom='false')
+    assert 'slam_profile_file' not in ctx.launch_configurations
+
+
+def test_slam_launch_layers_the_profile_last():
+    # oracle: spec -- ROS 2 parameter files: later files win (slam_launch.py,
+    # "Order matters"). So: tracking file, then profile, then the dict.
+    spec = importlib.util.spec_from_file_location(
+        'slam_launch', LAUNCH.parent / 'slam_launch.py')
+    sl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sl)
+    ld = sl.generate_launch_description()
+    ctx = _context(ld, slam_profile_file='/profile/under/test.yaml')
+    slam = [e for e in ld.entities if isinstance(e, Node)]
+    assert len(slam) == 1
+    entries = slam[0]._Node__parameters
+    files = [''.join(s.perform(ctx) for s in e.param_file)
+             for e in entries if isinstance(e, ParameterFile)]
+    assert files == [ctx.launch_configurations['slam_params_file'],
+                     ctx.launch_configurations['slam_tracking_file'],
+                     '/profile/under/test.yaml']
+    assert isinstance(entries[-1], dict)
+
+
+def test_gyro_profile_window_cannot_reach_the_neighbouring_track():
+    # oracle: measured docs/superpowers/specs/2026-10-26-slam-and-gap-follow-plan.md
+    # (A1): on runs 20261026-194714 and -194913 the false loop-closure jumps were
+    # at least 2.2 m. The correlation window is +/- loop_search_space_dimension / 2
+    # (A1: the 8.0 m search is +/-4 m), so it must stay short of 2.2 m.
+    profile = yaml.safe_load(SLAM_GYRO.read_text())['slam_toolbox']['ros__parameters']
+    assert profile['loop_search_space_dimension'] / 2 < 2.2
+
+
+@pytest.mark.parametrize('all_value', ['false', 'true'])
+@pytest.mark.parametrize('flag', ['gyro_odom', 'fused_speed', 'imu_lap_turns'])
+def test_imu_all_defaults_and_explicit_false_wins(all_value, flag):
+    # oracle: Task J1a R1: each flag follows imu_all unless explicitly set.
+    _, ctx = _wired_context(imu_all=all_value)
+    assert ctx.launch_configurations[flag] == all_value
+    overrides = {'imu_all': all_value, flag: 'false'}
+    if flag == 'gyro_odom':
+        overrides['imu_lap_turns'] = 'false'
+    _, ctx = _wired_context(**overrides)
+    assert ctx.launch_configurations[flag] == 'false'
+
+
+@pytest.mark.parametrize('flag', ['imu_all', 'imu_lap_turns', 'gyro_odom', 'fused_speed'])
+def test_imu_flags_refuse_when_imu_disabled(flag):
+    # oracle: Task J1a R2: identify the requested flag and the fix.
+    with pytest.raises(RuntimeError, match=flag + r':=true needs imu:=true'):
+        _wired_context(imu='false', **{flag: 'true'})
+
+
+def test_lap_turns_require_gyro_odometry_even_with_imu_all():
+    # oracle: Task J1a R2: do not let the lap counter consume an absent frame.
+    with pytest.raises(RuntimeError, match='imu_lap_turns:=false'):
+        _wired_context(imu_all='true', gyro_odom='false')
+
+
+@pytest.mark.parametrize('flag', ['imu', 'imu_all', 'imu_lap_turns', 'gyro_odom', 'fused_speed'])
+def test_imu_flags_reject_invalid_boolean(flag):
+    # oracle: Task J1a R2: launch booleans accept true/false/1/0 only.
+    with pytest.raises(RuntimeError, match=flag + r'.*expected'):
+        _wired_context(**{flag: 'maybe'})
+
+
+def test_lap_turn_frame_matches_publisher_and_default_yaml():
+    # oracle: Task J1a R3: compare against the two actual parameter files.
+    vehicle = yaml.safe_load((SRC / 'imu_bridge/config/vehicle_state.yaml').read_text())
+    supervisor = yaml.safe_load((SRC / 'pure_pursuit/config/auto_map_race.yaml').read_text())
+    vehicle_frame = vehicle['vehicle_state_node']['ros__parameters']['imu_odom_frame']
+    default_frame = supervisor['auto_map_race_node']['ros__parameters']['odom_frame']
+    for on in (False, True):
+        ld, ctx = _wired_context(imu_lap_turns=str(on).lower(), gyro_odom=str(on).lower())
+        nodes = _opaque(ld, None).execute(ctx)
+        node = next(n for n in nodes if isinstance(n, Node) and n.node_package == 'pure_pursuit')
+        params = _node_params(node, ctx)
+        if on:
+            assert params['odom_frame'] == vehicle_frame
+        else:
+            assert 'odom_frame' not in params
+            assert params.get('odom_frame', default_frame) == default_frame
+
+
+@pytest.mark.parametrize('requested,expected', [(None, 3.5), ('2.1', 2.1)])
+def test_mapping_speed_default_and_override(requested, expected):
+    # oracle: Task J1a R4: 3.5 m/s default; explicit cap wins.
+    overrides = {} if requested is None else {'mapping_max_speed': requested}
+    assert _gap_follow_params(**overrides)['max_speed'] == expected
+
+
+@pytest.mark.parametrize('requested', [None, '/x/y'])
+def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested):
+    # oracle: Task J1a R5: recorder arguments used to leak into the parent
+    # context, sending maps to racerbot_runs. This fails without GroupAction.
+    from launch.actions import GroupAction, SetLaunchConfiguration
+
+    ld = ml.generate_launch_description(imu_probe=lambda: True)
+    ctx = LaunchContext()
+    if requested is not None:
+        ctx.launch_configurations['output_directory'] = requested
+    recorded = []
+    supervisors = []
+
+    def visit(entities):
+        for entity in entities:
+            if entity.condition is not None and not entity.condition.evaluate(ctx):
+                continue
+            if isinstance(entity, DeclareLaunchArgument):
+                entity.execute(ctx)
+            elif isinstance(entity, GroupAction):
+                visit(entity.execute(ctx))
+            elif isinstance(entity, IncludeLaunchDescription):
+                entity.launch_description_source.get_launch_description(ctx)
+                if entity.launch_description_source.location.endswith('/record_run.py'):
+                    for action in entity.execute(ctx):
+                        if isinstance(action, SetLaunchConfiguration):
+                            action.execute(ctx)
+                    recorded.append(ctx.launch_configurations['output_directory'])
+            elif isinstance(entity, OpaqueFunction):
+                visit(entity.execute(ctx))
+            elif isinstance(entity, Node):
+                if entity.node_package == 'pure_pursuit':
+                    supervisors.append(_node_params(entity, ctx)['output_directory'])
+            elif entity.__class__.__name__ in ('PushLaunchConfigurations', 'PopLaunchConfigurations',
+                                               'SetLaunchConfiguration'):
+                entity.execute(ctx)
+
+    visit(ld.entities)
+    assert recorded == ['~/racerbot-ws/data/racerbot_runs']
+    assert supervisors == [requested or '~/racerbot-ws/data/racerbot_auto']

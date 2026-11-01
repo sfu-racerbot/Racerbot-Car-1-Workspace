@@ -81,21 +81,19 @@ ros2 launch gap_follow gap_follow_launch.py
 
 **Working when:** it prints a decision line every second, and the car drives itself while you hold LB.
 
-**Other cars on the track too?** Turn on opponent awareness, on every car (simulator-validated only, see [gap-follow.md](gap-follow.md#several-cars-at-once)). **Terminal 2**, instead of the command above:
+**Other cars on the track too?** Opponent awareness is **on by default**, so the command above already runs it on every car. It is simulator-validated only. Do the [first run](#car-1-and-car-2-together-first-run) in order before you run two cars. To turn it off for one run, add `opponent_awareness:=false` to the end of the command above.
 
-```bash
-ros2 launch gap_follow gap_follow_launch.py opponent_awareness:=true
-```
+**Working when:** the decision lines show `opponent mode=follow` (or `clear`) while another car is moving ahead. For a moment after a followed car is lost, the line can show `opponent mode=follow_memory`.
 
-**Working when:** the decision lines show `opponent mode=follow` (or `clear`) while another car is moving ahead.
+It follows a slower car instead of squeezing past it, and passes only on a straight with room. On a track as narrow as ours it will mostly follow.
 
-It follows a slower car instead of squeezing past it, and passes only on a straight with room. On a track as narrow as ours it will mostly follow. Do not run two cars at once without it.
+**Do not run two cars with opponent awareness turned off.** With it off, only 24 of 32 simulated two-car runs passed, with 3 contacts and 5 stalls ([gap-follow.md](gap-follow.md#several-cars-at-once)).
 
-**Slower for one run:** add `max_speed:=1.0` (any speed in m/s up to `gap_follow.yaml`'s `max_speed`, 3.5 on car 1). It also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. A value above the YAML's, or anything that isn't a positive number, is refused and nothing starts.
+**Slower or faster for one run:** add `max_speed:=1.0` (any speed in m/s up to 5.0; `gap_follow.yaml`'s own `max_speed` is 5.0 on car 1 since 2026-10-27, was 3.5). Lower than the YAML's, it also lowers `min_speed`, `corner_speed` and `corner_speed_wide` if they are above it. Higher, e.g. `max_speed:=5.0`, it raises only the top speed on straights: corners are still held to `corner_speed`, `corner_speed_wide` and `max_lateral_accel`, so raise those in the YAML too if the car should be faster everywhere. Above 5.0, or anything that isn't a positive number, is refused and nothing starts. Going faster: wheels off the ground first, then open space.
 
 ### Car 1 and car 2 together: first run
 
-Opponent awareness has only been tested in the simulator. Do these steps in order, and don't skip ahead. Each step is the cheapest place to find a problem the next one would find with a crash.
+Opponent awareness is on by default, and it has only been tested in the simulator. Do these steps in order, and don't skip ahead. Each step is the cheapest place to find a problem the next one would find with a crash.
 
 **Two people, one per car.** Each holds LB on **their own car's** F710 controller. Letting go of LB stops that car.
 
@@ -117,15 +115,21 @@ Opponent awareness has only been tested in the simulator. Do these steps in orde
 
    **Working when:** each car's wheels turn only while its own LB is held, and stop when it's released.
 
-3. **Floor, low speed, open space.** Same commands, one car about 2 m behind the other, nobody standing on the track. Start somewhere at least 2 m wide, not the 1.2 m track. In the simulator, at these speeds in a 1.2 m corridor, 1–3 of every 8 runs touched a wall, with or without opponent awareness and even with one car alone (2026-10-23, `narrow_1p2`). In wider layouts there was no contact.
+3. **Floor, low speed, open space.** Same commands, one car about 2 m behind the other, nobody standing on the track. Start somewhere at least 2 m wide, not the 1.2 m track.
 
-   **Working when:** the decision lines (one a second) of the car behind show `opponent mode=follow` and a `follow cap=`. **If either car shows `opponent mode=` with no other car moving,** it's mistaking a wall for a car: stop, relaunch without `opponent_awareness:=true`, and keep that run's log.
+   In the simulator, at these speeds in a 1.2 m corridor, 1–3 of every 8 runs touched a wall, with or without opponent awareness and even with one car alone (2026-10-23, `narrow_1p2`). In wider layouts there was no contact.
+
+   **Working when:** the decision lines (one a second) of the car behind show `opponent mode=follow` and a `follow cap=`. **If either car shows `opponent mode=` with no other car moving,** it's mistaking a wall for a car: let go of LB, relaunch with `opponent_awareness:=false`, and keep that run's log.
 
 ## Map a course: 3 laps, then stop
 
 `gap_follow` drives 3 laps while [SLAM](glossary.md#slam) builds the map. Then it saves the map and a [racing line](glossary.md#racing-line), stops the car, shuts everything down, and prints the commands to race on that map. Like every mode here it needs `bringup_launch.py` running first, and it refuses to start without it. Simulator-validated only; not yet run on the car.
 
 **Before you start:** put the car on the track, pointing the way it should lap.
+
+**Opponent awareness is off in mapping.** `map_course` starts `gap_follow` from `gap_follow.yaml`, but the mapping launches turn the layer off again, because mapping is always one car (decided 2026-10-28). Changing `enable_opponent_awareness` in the YAML does not change mapping.
+
+To map with the layer on, add `opponent_awareness:=true` to the `map_course` command. If `opponent mode=` shows with no other car on the track, let go of LB, then relaunch without `opponent_awareness:=true`.
 
 **Terminal 1** (leave it running for mapping *and* racing):
 
@@ -143,6 +147,12 @@ ros2 run racerbot_launch map_course
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
+After the launch stops, `map_course` runs the run summary, IMU report and SLAM report. It prints the first 15 lines of each and saves the full reports under the recorded run's `analysis/map_course/` directory. The `Recording run to:` line near the start gives that run's path.
+
+With `analysis:=false`, the reports are skipped. If recording is disabled, analysis is skipped because there is no recorded run.
+
+Mapping defaults to a 3.5 m/s speed cap. The gyro SLAM profile was validated by replay only up to about 3.3 m/s. Raise the default only after a recorded gyro run at a higher speed produces a clean `slam_report`.
+
 **Then leave the car where it stopped.** That spot is where racing on this map starts. If you'll race this map on another day, mark the spot and the direction (tape on the floor) before moving the car.
 
 Options, added to the end of the command:
@@ -152,9 +162,21 @@ Options, added to the end of the command:
 | `mapping_max_speed:=1.5` | a course nobody has driven yet |
 | `laps:=4` | a different number of laps (at least 2) |
 | `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
-| `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
-| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
-| `imu:=false` | no IMU side (the BNO085 bridge, `imu_bridge`, `vehicle_state`). Added for you in the simulator |
+| `gyro_odom:=true` | SLAM maps on **gyro odometry** (`/odom/imu`: heading from the BNO085's gyro instead of from the steering command). Only the map changes: `gap_follow` drives exactly as before. It also loads `slam_gyro.yaml`: a tighter loop-closure search for good odometry. A loop closure is SLAM noticing it has come back to a place it already mapped. **Not yet driven on:** see [Testing the IMU in mapping](#testing-the-imu-in-mapping-ab) |
+| `imu_lap_turns:=true` | Count lap turning from gyro heading in `odom_imu`; positions relative to the map still determine the recorded path. Requires `gyro_odom:=true`. |
+| `imu_all:=true` | Enable `gyro_odom`, `fused_speed` and `imu_lap_turns`. An explicit `false` overrides the corresponding setting; if disabling `gyro_odom`, also disable `imu_lap_turns`. All require `imu:=true`. |
+| `analysis:=false` | Skip the reports after the launch exits. |
+| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
+| `imu:=false` | explicitly turn off the IMU stack, including the estimator |
+| `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
+
+With `imu_lap_turns` enabled, short odometry gaps use map heading provisionally. On return, the counter replaces that estimate with the gyro turn, avoiding double counting.
+
+Reconciliation requires a gap of at most 0.25 s with provisional turning kept within 90°. Other gaps retain the map estimate because a wrapped heading difference can hide a full turn.
+
+A lap must take at least 4 s, alongside the 300° turning gate. From the second lap on, it must also take at least half as long as the lap before. That way the minimum follows the course: on car 1's 29 m course at mapping speed it is about 8 s, and on a longer course it grows with it. The former fixed 15 s blocked the first return on the simulator's roughly 29 m oval, forcing two circuits into each recorded lap.
+
+The corrected `imu_all:=true` simulator run `20261029-170502` recorded 363°, 360° and 359° (1.01, 1.00 and 1.00 revolutions). Its final lap passed and saved a racing profile. See [the simulator results](ros-simulator.md#simulated-imu) for the first-run diagnosis and repeat-run paths.
 
 **If it says `the hardware is not running`:** start Terminal 1 first.
 
@@ -182,7 +204,7 @@ ros2 launch imu_bridge vehicle_state_launch.py
 ros2 topic echo /imu/bno/data --field linear_acceleration
 ```
 
-**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/imu-calibration`. Then `Ctrl+C` terminals 2 and 3.
+**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/racerbot-ws/tools/imu_calibration`. Then `Ctrl+C` terminals 2 and 3.
 
 **2. Run A, today's odometry.** Car on the tape mark. **Terminal 2:**
 
@@ -190,7 +212,7 @@ ros2 topic echo /imu/bno/data --field linear_acceleration
 ros2 run racerbot_launch map_course
 ```
 
-Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/.ros/racerbot_runs/<time>` near the start. Write that folder down as run A.
+Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/racerbot-ws/data/racerbot_runs/<time>` near the start. Write that folder down as run A.
 
 **3. Run B, gyro odometry.** Put the car back on the tape mark, facing the same way. **Terminal 2:**
 
@@ -203,7 +225,7 @@ ros2 run racerbot_launch map_course gyro_odom:=true
 **4. Compare.** For each run's folder:
 
 ```bash
-python3 tools/run_analysis/imu_report.py ~/.ros/racerbot_runs/<time>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<time>
 ```
 
 **Working when:** it prints three sections: turn rate from each source, the steering lag and turning gain the gyro measured, and how much heading correction SLAM had to apply. Run B should need far less heading correction than run A.
@@ -220,13 +242,13 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 ```bash
 # pure pursuit (the default racing controller)
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run>
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run>
 # Stanley
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=stanley
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=stanley
 # LQR
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=lqr
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=lqr
 # MPC
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=mpc
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=mpc
 ```
 
 **Working when:** `Particle filter is at the start pose; racing can begin.` appears (the race controller only starts after it), then the car drives the racing line while you hold LB.
@@ -236,8 +258,8 @@ ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<ru
 **Forgot the run folder?**
 
 ```bash
-ls -t ~/.ros/racerbot_auto | head -3                    # newest first
-cat ~/.ros/racerbot_auto/<run>/commands.txt             # that run's commands again
+ls -t ~/racerbot-ws/data/racerbot_auto | head -3                    # newest first
+cat ~/racerbot-ws/data/racerbot_auto/<run>/commands.txt             # that run's commands again
 ```
 
 **In the simulator** (map, then race without moving the car): pure pursuit, LQR and MPC each raced 128–142 m with no contact. In one run Stanley swerved around something it wrongly took for another car, and brushed a wall. Start with pure pursuit.
@@ -246,7 +268,7 @@ What the steering laws are: [steering-laws.md](steering-laws.md). A better racin
 
 ## Map and race in one go
 
-The same mapping, but it switches straight to racing as soon as lap 2 is clean, with no restart. Starts the hardware too.
+The same mapping, but it switches straight to racing as soon as lap 2 is clean, with no restart. Starts the hardware too. Opponent awareness is off during its mapping laps too; see [Map a course](#map-a-course-3-laps-then-stop). `opponent_awareness:=true` turns it on there.
 
 **Terminal 1:**
 
@@ -268,13 +290,15 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 ## Record a run and analyse it
 
-**Terminal 1, first:** `ros2 launch race_diagnostics record_run.py`. It prints the folder it records into, `~/.ros/racerbot_runs/<ts>/`.
+**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
-Then start the mode you want as usual. Afterwards, in **any terminal**:
+To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
+
+Afterwards, in **any terminal**:
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<ts>
-python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/<ts>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<ts>
+python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<ts>
 ```
 
 **Working when:** the second writes `analysis/report.md` in the run folder, explaining every stop. The mapping commands above record a run by themselves. Details: [gap-follow.md, recording a floor run](gap-follow.md#recording-a-floor-run) and [run-analysis.md](run-analysis.md).
@@ -288,7 +312,7 @@ python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/<ts
 ros2 launch racerbot_sim sim_auto_map_race_launch.py
 # gap_follow on every indoor layout, no ROS (fast)
 python3 ~/racerbot-ws/tools/f1tenth_sim/sweep_gap.py --track indoor --seeds 6
-# several gap_follow cars at once, opponent awareness on
+# several gap_follow cars at once (awareness is on by default; --set only restates it)
 python3 ~/racerbot-ws/tools/f1tenth_sim/eval_gap_multi.py --track indoor_wide --cars 3 --speeds 1.8,3.5,3.5 --set enable_opponent_awareness=true
 ```
 
@@ -308,8 +332,9 @@ Battery off **last**.
 
 | What | Where |
 |---|---|
-| Maps, racing lines, `commands.txt` from mapping runs | `~/.ros/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
-| The same from the simulator | `~/.ros/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
-| Run recordings (logs, events, optional bag) | `~/.ros/racerbot_runs/<ts>/` |
+| Maps, racing lines, `commands.txt` from mapping runs | `~/racerbot-ws/data/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
+| The same from the simulator | `~/racerbot-ws/data/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
+| Run recordings (logs, events, optional bag) | `~/racerbot-ws/data/racerbot_runs/<ts>/` |
+| Saving those three to GitHub after a session | `tools/save_runs.sh` (see [data/README.md](../data/README.md)) |
 | Speeds and limits for `gap_follow` | `src/gap_follow/config/gap_follow.yaml` |
 | Racing-line limits for mapping runs | `src/pure_pursuit/config/auto_map_race.yaml` |

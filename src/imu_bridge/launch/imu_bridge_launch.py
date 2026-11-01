@@ -51,6 +51,6 @@ def generate_launch_description():
                         "Empty = the YAML's value."),
         DeclareLaunchArgument(
             'racer_imu_root', default_value='',
-            description="Where imu-calibration is cloned. Empty = the YAML's value."),
+            description="Where the IMU calibration lives (default tools/imu_calibration/ in this workspace). Empty = the YAML's value."),
         OpaqueFunction(function=_node),
     ])

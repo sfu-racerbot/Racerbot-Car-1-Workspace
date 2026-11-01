@@ -1,0 +1,16 @@
+Turn rate vs the bno gyro, while moving (>= 0.3 m/s):
+  odom (steering model)  n= 22269  RMS 0.438 rad/s  mean +0.004  gain 0.945
+  vesc gyro              n= 22269  RMS 0.032 rad/s  mean +0.004  gain 1.011
+  /odom/imu              n= 22261  RMS 0.177 rad/s  mean +0.008  gain 1.029
+  LiDAR scan matching    n= 22261  RMS 0.062 rad/s  mean -0.017  gain 0.985
+Steering response measured by the bno gyro (above 0.5 m/s):
+  steering lag 0.150 s, curvature gain 0.938 (left 0.958, right 0.851; RMS 0.075 1/m)
+  achieved lateral accel p50/p90/p99: 0.00 / 1.65 / 2.60 m/s^2
+Steering response measured by LiDAR scan matching:
+  speed lag 0.325 s (RMS speed error 0.73 m/s at that lag)
+  steering lag 0.150 s, curvature gain 1.054 (left 1.069, right 0.991; RMS 0.262 1/m)
+  achieved lateral accel p50/p90/p99: 0.00 / 1.49 / 2.47 m/s^2
+Heading correction SLAM (slam) applied on top of each odometry:
+  /odom      end  +11.05 deg  max  48.97 deg  per 100 m   6.50 deg
+  /odom/imu  end  +24.35 deg  max  44.53 deg  per 100 m  14.33 deg
+  (SLAM's pose is built on the odometry it was given: compare runs, not just these numbers)

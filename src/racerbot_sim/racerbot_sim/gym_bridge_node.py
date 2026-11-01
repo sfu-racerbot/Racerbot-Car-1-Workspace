@@ -27,17 +27,20 @@ import numpy as np
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 from racerbot_sim import tracks
+from imu_bridge.convert import ORIENTATION_UNKNOWN, covariance_diag
+from racerbot_sim.sim_imu import BNO_NOISE, VESC_NOISE, FAULTS, SimImu
 from racerbot_sim.hardware_guard import HardwareInterlock
 from racerbot_sim.sim_bridge import (
     LIDAR_BEAMS, LIDAR_HALF_FOV, LIDAR_OFFSET_X, LIDAR_OFFSET_Z,
     LIDAR_RANGE_MAX, LIDAR_RANGE_MIN, OpponentPlan, SimBridge, SimConfig,
-    sanitize_command,
+    car_names, command_is_fresh, sanitize_command,
 )
 
 
@@ -57,6 +60,7 @@ class GymBridgeNode(Node):
         # VESC does, so it listens where the VESC does
         # (racerbot_launch/test/test_drive_path_wiring.py).
         self.declare_parameter('drive_topic', '/ackermann_cmd')
+        self.declare_parameter('car2_drive_topic', '/car2/ackermann_cmd')
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('odom_frame', 'odom')
@@ -65,6 +69,8 @@ class GymBridgeNode(Node):
         self.declare_parameter('rate_hz', 40.0)
         self.declare_parameter('seed', 12345)
         self.declare_parameter('ego_start_offset_m', 0.0)
+        self.declare_parameter('controlled_cars', 1)
+        self.declare_parameter('controlled_start_offsets_m', '')
         # Semicolon-separated, each entry "offset_m,speed_mps,lateral_m".
         # A speed of 0 parks that car on the line as a static obstacle.
         # One string rather than a string array because a launch argument
@@ -78,6 +84,13 @@ class GymBridgeNode(Node):
         self.declare_parameter('odom_speed_noise_std', 0.01)
         self.declare_parameter('odom_yaw_rate_scale', 1.0)
         self.declare_parameter('publish_ground_truth', True)
+        self.declare_parameter('publish_imu', True)
+        self.declare_parameter('imu_fault', 'none')
+        self.declare_parameter('car2_imu_fault', 'none')
+        self.declare_parameter('imu_fault_bias', 0.1)
+        self.declare_parameter('imu_fault_scale', 1.1)
+        self.declare_parameter('interlock_discovery_hold_sec', 3.0)
+        self.declare_parameter('interlock_clear_confirm_sec', 3.0)
 
         def value(name):
             return self.get_parameter(name).value
@@ -89,10 +102,14 @@ class GymBridgeNode(Node):
         self.rate_hz = float(value('rate_hz'))
         self.command_timeout_sec = float(value('command_timeout_sec'))
         self.publish_ground_truth = bool(value('publish_ground_truth'))
+        self.controlled_cars = int(value('controlled_cars'))
+        for name in ('imu_fault', 'car2_imu_fault'):
+            if value(name) not in FAULTS:
+                raise ValueError(f'{name} must be one of {FAULTS}')
 
         import os
         track_directory = os.path.expanduser(str(value('track_directory')))
-        track_path = tracks.build(self.track_name, track_directory)
+        track_path = tracks.resolve(self.track_name, track_directory)
         centerline = tracks.load_centerline(track_directory, self.track_name)
 
         opponents = []
@@ -113,6 +130,10 @@ class GymBridgeNode(Node):
             control_dt=1.0 / self.rate_hz,
             seed=int(value('seed')),
             ego_start_offset_m=float(value('ego_start_offset_m')),
+            controlled_cars=self.controlled_cars,
+            controlled_start_offsets_m=tuple(
+                float(part) for part in str(value('controlled_start_offsets_m') or '').split(',')
+                if part.strip()),
             opponents=opponents,
             odom_speed_scale=float(value('odom_speed_scale')),
             odom_speed_noise_std=float(value('odom_speed_noise_std')),
@@ -120,7 +141,10 @@ class GymBridgeNode(Node):
         ))
 
         self.interlock = HardwareInterlock(
-            self, 'simulated /scan and /odom')
+            self, 'simulated /scan, /odom and /imu',
+            discovery_hold_sec=float(value('interlock_discovery_hold_sec')),
+            clear_confirm_sec=float(value('interlock_clear_confirm_sec')))
+        self._interlock_was_open = False
         self.commanded_speed = 0.0
         self.commanded_steering = 0.0
         self.last_command_time = None
@@ -130,20 +154,56 @@ class GymBridgeNode(Node):
         self.ever_contacted = False
         self.distance_travelled = 0.0
         self._previous_xy = None
+        self.commands = [dict(speed=0.0, steering=0.0, time=None)
+                         for _ in range(self.controlled_cars)]
+        self.wall_contact_counts = [0] * self.controlled_cars
+        self.names = [car_names(i + 1) for i in range(self.controlled_cars)]
+        self.names[0].update(scan=str(value('scan_topic')), odom=str(value('odom_topic')),
+                             drive=str(value('drive_topic')), odom_frame=self.odom_frame,
+                             base_frame=self.base_frame, laser_frame=self.laser_frame)
+        if self.controlled_cars > 1:
+            self.names[1]['drive'] = str(value('car2_drive_topic'))
 
-        self.scan_pub = self.create_publisher(LaserScan, str(value('scan_topic')), 10)
-        self.odom_pub = self.create_publisher(Odometry, str(value('odom_topic')), 10)
+        self.scan_pubs = [self.create_publisher(LaserScan, names['scan'], 10)
+                          for names in self.names]
+        self.odom_pubs = [self.create_publisher(Odometry, names['odom'], 10)
+                          for names in self.names]
+        self.scan_pub, self.odom_pub = self.scan_pubs[0], self.odom_pubs[0]
         self.tf_broadcaster = TransformBroadcaster(self)
-        self.create_subscription(
-            AckermannDriveStamped, str(value('drive_topic')),
-            self._drive_callback, 10)
+        self.drive_subs = [self.create_subscription(
+            AckermannDriveStamped, names['drive'],
+            lambda msg, index=i: self._drive_callback(msg, index), 10)
+            for i, names in enumerate(self.names)]
 
         latched = QoSProfile(depth=1,
                              reliability=QoSReliabilityPolicy.RELIABLE,
                              durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
-        self.truth_pub = self.create_publisher(PoseStamped, '/sim/ground_truth_pose', 10)
+        self._imu_status_qos = latched
+        self.truth_pubs = [self.create_publisher(PoseStamped, names['truth'], 10)
+                           for names in self.names]
+        self.truth_pub = self.truth_pubs[0]
         self.opponents_pub = self.create_publisher(PoseArray, '/sim/opponent_poses', 10)
         self.status_pub = self.create_publisher(String, '/sim/status', latched)
+
+        self.imus = []
+        self.imu_pubs = []
+        self.imu_status_pubs = []
+        self.imu_status_topics = []
+        self._last_imu_status = [None] * self.controlled_cars
+        if bool(value('publish_imu')):
+            # Independent per-car RNGs do not perturb LiDAR/odometry noise.
+            seeds = np.random.SeedSequence(int(value('seed'))).spawn(self.controlled_cars)
+            for i, names in enumerate(self.names):
+                fault = value(('imu_fault', 'car2_imu_fault')[i]) if i < 2 else 'none'
+                self.imus.append(SimImu(np.random.default_rng(seeds[i]), fault=fault,
+                    bias=float(value('imu_fault_bias')), scale=float(value('imu_fault_scale'))))
+                prefix = '/' + names['namespace'] if names['namespace'] else ''
+                self.imu_pubs.append({sensor: self.create_publisher(
+                    Imu, f'{prefix}/imu/{suffix}', 10)
+                    for sensor, suffix in [('bno', 'bno/data'), ('vesc', 'vesc/data'), ('primary', 'data')]})
+                self.imu_status_topics.append(f'{prefix}/imu/status')
+                self.imu_status_pubs.append(self.create_publisher(String, self.imu_status_topics[-1], latched))
+        self.add_on_set_parameters_callback(self._validate_imu_parameters)
 
         self._beam_angles = self.bridge.beam_angles
         self.create_timer(1.0 / self.rate_hz, self._step)
@@ -155,7 +215,14 @@ class GymBridgeNode(Node):
 
     # -- ROS plumbing ------------------------------------------------------
 
-    def _drive_callback(self, msg: AckermannDriveStamped):
+    def _validate_imu_parameters(self, parameters):
+        for parameter in parameters:
+            if parameter.name in ('imu_fault', 'car2_imu_fault') and parameter.value not in FAULTS:
+                return SetParametersResult(successful=False,
+                    reason=f'{parameter.name} must be one of {FAULTS}')
+        return SetParametersResult(successful=True)
+
+    def _drive_callback(self, msg: AckermannDriveStamped, index=0):
         steering, speed, ok = sanitize_command(
             msg.drive.steering_angle, msg.drive.speed)
         if not ok:
@@ -164,23 +231,40 @@ class GymBridgeNode(Node):
                 f'non-finite drive command (steering={msg.drive.steering_angle}, '
                 f'speed={msg.drive.speed}) -- stopping the simulated car',
                 throttle_duration_sec=2.0)
-        self.commanded_speed = speed
-        self.commanded_steering = steering
-        self.last_command_time = self.get_clock().now()
+        now = self.get_clock().now()
+        self.commands[index] = dict(speed=speed, steering=steering, time=now.nanoseconds / 1e9)
+        if index == 0:
+            self.commanded_speed = speed
+            self.commanded_steering = steering
+            self.last_command_time = now
 
-    def _command_is_fresh(self) -> bool:
-        if self.last_command_time is None:
-            return False
-        age = (self.get_clock().now() - self.last_command_time).nanoseconds / 1e9
-        return age <= self.command_timeout_sec
+    def _command_is_fresh(self, index=0) -> bool:
+        return command_is_fresh(self.commands[index]['time'],
+                                self.get_clock().now().nanoseconds / 1e9,
+                                self.command_timeout_sec)
 
     def _step(self):
         if not self.interlock.safe():
+            if self._interlock_was_open:
+                # Stopping publish() alone leaves durable simulated verdicts
+                # available to driving nodes that start beside real hardware.
+                for publisher in self.imu_status_pubs:
+                    self.destroy_publisher(publisher)
+                self.imu_status_pubs = []
+            self._interlock_was_open = False
             return
 
-        speed = self.commanded_speed if self._command_is_fresh() else 0.0
-        steering = self.commanded_steering if self._command_is_fresh() else 0.0
-        self.bridge.step(steering, speed)
+        if not self._interlock_was_open and not self.imu_status_pubs:
+            self.imu_status_pubs = [self.create_publisher(String, topic, self._imu_status_qos)
+                                    for topic in self.imu_status_topics]
+            # Republish the current verdict on this first open tick, even if
+            # it is unchanged since the previous publisher was withdrawn.
+            self._last_imu_status = [None] * self.controlled_cars
+        self._interlock_was_open = True
+
+        commands = [(command['steering'], command['speed']) if self._command_is_fresh(i)
+                    else (0.0, 0.0) for i, command in enumerate(self.commands)]
+        self.bridge.step_cars(commands)
 
         ego = self.bridge.agent_state(0)
         if self._previous_xy is not None:
@@ -192,19 +276,51 @@ class GymBridgeNode(Node):
             self.ever_contacted = True
         if self.bridge.car_contact():
             self.car_contact_steps += 1
+        for i in range(self.controlled_cars):
+            if self.bridge.body_contact(i):
+                self.wall_contact_counts[i] += 1
 
         stamp = self.get_clock().now().to_msg()
-        self._publish_scan(stamp)
-        self._publish_odom(stamp)
-        if self.publish_ground_truth:
-            self._publish_truth(stamp, ego)
+        for i in range(self.controlled_cars):
+            self._publish_scan(stamp, i)
+            self._publish_odom(stamp, i)
+            if self.imus:
+                self._publish_imu(stamp, i)
+            if self.publish_ground_truth:
+                self._publish_truth(stamp, self.bridge.agent_state(i), i)
         self._publish_status(ego)
 
-    def _publish_scan(self, stamp):
-        ranges = self.bridge.ego_scan()
+    def _publish_imu(self, stamp, index):
+        imu = self.imus[index]
+        if index < 2:
+            imu.fault = self.get_parameter(('imu_fault', 'car2_imu_fault')[index]).value
+        state = self.bridge.agent_state(index)
+        sample = imu.step(state.speed, state.yaw_rate, self.bridge.config.control_dt)
+        if sample is not None:
+            for sensor, noise in [('bno', BNO_NOISE), ('vesc', VESC_NOISE)]:
+                msg = Imu()
+                msg.header.stamp = stamp
+                msg.header.frame_id = car_names(index + 1)['base_frame']
+                msg.orientation_covariance = list(ORIENTATION_UNKNOWN)
+                msg.angular_velocity_covariance = covariance_diag(noise.gyro_std)
+                msg.linear_acceleration_covariance = covariance_diag(noise.accel_std)
+                for axis, acc, gyro in zip('xyz', getattr(sample, sensor + '_acc'),
+                                            getattr(sample, sensor + '_gyro')):
+                    setattr(msg.linear_acceleration, axis, acc)
+                    setattr(msg.angular_velocity, axis, gyro)
+                self.imu_pubs[index][sensor].publish(msg)
+                if sensor == 'bno':
+                    self.imu_pubs[index]['primary'].publish(msg)
+        status = imu.status()
+        if status != self._last_imu_status[index]:
+            self.imu_status_pubs[index].publish(String(data=json.dumps(status)))
+            self._last_imu_status[index] = status
+
+    def _publish_scan(self, stamp, index=0):
+        ranges = self.bridge.scan(index)
         msg = LaserScan()
         msg.header.stamp = stamp
-        msg.header.frame_id = self.laser_frame
+        msg.header.frame_id = self.names[index]['laser_frame']
         msg.angle_min = float(-LIDAR_HALF_FOV)
         msg.angle_max = float(LIDAR_HALF_FOV)
         msg.angle_increment = float(2.0 * LIDAR_HALF_FOV / (LIDAR_BEAMS - 1))
@@ -213,16 +329,16 @@ class GymBridgeNode(Node):
         msg.range_min = float(LIDAR_RANGE_MIN)
         msg.range_max = float(LIDAR_RANGE_MAX)
         msg.ranges = [float(value) for value in ranges]
-        self.scan_pub.publish(msg)
+        self.scan_pubs[index].publish(msg)
 
-    def _publish_odom(self, stamp):
-        odom = self.bridge.odom
+    def _publish_odom(self, stamp, index=0):
+        odom = self.bridge.odometry(index)
         qx, qy, qz, qw = yaw_to_quaternion(odom.yaw)
 
         msg = Odometry()
         msg.header.stamp = stamp
-        msg.header.frame_id = self.odom_frame
-        msg.child_frame_id = self.base_frame
+        msg.header.frame_id = self.names[index]['odom_frame']
+        msg.child_frame_id = self.names[index]['base_frame']
         msg.pose.pose.position.x = odom.x
         msg.pose.pose.position.y = odom.y
         msg.pose.pose.orientation.x = qx
@@ -231,12 +347,12 @@ class GymBridgeNode(Node):
         msg.pose.pose.orientation.w = qw
         msg.twist.twist.linear.x = odom.speed
         msg.twist.twist.angular.z = odom.yaw_rate
-        self.odom_pub.publish(msg)
+        self.odom_pubs[index].publish(msg)
 
         transform = TransformStamped()
         transform.header.stamp = stamp
-        transform.header.frame_id = self.odom_frame
-        transform.child_frame_id = self.base_frame
+        transform.header.frame_id = self.names[index]['odom_frame']
+        transform.child_frame_id = self.names[index]['base_frame']
         transform.transform.translation.x = odom.x
         transform.transform.translation.y = odom.y
         transform.transform.rotation.x = qx
@@ -245,7 +361,7 @@ class GymBridgeNode(Node):
         transform.transform.rotation.w = qw
         self.tf_broadcaster.sendTransform(transform)
 
-    def _publish_truth(self, stamp, ego):
+    def _publish_truth(self, stamp, ego, index=0):
         # Deliberately in its own frame, unconnected to the TF tree: this is
         # the answer sheet, and nothing that drives the car may read it.
         pose = PoseStamped()
@@ -258,13 +374,13 @@ class GymBridgeNode(Node):
         pose.pose.orientation.y = qy
         pose.pose.orientation.z = qz
         pose.pose.orientation.w = qw
-        self.truth_pub.publish(pose)
+        self.truth_pubs[index].publish(pose)
 
-        if self.bridge.num_agents > 1:
+        if index == 0 and self.bridge.num_agents > self.controlled_cars:
             array = PoseArray()
             array.header = pose.header
-            for index in range(1, self.bridge.num_agents):
-                other = self.bridge.agent_state(index)
+            for agent in range(self.controlled_cars, self.bridge.num_agents):
+                other = self.bridge.agent_state(agent)
                 item = Pose()
                 item.position.x = other.x
                 item.position.y = other.y
@@ -278,6 +394,16 @@ class GymBridgeNode(Node):
 
     def _publish_status(self, ego):
         message = String()
+        cars = []
+        for i, command in enumerate(self.commands):
+            state = self.bridge.agent_state(i)
+            cars.append(dict(car=i + 1, x=round(state.x, 4), y=round(state.y, 4),
+                             yaw=round(state.yaw, 4), speed=round(state.speed, 4),
+                             commanded=dict(speed=round(command['speed'], 4),
+                                            steering=round(command['steering'], 4),
+                                            fresh=self._command_is_fresh(i)),
+                             wall_contact_now=bool(self.bridge.body_contact(i)),
+                             wall_contact_steps=self.wall_contact_counts[i]))
         message.data = json.dumps({
             'track': self.track_name,
             'sim_time_s': round(self.bridge.sim_time, 3),
@@ -298,10 +424,11 @@ class GymBridgeNode(Node):
             'ever_contacted': self.ever_contacted,
             'opponent_wall_contact': any(
                 self.bridge.body_contact(i)
-                for i in range(1, self.bridge.num_agents)),
+                for i in range(self.controlled_cars, self.bridge.num_agents)),
             'car_contact_now': bool(self.bridge.car_contact()),
             'car_contact_steps': self.car_contact_steps,
             'nonfinite_commands': self.nonfinite_commands,
+            'cars': cars,
         })
         self.status_pub.publish(message)
 

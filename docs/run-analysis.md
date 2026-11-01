@@ -33,14 +33,14 @@ The car can record everything it saw and did. These tools turn that recording in
 
 ## What gets logged
 
-[run-diagnostics.md](run-diagnostics.md#tldr) has the recording commands. A recorded run is one directory under `~/.ros/racerbot_runs/`, named for when it started:
+[run-diagnostics.md](run-diagnostics.md#tldr) has the recording commands. A recorded run is one directory under `~/racerbot-ws/data/racerbot_runs/`, named for when it started:
 
 | File | What's in it | Read by |
 |---|---|---|
 | `launch.log` | Everything the driving node printed: one decision line a second, plus every state change (`DRIVE [...]` / `STOP [...]`) | you; `summarize_run` |
 | `events.jsonl` | The probe's machine-readable events: first messages, LB pressed/released, periodic status lines | `summarize_run`; `analyze_run.py` counts them |
 | `bag/` | A rosbag (a recording of ROS messages, replayable later): every message on `/scan`, `/odom`, `/drive`, `/joy`, `/ackermann_cmd`, `/tf` and `/parameter_events`, with timestamps | `analyze_run.py` |
-| `metadata/` | What the run was made with: git state and uncommitted diff of `racerbot-ws` and `imu-calibration`, copies of the IMU calibration files, every node's parameters (see [run-diagnostics.md](run-diagnostics.md#what-gets-captured-and-why-each-piece-earns-its-place)) | you, weeks later |
+| `metadata/` | What the run was made with: git state and uncommitted diff of `racerbot-ws` (which includes `tools/imu_calibration/`), copies of the IMU calibration files, every node's parameters (see [run-diagnostics.md](run-diagnostics.md#what-gets-captured-and-why-each-piece-earns-its-place)) | you, weeks later |
 | `analysis/` | Written by the tools below: `run.npz` (the bag as arrays), motion caches, `report.md`, plots | you |
 
 The 1 Hz lines in `launch.log` are a summary. Between them the node made about 39 more decisions, and only the bag has them. Only the bag also has the scans, so only it can answer "what did the car see when it braked".
@@ -52,10 +52,10 @@ The 1 Hz lines in `launch.log` are a summary. Between them the node made about 3
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 cd ~/racerbot-ws
-python3 tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/20261019-200703
+python3 tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/20261019-200703
 ```
 
-**Working when:** it prints a report starting `# Run analysis: 20261019-200703`, with one `## LB hold` section per time LB was held. The same text is saved as `~/.ros/racerbot_runs/<run>/analysis/report.md`, beside a `hold1.png` plot.
+**Working when:** it prints a report starting `# Run analysis: 20261019-200703`, with one `## LB hold` section per time LB was held. The same text is saved as `~/racerbot-ws/data/racerbot_runs/<run>/analysis/report.md`, beside a `hold1.png` plot.
 
 **If it doesn't:** `ModuleNotFoundError: rosbag2_py` means ROS isn't sourced in that terminal. That only matters the first time. After that, `analysis/run.npz` exists and the tool runs without ROS.
 
@@ -68,7 +68,7 @@ For a run recorded with the IMU side up (any `map_course` run since 2026-10-24),
 **Terminal 1**, ROS sourced as above for the first run:
 
 ```bash
-python3 tools/run_analysis/imu_report.py ~/.ros/racerbot_runs/<run>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<run>
 ```
 
 **Working when:** it prints three sections, also saved as `analysis/imu_report.txt`:
@@ -108,7 +108,7 @@ Add `--set name=value` to replay the same scans with a `gap_follow` parameter ch
 
 ```bash
 git show eec6405:src/gap_follow/config/gap_follow.yaml > /tmp/gap_follow_20261019.yaml
-python3 tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/20261019-200703 \
+python3 tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/20261019-200703 \
   --yaml /tmp/gap_follow_20261019.yaml --set ttc_path_margin=0.05
 ```
 
@@ -130,7 +130,7 @@ The simulator's car model is `tools/f1tenth_sim/sim_fidelity/calibration.py`. Ev
 
 ```bash
 cd ~/racerbot-ws
-python3 tools/run_analysis/fit_sim.py ~/.ros/racerbot_runs/20261019-200703 \
+python3 tools/run_analysis/fit_sim.py ~/racerbot-ws/data/racerbot_runs/20261019-200703 \
   --grid speed_delay_ticks=1,2,4 --grid speed_loop_brake_gain=2,4,8 --grid steering_delay_ticks=1,3,5
 ```
 
@@ -162,6 +162,15 @@ Speed error went from 0.46 to 0.24 m/s, and turning-rate error from 0.25 to 0.15
 
 ## Adding a map to the simulator
 
+**A map from a recorded run, first.** If the run saved no map (the 2026-10-26 runs failed their laps), take the last live one from its bag, then clean it. In **any terminal**, with ROS sourced, from the workspace root:
+
+```bash
+python3 tools/run_analysis/extract_map.py data/racerbot_runs/<run>/bag /tmp/live   # raw: /tmp/live.pgm/.yaml/.png
+python3 tools/run_analysis/clean_map.py data/racerbot_runs/<run> /tmp/<run>-clean     # race-ready map.pgm + map.yaml
+```
+
+**Working when:** the second prints `track cells ..., wall cells ... -> /tmp/<run>-clean` and its `raw_vs_clean.png` shows the raw map on the left and one clean wall ring on the right. **If it says `the bag has no /map or no SLAM pose`:** the run wasn't a mapping run. `clean_map.py` keeps only free space reachable from where the car actually drove, so a corridor it never entered is dropped. Then import the clean map as below.
+
 Any ROS occupancy map ([glossary](glossary.md#occupancy-grid)) can be a simulator track. That covers a SLAM map from `auto_map_race`, one saved with `map_saver_cli`, or one from another team's repo. The importer:
 - turns unexplored grey into wall, so the simulated car can't drive into space the map never saw;
 - finds the loop's centreline as the line equally far from the inner island and the outer walls;
@@ -171,8 +180,8 @@ Any ROS occupancy map ([glossary](glossary.md#occupancy-grid)) can be a simulato
 
 ```bash
 cd ~/racerbot-ws
-cp ~/.ros/racerbot_auto/<ts>/map.pgm  tools/f1tenth_sim/maps/sources/hall_<date>.pgm
-sed 's/image: map.pgm/image: hall_<date>.pgm/' ~/.ros/racerbot_auto/<ts>/map.yaml > tools/f1tenth_sim/maps/sources/hall_<date>.yaml
+cp ~/racerbot-ws/data/racerbot_auto/<ts>/map.pgm  tools/f1tenth_sim/maps/sources/hall_<date>.pgm
+sed 's/image: map.pgm/image: hall_<date>.pgm/' ~/racerbot-ws/data/racerbot_auto/<ts>/map.yaml > tools/f1tenth_sim/maps/sources/hall_<date>.yaml
 python3 tools/f1tenth_sim/track_import.py tools/f1tenth_sim/maps/sources/hall_<date>.yaml \
   --name hall_<date> --source "slam_toolbox map, run <ts>" --plot /tmp/hall.png
 ```
@@ -204,6 +213,8 @@ Rebuilding the 2026-10-19 loop from that run's own scans was tried, and the laps
 
 ## Testing several cars at once
 
+**Terminal 1 — simulator analysis**, from the workspace root:
+
 ```bash
 cd ~/racerbot-ws
 python3 tools/f1tenth_sim/eval_gap_multi.py --track indoor_wide,asb_10000 --cars 3 --seeds 4
@@ -212,7 +223,22 @@ python3 tools/f1tenth_sim/eval_gap_multi.py --track levine_blocked --cars 2 --sp
 
 All cars run the shipped `gap_follow` on their own simulated LiDAR, which sees the other cars as obstacles. They start one behind another along the track, 3 m apart (`--spacing`). By default the leader runs at 0.7 × `max_speed` and the others at full speed, so they catch it. `--speeds` sets each car's top speed directly, leader first.
 
-**Working when:** it prints one line per track and exits. A fully passing track reads `pass N/N wall 0 car-car 0 unfinished 0`; the exit code is 0 only if every track did. `closest` is the smallest centre-to-centre distance between any two cars during the run.
+**Working when:** it prints one line per track and exits. A fully passing track reads `pass N/N wall 0 car-car 0 unfinished 0`. `closest` is the smallest centre-to-centre distance between any two cars during the run.
+
+**If it doesn't:** a missing Gym module means the simulator setup has not been completed; see [simulator setup](simulator.md). For two cars this is a comparison, and the command exits 0 even if there is contact or an unfinished car. With more than two cars, it exits 0 only if every run passes.
+
+With `--cars 2`, the head-to-head table uses car indices 0 and 1. Both cars default to their own configured maximum speed; the 0.7 multiplier above applies to runs with more than two cars. `--swap-starts` repeats each seed with the other car in front.
+
+| Result | How to read it |
+|---|---|
+| `stalls` | Per-car counts. A stall is below 0.05 m/s for more than 1.0 s while another car moves at or above 0.05 m/s. |
+| `gap_changes` | Each pair's end time gap minus its starting time gap. Negative means the car that started behind closed the gap. |
+| `gained` / `time_gained_s` | The table's `gained` is car 0's seconds gained; a positive value is better for car 0. Pair contributions are summed per car, so starting first alone does not decide this score. |
+| `recognition` | For each car, episodes start when the other car becomes visible. Delay is time to first recognition within that episode; `inf` means it was never recognised before the episode ended. |
+| Recognised fraction | Recognised ticks divided by visible ticks, not all ticks. `no visible ticks` means the fraction is unavailable; aggregate counts pool runs. |
+| `false_mover_ticks`, `false_mover_tracks` | In a one-car `eval_gap.py` run with awareness enabled, ticks with any falsely moving track and distinct false track IDs, respectively. Fewer is better. |
+
+For `gap_changes`, distance gaps are converted to seconds using the initially trailing car's average progress speed. If both cars finish, the end gap uses their finish times; otherwise it uses their final distance gap. An unavailable value is not zero.
 
 Results for the shipped config are in [gap-follow.md](gap-follow.md#several-cars-at-once): not every run passes yet.
 
@@ -231,6 +257,10 @@ Everything lives in two places and imports no ROS, except reading the bag:
 | `tools/run_analysis/fit_sim.py` | Plays recorded commands into `FidelityPlant` on an empty floor; grid search over `calibration.py` fields |
 | `tools/run_analysis/analyze_run.py` | All of the above, one report |
 | `tools/f1tenth_sim/track_import.py` | Occupancy map → gym track triplet + catalog entry |
+| `tools/run_analysis/extract_map.py` | The last `/map` in a bag → `.pgm` + `.yaml` + `.png`. Made the live maps in `data/racerbot_runs/20261026-*/live_map/` |
+| `tools/run_analysis/clean_map.py` | A run's final SLAM map → a clean map: specks cleared, rays leaking through wall gaps cut, a wall ring round the driven track. Made `data/racerbot_auto/20261026-194514-clean/`, the simulator's car 1 course. Tested in `tests/test_clean_map.py` |
+| `tools/run_analysis/render_maps.py` | Several runs' SLAM maps side by side, each with its driven path coloured by time |
+| `tools/run_analysis/accel_check.py` | Commanded vs achieved acceleration inside each LB hold (from `/drive` and `/odom`) |
 | `tools/f1tenth_sim/eval_gap_multi.py` | N `gap_follow` cars on one track |
 
 <details>

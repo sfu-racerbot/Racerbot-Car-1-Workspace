@@ -183,7 +183,7 @@ Same result as above, except `gap_follow` drives the lap instead of a human — 
 
 ### Mapping in one command: 3 laps, then stop
 
-With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 does the steps above by itself: SLAM, `gap_follow`, three closed laps, then it saves the map, pose graph and racing line to `~/.ros/racerbot_auto/<timestamp>/`, shuts everything down and prints the commands to race on that map (`race_launch.py run_dir:=...`, which seeds the localizer where the car stopped at the end of mapping, so no RViz is needed). The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
+With `bringup_launch.py` running in terminal 1, `ros2 run racerbot_launch map_course` in terminal 2 does the steps above by itself: SLAM, `gap_follow`, three closed laps, then it saves the map, pose graph and racing line to `~/racerbot-ws/data/racerbot_auto/<timestamp>/`, shuts everything down and prints the commands to race on that map (`race_launch.py run_dir:=...`, which seeds the localizer where the car stopped at the end of mapping, so no RViz is needed). The commands and options are in [launchstart.md](launchstart.md#map-a-course-3-laps-then-stop). Simulator-validated only.
 
 ## Localizing against a saved map
 
@@ -265,7 +265,7 @@ The deadman behavior is **required, not optional** — see [writing-your-own-nod
 
 Its parameters — speed limits, steering limits, safety bubble radius, emergency stop distance, `deadman_button`, `joy_timeout_sec`, `enable_deadman` — live in `src/gap_follow/config/gap_follow.yaml`.
 
-Defaults are deliberately conservative (`max_speed: 2.5` m/s). Raise them gradually rather than all at once, and re-test with the wheels off the ground after every change.
+The shipped defaults are the race defaults of 2026-10-27 (`max_speed: 5.0` m/s), not conservative ones ([race defaults](gap-follow.md#race-defaults-2026-10-27)). For a slower first run, pass `max_speed:=` on the launch line. Re-test with the wheels off the ground after every change.
 
 ## Racing with the pure-pursuit stack
 
@@ -295,7 +295,7 @@ SLAM stays online as the localization source, so there's no RViz pose seed to gi
 
 **Working when:** you see the lap counter advancing in the terminal (see [Reading the terminal while it maps](#reading-the-terminal-while-it-maps) below), then a handover summary, then the car starts racing the line it just recorded.
 
-Generated artifacts are written to `~/.ros/racerbot_auto/<YYYYMMDD-HHMMSS>/`:
+Generated artifacts are written to `~/racerbot-ws/data/racerbot_auto/<YYYYMMDD-HHMMSS>/`:
 
 - `raceline_raw.csv` and `raceline_profiled.csv`
 - `map.yaml` and `map.pgm`
@@ -350,6 +350,16 @@ Two fields tell you whether it's going to work:
 - **`turn`** is the gate that actually decides a lap is a lap. 360 degrees of accumulated yaw is one revolution of a closed circuit, whatever its size. If this climbs past 300 and the lap still doesn't close, the car isn't getting back within `closure_distance` of where it started.
 
 - **`SLAM corrections absorbed`** counts how many times the map-frame pose jumped further than the car could physically have moved. A handful over a lap is normal, and they're applied to the recorded path rather than recorded *as* path. Dozens means SLAM is struggling — check the map in the dashboard before trusting anything downstream.
+
+When a lap closes, the terminal prints one more line, for example:
+
+```
+closed at closest approach: d=0.10m, heading error=0.6deg
+```
+
+The lap closes at the point where the car came nearest its starting point, once the car has moved on a few centimetres past that point. `d` is how far that point was from the start.
+
+`heading error` is how far the car was turned away from its starting direction there. Above 15 degrees the lap fails its quality check, and the car drives one more lap, up to the `max_mapping_laps` limit.
 
 Then, once, at the handover:
 
