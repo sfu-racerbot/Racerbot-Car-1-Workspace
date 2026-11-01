@@ -43,9 +43,28 @@ def repo(tmp_path):
     return tmp_path
 
 
-def save(repo, car='rb1'):
+def save(repo, car='rb1', *, serial=None, missing_source=False):
     env = dict(os.environ, PATH=f'{repo / "bin"}:{os.environ["PATH"]}',
                RACERBOT_CARS_DIR=str(repo / 'cars'))
+    # Do not let a sourced overlay hide a missing checkout package.
+    env['PYTHONPATH'] = ''
+    package = repo / 'src/racerbot_car'
+    if missing_source:
+        package.rename(repo / 'identity_source')
+        package = repo / 'identity_source'
+    if serial is not None:
+        # Inject only the serial-file boundary, using identity's SERIAL_PATH
+        # hook. Resolution and mismatch checks remain the real implementation.
+        serial_path = repo / 'serial'
+        serial_path.write_text(serial)
+        hook = repo / 'serial_hook'
+        hook.mkdir()
+        (hook / 'sitecustomize.py').write_text(
+            'import sys\n'
+            f'sys.path.insert(0, {str(package)!r})\n'
+            'from racerbot_car import identity\n'
+            f'identity.SERIAL_PATH = {str(serial_path)!r}\n')
+        env['PYTHONPATH'] = str(hook)
     env.pop('RACERBOT_CAR', None)
     if car:
         env['RACERBOT_CAR'] = car
@@ -78,4 +97,33 @@ def test_refuses_file_over_100mb(repo):
     assert result.returncode != 0
     assert '100 MB' in result.stderr
     assert git(repo, 'rev-parse', 'HEAD') == before
+    assert not git(repo, 'diff', '--cached', '--name-only')
+
+
+@pytest.mark.parametrize('missing_source', [False, True])
+def test_refuses_unknown_car_id(repo, missing_source):
+    before = git(repo, 'rev-parse', 'HEAD')
+    result = save(repo, car='rb9', missing_source=missing_source)
+    assert result.returncode != 0
+    assert 'rb9' in result.stderr
+    assert git(repo, 'rev-parse', 'HEAD') == before
+    assert not git(repo, 'diff', '--cached', '--name-only')
+
+
+@pytest.mark.parametrize('missing_source', [False, True])
+def test_refuses_conflicting_identity(repo, missing_source):
+    (repo / 'cars/machines.yaml').write_text('"456": rb2\n')
+    before = git(repo, 'rev-parse', 'HEAD')
+    result = save(repo, car='rb1', serial='456', missing_source=missing_source)
+    assert result.returncode != 0
+    assert all(word in result.stderr for word in ('456', 'rb2', 'rb1', 'unset'))
+    assert git(repo, 'rev-parse', 'HEAD') == before
+    assert not git(repo, 'diff', '--cached', '--name-only')
+
+
+def test_refuses_missing_identity_import(repo):
+    result = save(repo, missing_source=True)
+    assert result.returncode != 0
+    assert 'racerbot_car' in result.stderr
+    assert 'Cannot resolve' in result.stderr
     assert not git(repo, 'diff', '--cached', '--name-only')
