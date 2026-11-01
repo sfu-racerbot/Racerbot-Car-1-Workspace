@@ -68,9 +68,9 @@ A mismatch makes launches refuse with `serial ... identifies rbN, but RACERBOT_C
   `ros2 bag play <run>/bag` and the analysis tools read them as one bag.
   The largest non-bag file so far is a 30 MB pose graph. `tools/save_runs.sh`
   checks every file before committing.
-- **Dashboard saved maps:** car 1's configured roots do not list the maps in `data/rb1/`. Car 2's saved-runs panel lists maps under `data/rb2/racerbot_auto/` and `data/rb2/racerbot_sim/auto/` and can delete eligible runs. A deletion appears in `git status`; the next `tools/save_runs.sh` commits it.
+- **Dashboard saved maps:** each car's saved-runs panel lists only its own maps, under `data/<car>/racerbot_auto/` and `data/<car>/racerbot_sim/auto/` (decision 15; car 1's since 2026-11-01), and can delete eligible runs. A deletion appears in `git status`; the next `tools/save_runs.sh` commits it.
 
-  Recordings under `data/rb2/racerbot_runs/` are not in that panel. To delete a tracked recording, use `git rm -r` followed by its path and commit; the files remain in git history.
+  Recordings under `data/<car>/racerbot_runs/` are not in that panel. To delete a tracked recording, use `git rm -r` followed by its path and commit; the files remain in git history.
 - Every file added here stays in git history for good, and every clone
   downloads it, even if it is later deleted. A simulator run is around 30 MB,
   mostly its pose graph.

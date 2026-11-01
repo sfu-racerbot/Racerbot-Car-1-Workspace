@@ -1501,6 +1501,16 @@ In the one run traced, the launch ends up with the nose inside the forward reser
 
 **So on car 2's room, or any course with a corner soon after the start, think about `launch_boost:=false`.** On every track, whichever car started in front finished first: at 1 m nose to tail the launch car never passed anyone.
 
+**Car 1's numbers.** The first simulation of the launch, on 2026-10-30 in car 1's repository, used car 1's model and limits and the 3.0 m swept look-ahead car 1 shipped then:
+
+- **The start itself.** On car 1's course (`car1_course_2026_10_26`) from standstill, the launch car is 0.91 m further along at 1.4 s (3.44 m against 2.53 m), and 0.95 m further at 2.0 s.
+- **Over a whole solo lap it costs nothing.** Across 8 indoor tracks × 4 seeds the mean lap is 0.09 s faster, which is within seed noise.
+  - Faster on most: `narrow_1p2` −0.27 s, `car1_course_2026_10_26` −0.21 s, `indoor_tight` −0.14 s.
+  - Slightly slower on two: `asb_sharp` +0.09 s, `asb_10000` +0.07 s.
+  - The point is the lead at the first corner, not the lap time.
+  - Before the car held straight (it steered with the gap logic through the launch), `asb_sharp` was +0.64 s and car 1's course +0.38 s.
+- **No contact.** 32 solo runs, plus 12 two-car runs with the cars 1 m apart nose to tail (launch car against no-launch car, both start orders): no wall or car contact.
+
 ### The stopping limit at full speed
 
 Read this before step 3 of the car test.
@@ -1516,7 +1526,7 @@ A one-off check on a straight ending in a wall, with a 0.3 s lag on speeding up:
 
 Car 2's real braking from 5 m/s has never been measured, which is why step 2 comes before step 3.
 
-**Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on car 2. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
+**Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on either car's floor. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
 
 ## See also
 

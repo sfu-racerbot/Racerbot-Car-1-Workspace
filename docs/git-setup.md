@@ -139,10 +139,10 @@ ros2 param get /ackermann_to_vesc_node speed_to_erpm_gain # must be positive for
 `src/f1tenth_system/f1tenth_stack/config/vesc.yaml` and
 `src/f1tenth_system/f1tenth_stack/launch/bringup_launch.py`
 
-The per-car wheelbase is in `cars/<id>/calibration/vesc.yaml`. The shared geometry remains in the vendored launch and config files where it is common to both cars.
+Two numbers in this package describe the cars, not a stock chassis, and both cars share them, so they stay in the vendored files rather than in a car's overlay. Both were tape-measured **on car 2** on 2026-08-24 and replace values that were wrong; car 1 took them in the October 2026 port on the assumption that the two chassis are built the same, and they have not been measured on car 1 yet.
 
-- Each car's calibration overlay provides its own wheelbase value; `vesc_to_odom_node` uses it when integrating heading.
-- The `base_link`→`laser` transform is shared by the current profiles and remains in the vendored launch files.
+- `wheelbase: 0.36` in the vendored `config/vesc.yaml`; `vesc_to_odom_node` uses it when integrating heading.
+- The `base_link`→`laser` transform `0.26 0.0 0.11` in all three `*_bringup_launch.py` files.
 
 See [hardware-reference.md](hardware-reference.md#physical-dimensions-used-in-config) for the measurements and the full list of files each one has to stay in step with.
 
