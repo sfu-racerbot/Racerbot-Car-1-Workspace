@@ -54,6 +54,7 @@ def test_output_directory_resolves_per_car(tmp_path, monkeypatch, car, explicit)
     requested = tmp_path / 'override'
     args = ['--ros-args']
     if explicit:
+        monkeypatch.delenv('RACERBOT_CAR')
         args += ['-p', f'output_directory:={requested}']
     rclpy.init(args=args)
     node = None

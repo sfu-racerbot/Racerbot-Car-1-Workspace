@@ -10,6 +10,8 @@ def test_imu_recording_root(tmp_path, monkeypatch, car, explicit):
     monkeypatch.setenv('RACERBOT_CAR', car)
     monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     root = tmp_path / 'override' if explicit else None
+    if explicit:
+        monkeypatch.delenv('RACERBOT_CAR')
     expected = root if explicit else tmp_path / 'data' / car / 'imu_calibration'
     log = RunLogger('test', root=root)
     try:

@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 
 import pytest
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import grip_replay
@@ -32,9 +33,31 @@ def test_grip_cli_refuses_without_car(monkeypatch, capsys):
 
 @pytest.mark.parametrize('car', ['rb1', 'rb2'])
 @pytest.mark.parametrize('from_env', [False, True])
+def test_grip_cli_selects_car(tmp_path, monkeypatch, car, from_env):
+    # Task 7: an explicit --car beats the environment, and reports stay in
+    # that car's run. Use a tiny synthetic cache, so no ROS or recorded bag is needed.
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
+    monkeypatch.setenv('RACERBOT_CAR', car if from_env else
+                       ('rb2' if car == 'rb1' else 'rb1'))
+    analysis = tmp_path / 'data' / car / 'racerbot_runs/example/analysis'
+    analysis.mkdir(parents=True)
+    np.savez(analysis / grip_replay.CACHE,
+             drive=np.array([[0.0, 0.0], [0.1, 0.1]]),
+             gyro=np.array([[0.0, 0.0], [0.1, 0.0]]),
+             odom=np.array([[0.0, 1.0], [0.1, 1.0]]))
+    argv = ['example'] if from_env else ['example', '--car', car]
+    assert grip_replay.main(argv) == 0
+    assert (analysis / grip_replay.REPORT).is_file()
+    other = 'rb2' if car == 'rb1' else 'rb1'
+    assert not (tmp_path / 'data' / other).exists()
+
+
+@pytest.mark.parametrize('car', ['rb1', 'rb2'])
+@pytest.mark.parametrize('from_env', [False, True])
 def test_slam_output_default_uses_selected_car(tmp_path, monkeypatch, car, from_env):
     monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
-    monkeypatch.setenv('RACERBOT_CAR', car)
+    monkeypatch.setenv('RACERBOT_CAR', car if from_env else
+                       ('rb2' if car == 'rb1' else 'rb1'))
     argv = ['source'] if from_env else ['source', '--car', car]
     args = slam_replay._parser().parse_args(argv)
     assert slam_replay.replay_output_root(args.out_root, args.car) == \
