@@ -32,8 +32,14 @@ _SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # optimize_raceline is pure Python (no rclpy), so its real argument parser is
 # importable here without ROS.
 sys.path.insert(0, os.path.join(_SRC, 'pure_pursuit'))
+sys.path.insert(0, os.path.join(_SRC, 'racerbot_car'))
 from pure_pursuit import optimize_raceline  # noqa: E402
+from racerbot_car.identity import known_car_ids  # noqa: E402
+from racerbot_car.layers import effective_config  # noqa: E402
+from racerbot_car.paths import cars_dir  # noqa: E402
 _STACK = os.path.join(_SRC, 'f1tenth_system', 'f1tenth_stack', 'config')
+CARS = sorted(car for car in known_car_ids(cars_dir())
+              if (cars_dir() / car / 'calibration' / 'vesc.yaml').is_file())
 
 
 def _params(path, node):
@@ -41,8 +47,8 @@ def _params(path, node):
         return yaml.safe_load(handle)[node]['ros__parameters']
 
 
-def _servo_mapping():
-    vesc = _params(os.path.join(_STACK, 'vesc.yaml'), '/**')
+def _servo_mapping(car):
+    vesc = effective_config('vesc.yaml', '/**', car_id=car)
     return (vesc['steering_angle_to_servo_gain'],
             vesc['steering_angle_to_servo_offset'],
             vesc['servo_min'], vesc['servo_max'])
@@ -58,19 +64,16 @@ def clipped_sides(angle, gain, offset, servo_min, servo_max):
     return clipped
 
 
-def _limits():
-    joy = _params(os.path.join(_STACK, 'joy_teleop.yaml'), 'joy_teleop')
-    steering = joy['human_control']['axis_mappings']['drive-steering_angle']
-    assert steering['offset'] == 0.0
+def _limits(car):
+    joy = effective_config('joy_teleop.yaml', 'joy_teleop', car_id=car)
+    assert joy['human_control.axis_mappings.drive-steering_angle.offset'] == 0.0
     return {
         # Full stick: the F710 axis reads +/-1.0.
-        'joy_teleop.yaml full stick': abs(steering['scale']),
-        'gap_follow.yaml max_steering_angle': _params(
-            os.path.join(_SRC, 'gap_follow', 'config', 'gap_follow.yaml'),
-            'gap_follow_node')['max_steering_angle'],
-        'pure_pursuit.yaml max_steering_angle': _params(
-            os.path.join(_SRC, 'pure_pursuit', 'config', 'pure_pursuit.yaml'),
-            'pure_pursuit_node')['max_steering_angle'],
+        'joy_teleop.yaml full stick': abs(joy['human_control.axis_mappings.drive-steering_angle.scale']),
+        'gap_follow.yaml max_steering_angle': effective_config(
+            'gap_follow.yaml', 'gap_follow_node', car_id=car)['max_steering_angle'],
+        'pure_pursuit.yaml max_steering_angle': effective_config(
+            'pure_pursuit.yaml', 'pure_pursuit_node', car_id=car)['max_steering_angle'],
         'auto_map_race.yaml profile_max_steering_angle': _params(
             os.path.join(_SRC, 'pure_pursuit', 'config', 'auto_map_race.yaml'),
             'auto_map_race_node')['profile_max_steering_angle'],
@@ -81,26 +84,32 @@ def _limits():
     }
 
 
-@pytest.mark.parametrize('name', sorted(_limits()))
-def test_shipped_limit_is_not_clipped_by_the_servo(name):
-    angle = _limits()[name]
+@pytest.mark.parametrize('car', CARS)
+@pytest.mark.parametrize('name', ['joy_teleop.yaml full stick', 'gap_follow.yaml max_steering_angle',
+                                  'pure_pursuit.yaml max_steering_angle',
+                                  'auto_map_race.yaml profile_max_steering_angle',
+                                  'optimize_raceline --max-steering-angle default'])
+def test_shipped_limit_is_not_clipped_by_the_servo(name, car):
+    angle = _limits(car)[name]
     assert angle > 0.0
-    assert clipped_sides(angle, *_servo_mapping()) == [], (
+    assert clipped_sides(angle, *_servo_mapping(car)) == [], (
         f'{name} = {angle} rad is clipped by servo_min/servo_max in vesc.yaml')
 
 
-def test_planner_plans_below_the_controller_limit():
-    limits = _limits()
+@pytest.mark.parametrize('car', CARS)
+def test_planner_plans_below_the_controller_limit(car):
+    limits = _limits(car)
     assert (limits['auto_map_race.yaml profile_max_steering_angle']
             < limits['pure_pursuit.yaml max_steering_angle'])
 
 
-def test_hand_run_optimizer_checks_against_the_planners_limit():
+@pytest.mark.parametrize('car', CARS)
+def test_hand_run_optimizer_checks_against_the_planners_limit(car):
     # The optimizer and auto_map_race both decide what "the rack cannot steer
     # this" means for a racing line; they must agree, or a line accepted by
     # one is rejected (or worse, accepted too tight) by the other. Until
     # 2026-10-24 the optimizer still defaulted to the pre-October 0.26 rad.
-    limits = _limits()
+    limits = _limits(car)
     assert (limits['optimize_raceline --max-steering-angle default']
             == limits['auto_map_race.yaml profile_max_steering_angle'])
 

@@ -21,6 +21,7 @@ import glob
 import importlib.util
 import os
 import re
+import sys
 
 import yaml
 
@@ -30,6 +31,8 @@ _STACK = os.path.join(_SRC, 'f1tenth_system', 'f1tenth_stack')
 _RB1 = os.path.join(_SRC, 'racerbot_launch', 'config', 'web_dashboard_rb1.yaml')
 _DOCTOR_CAR = os.path.join(_SRC, 'racerbot_doctor', 'racerbot_doctor', 'car.py')
 _HW_DOC = os.path.join(_SRC, '..', 'docs', 'hardware-reference.md')
+sys.path.insert(0, os.path.join(_SRC, 'racerbot_car'))
+from racerbot_car.layers import effective_config  # noqa: E402
 
 
 def _yaml(path):
@@ -45,8 +48,7 @@ def _doctor_car():
 
 
 def _urg_params():
-    return _yaml(os.path.join(_STACK, 'config', 'sensors.yaml'))['urg_node'][
-        'ros__parameters']
+    return effective_config('sensors.yaml', 'urg_node', car_id='rb1')
 
 
 # ------------------------------------------------------------------ LiDAR
@@ -180,8 +182,7 @@ def _doc_number(pattern):
 def test_vesc_steering_calibration_is_car_1s_measured_one():
     # A port that takes car 2's vesc.yaml (its own circles, different servo)
     # breaks this. Oracle: the vesc.yaml block quoted in hardware-reference.md.
-    shared = _yaml(os.path.join(_STACK, 'config', 'vesc.yaml'))['/**'][
-        'ros__parameters']
+    shared = effective_config('vesc.yaml', '/**', car_id='rb1')
     for key in ('steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',
                 'servo_min', 'servo_max'):
         documented = _doc_number(r'(?m)^' + key + r':\s*(-?[0-9.]+)')
@@ -191,14 +192,13 @@ def test_vesc_steering_calibration_is_car_1s_measured_one():
 def test_full_stick_and_autonomy_limits_are_car_1s():
     # hardware-reference.md's "Steering limits" bullets are car 1's numbers;
     # car 2's 0.436 full stick or 0.349 limit fail here.
-    joy = _yaml(os.path.join(_STACK, 'config', 'joy_teleop.yaml'))['joy_teleop'][
-        'ros__parameters']
-    scale = joy['human_control']['axis_mappings']['drive-steering_angle']['scale']
+    joy = effective_config('joy_teleop.yaml', 'joy_teleop', car_id='rb1')
+    scale = joy['human_control.axis_mappings.drive-steering_angle.scale']
     assert scale == _doc_number(r'Full stick \(`joy_teleop\.yaml` scale\) is \*\*([0-9.]+) rad')
     controller = _doc_number(r'`max_steering_angle` \*\*([0-9.]+) rad')
     for pkg, cfg, node in (('gap_follow', 'gap_follow.yaml', 'gap_follow_node'),
                            ('pure_pursuit', 'pure_pursuit.yaml', 'pure_pursuit_node')):
-        params = _yaml(os.path.join(_SRC, pkg, 'config', cfg))[node]['ros__parameters']
+        params = effective_config(cfg, node, car_id='rb1')
         assert params['max_steering_angle'] == controller, cfg
     planner = _yaml(os.path.join(_SRC, 'pure_pursuit', 'config', 'auto_map_race.yaml'))[
         'auto_map_race_node']['ros__parameters']['profile_max_steering_angle']
