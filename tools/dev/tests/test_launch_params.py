@@ -434,6 +434,93 @@ def test_diff_reports_missing_include():
     assert diff_captures(a, b) == ['+ missing_include new', '- missing_include old']
 
 
+def diff_directories(tmp_path):
+    """Write small captures in the same JSON shape as capture()."""
+    a, b = tmp_path / 'a', tmp_path / 'b'
+    a.mkdir()
+    b.mkdir()
+    before = {'nodes': [record('/n', {'gain': 1})], 'processes': [],
+              'deferred_callables': [], 'errors': [], 'probes': [], 'writes': [],
+              'missing_includes': []}
+    after = copy.deepcopy(before)
+    after['nodes'][0]['params'] = {'gain': 2, 'extra': 3}
+    (a / 'demo.json').write_text(json.dumps(before), encoding='utf-8')
+    (b / 'demo.json').write_text(json.dumps(after), encoding='utf-8')
+    return a, b, ['+ /n extra=3', '~ /n gain 1 -> 2']
+
+
+def run_diff(a, b, *args):
+    return subprocess.run(
+        [sys.executable, str(ROOT / 'tools/dev/launch_params.py'), 'diff',
+         str(a), str(b), *args], capture_output=True, text=True)
+
+
+def test_allow_passes_when_every_difference_is_listed(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    allow.write_text('\n'.join(f'`both {line}`' for line in lines), encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 0
+    assert result.stdout == '== demo\n'
+
+
+def test_allow_fails_on_an_unlisted_difference(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    prefix = '~ /n gain'
+    allow.write_text(f'`both {prefix}`', encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 1
+    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n== listed but not found\n{prefix}\n'
+
+
+def test_allow_fails_on_a_listed_difference_that_never_occurs(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    absent = '~ /n absent 1 -> 2'
+    allow.write_text('\n'.join(f'`both {line}`' for line in [*lines, absent]), encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 1
+    assert result.stdout == f'== demo\n== listed but not found\n{absent}\n'
+
+
+def test_allow_scope_is_per_car(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    allow.write_text(f'`rb2 {lines[0]}`', encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 1
+    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n'
+    allow.write_text(f'`both {lines[0]}`\n`both {lines[1]}`', encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 0
+
+
+def test_allow_ignores_other_code_spans(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    allow.write_text(
+        f'Prose `foo`\n\n```text\n`both {lines[0]}`\n```\n', encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow), '--car', 'rb1')
+    assert result.returncode == 1
+    assert result.stdout == f'== demo\n{lines[0]}\n{lines[1]}\n'
+
+
+def test_allow_requires_car(tmp_path):
+    a, b, _ = diff_directories(tmp_path)
+    allow = tmp_path / 'allow.md'
+    allow.write_text('', encoding='utf-8')
+    result = run_diff(a, b, '--allow', str(allow))
+    assert result.returncode == 2
+
+
+def test_diff_without_allow_is_unchanged(tmp_path):
+    a, b, lines = diff_directories(tmp_path)
+    result = run_diff(a, b)
+    assert result.returncode == 1
+    assert result.stdout == '== demo\n' + '\n'.join(lines) + '\n'
+
+
 def test_resolve_args_data_placeholder(tmp_path):
     entry = {'args': ['run:={data:racerbot_auto}/x']}
     assert resolve_args(entry, 'rb1', str(tmp_path)) == [f'run:={tmp_path}/data/rb1/racerbot_auto/x']
