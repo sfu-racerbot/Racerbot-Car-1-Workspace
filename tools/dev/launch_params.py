@@ -97,10 +97,10 @@ def normalize(obj, ws_root, sandbox=None):
     return re.sub(r'(?<!>)' + tmp + r'/[^\s\"\']+', lambda m: '<TMP>/' + os.path.basename(m.group()), obj)
 
 
-def capture(launch_file, launch_args, ws_root=None, *, sandbox=None):
+def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=None):
     if sandbox is None:
         with tempfile.TemporaryDirectory(prefix='launch_params_') as directory:
-            return capture(launch_file, launch_args, ws_root, sandbox=directory)
+            return capture(launch_file, launch_args, ws_root, sandbox=directory, matrix_dir=matrix_dir)
     ws_root = ws_root or os.environ.get('RB_WS') or os.getcwd()
     sandbox = os.path.realpath(sandbox)
     os.makedirs(sandbox, exist_ok=True)
@@ -382,13 +382,17 @@ def load_matrix(path):
     return matrix
 
 
-def resolve_args(entry, car, ws_root):
+def resolve_args(entry, car, ws_root, *, matrix_dir=None):
     def replace(match):
         kind = match.group(1)
         local = os.path.join(ws_root, 'data', car, kind)
         return local if os.path.isdir(local) else os.path.join(ws_root, 'data', kind)
-    return [re.sub(r'\{data:([^}]+)\}', replace, arg.replace('{ws}', ws_root))
-            for arg in entry.get('args', []) + entry.get('args_by_car', {}).get(car, [])]
+    args = entry.get('args', []) + entry.get('args_by_car', {}).get(car, [])
+    if matrix_dir is None and any('{matrix_dir}' in arg for arg in args):
+        raise ValueError('matrix_dir is required for {matrix_dir} arguments')
+    return [re.sub(r'\{data:([^}]+)\}', replace,
+                   arg.replace('{ws}', ws_root).replace('{matrix_dir}', os.path.realpath(matrix_dir) if matrix_dir else ''))
+            for arg in args]
 
 
 def main(argv=None):
@@ -399,6 +403,7 @@ def main(argv=None):
     one.add_argument('--package')
     one.add_argument('--launch')
     one.add_argument('--ws', default=os.environ.get('RB_WS', os.getcwd()))
+    one.add_argument('--matrix-dir')
     one.add_argument('args', nargs=argparse.REMAINDER)
     batch = sub.add_parser('capture')
     batch.add_argument('--matrix', required=True)
@@ -422,7 +427,7 @@ def main(argv=None):
                 path = get_share_file_path_from_package(package_name=options.package, file_name=options.launch)
             args = options.args[1:] if options.args[:1] == ['--'] else options.args
             with redirect_stdout(launch_output):
-                captured = capture(path, args, options.ws)
+                captured = capture(path, args, options.ws, matrix_dir=options.matrix_dir)
             print(json.dumps(captured, sort_keys=True, indent=1))
             print(launch_output.getvalue(), end='', file=sys.stderr)
             return 0
@@ -433,12 +438,13 @@ def main(argv=None):
     if options.command == 'capture':
         try:
             matrix = load_matrix(options.matrix)
+            matrix_dir = os.path.realpath(os.path.dirname(options.matrix))
             entries = [entry for entry in matrix['entries'] if options.car in entry.get('cars', ['rb1', 'rb2']) and (not options.only or entry['id'] == options.only)]
             if options.only and not entries:
                 raise ValueError('unknown or unavailable entry: ' + options.only)
             for entry in entries:
                 entry['package'], entry['launch']
-                resolve_args(entry, options.car, options.ws)
+                resolve_args(entry, options.car, options.ws, matrix_dir=matrix_dir)
         except (ValueError, KeyError, TypeError, OSError, yaml.YAMLError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -447,7 +453,7 @@ def main(argv=None):
         env = dict(os.environ, RACERBOT_CAR=options.car)
         for entry in entries:
             name = entry['id']
-            cmd = [sys.executable, __file__, 'capture-one', '--package', entry['package'], '--launch', entry['launch'], '--ws', options.ws, '--', *resolve_args(entry, options.car, options.ws)]
+            cmd = [sys.executable, __file__, 'capture-one', '--package', entry['package'], '--launch', entry['launch'], '--ws', options.ws, '--matrix-dir', matrix_dir, '--', *resolve_args(entry, options.car, options.ws, matrix_dir=matrix_dir)]
             try:
                 proc = subprocess.run(cmd, text=True, capture_output=True, timeout=120, env=env)
                 error = proc.stderr if proc.returncode else None

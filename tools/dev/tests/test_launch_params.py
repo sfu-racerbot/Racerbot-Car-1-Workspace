@@ -216,6 +216,14 @@ def test_resolve_args_data_placeholder(tmp_path):
     assert resolve_args(entry, 'rb1', str(tmp_path)) == [f'run:={tmp_path}/data/rb1/racerbot_auto/x']
 
 
+def test_resolve_args_matrix_dir_placeholder(tmp_path):
+    # oracle: the placeholder resolves against the matrix directory, not ws.
+    matrix_dir = tmp_path / 'matrix'
+    entry = {'args': ['run:={matrix_dir}/tests/fixtures/run']}
+    assert resolve_args(entry, 'rb1', '/other/workspace', matrix_dir=str(matrix_dir)) == [
+        f'run:={matrix_dir}/tests/fixtures/run']
+
+
 def test_matrix_covers_every_launch_file():
     matrix = load_matrix(str(ROOT / 'tools/dev/launch_matrix.yaml'))
     excluded_roots = {'racerbot_a', 'racerbot_b', 'web_dashboards', 'realsense-ros',
@@ -250,7 +258,8 @@ def test_matrix_run_dir_fixture_complete():
     matrix = load_matrix(str(ROOT / 'tools/dev/launch_matrix.yaml'))
     fixture_marker = 'fixtures/launch_params/run_dir'
     references = [arg for entry in matrix['entries'] for car in ('rb1', 'rb2')
-                  for arg in resolve_args(entry, car, str(ROOT)) if fixture_marker in arg]
+                  for arg in resolve_args(entry, car, str(ROOT), matrix_dir=str(ROOT / 'tools/dev'))
+                  if fixture_marker in arg]
     assert references
     for arg in references:
         path = Path(arg.split(':=', 1)[1])

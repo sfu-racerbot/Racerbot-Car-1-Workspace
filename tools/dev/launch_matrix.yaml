@@ -20,7 +20,7 @@ entries:
   - id: localize-run
     package: racerbot_launch
     launch: localize_run_launch.py
-    args: ['map_yaml:={ws}/tools/dev/tests/fixtures/launch_params/run_dir/map.yaml']
+    args: ['map_yaml:={matrix_dir}/tests/fixtures/launch_params/run_dir/map.yaml']
   - {id: auto-map-race, package: racerbot_launch, launch: auto_map_race_launch.py, args: []}
   - {id: auto-map-speed, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['mapping_max_speed:=1.5']}
   - {id: auto-map-no-diagnostics, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['diagnostics:=false']}
@@ -32,19 +32,19 @@ entries:
   - id: race
     package: racerbot_launch
     launch: race_launch.py
-    args: ['run_dir:={ws}/tools/dev/tests/fixtures/launch_params/run_dir']
+    args: ['run_dir:={matrix_dir}/tests/fixtures/launch_params/run_dir']
   - id: race-stanley
     package: racerbot_launch
     launch: race_launch.py
-    args: ['steering_law:=stanley', 'run_dir:={ws}/tools/dev/tests/fixtures/launch_params/run_dir']
+    args: ['steering_law:=stanley', 'run_dir:={matrix_dir}/tests/fixtures/launch_params/run_dir']
   - id: race-lqr
     package: racerbot_launch
     launch: race_launch.py
-    args: ['steering_law:=lqr', 'run_dir:={ws}/tools/dev/tests/fixtures/launch_params/run_dir']
+    args: ['steering_law:=lqr', 'run_dir:={matrix_dir}/tests/fixtures/launch_params/run_dir']
   - id: race-mpc
     package: racerbot_launch
     launch: race_launch.py
-    args: ['steering_law:=mpc', 'run_dir:={ws}/tools/dev/tests/fixtures/launch_params/run_dir']
+    args: ['steering_law:=mpc', 'run_dir:={matrix_dir}/tests/fixtures/launch_params/run_dir']
   - {id: dashboard, package: racerbot_launch, launch: dashboard_launch.py, args: []}
   - {id: map-course, package: racerbot_launch, launch: map_course_launch.py, args: []}
   - {id: autonomous-mapping, package: racerbot_launch, launch: autonomous_mapping_launch.py, args: []}
