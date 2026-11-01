@@ -62,8 +62,10 @@ def test_effective_values_overlay_wins(tmp_path):
 
 
 def test_effective_values_tuning_beats_calibration(tmp_path):
-    paths = [write(tmp_path / str(i), {'n': block(x=i)}) for i in range(3)]
-    assert effective_values(paths, 'n') == {'x': 2}
+    paths = [write(tmp_path / 'shared', {'n': block(x=0, retained=7)}),
+             write(tmp_path / 'calibration', {'n': block(x=1)}),
+             write(tmp_path / 'tuning', {'n': block(x=2)})]
+    assert effective_values(paths, 'n') == {'x': 2, 'retained': 7}
 
 
 # Recorded ROS 2 Jazzy measurement, 2026-10-31.
