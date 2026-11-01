@@ -4,6 +4,7 @@
 #   tools/save_runs.sh                 # commit + push this car's data
 #   tools/save_runs.sh --no-push       # commit only
 #   tools/save_runs.sh --skip-idle     # leave runs that never moved uncommitted
+#   SAVE_RUNS_PUSH_LIMIT_BYTES         # staged-size limit; default 1.5 GiB
 #
 # Runs where the car never moved, and stubs replaced at once by another
 # recorder (both flagged in auto_record.yaml), are listed before committing.
@@ -19,6 +20,7 @@
 set -euo pipefail
 
 LIMIT_BYTES=$((100 * 1000 * 1000))
+PUSH_LIMIT_BYTES=${SAVE_RUNS_PUSH_LIMIT_BYTES:-$((3 * 1024 * 1024 * 1024 / 2))}
 push=1
 skip_idle=0
 for arg in "$@"; do
@@ -71,7 +73,7 @@ too_big="$(find data -type f -size +"${LIMIT_BYTES}"c -printf '%s\t%p\n')"
 if [[ -n "$too_big" ]]; then
     echo "These files are over GitHub's 100 MB limit and would make the push fail:" >&2
     echo "$too_big" >&2
-    echo "Move them out of data/ (or set up Git LFS), then run this again." >&2
+    echo "Move them out of data/ or split them, then run this again." >&2
     exit 1
 fi
 
@@ -102,6 +104,17 @@ fi
 if git diff --cached --quiet -- "${paths[@]}"; then
     echo "No new runs in $car_data/ -- nothing to commit."
     exit 0
+fi
+
+total=0
+while IFS= read -r -d '' path; do
+    size=$(git cat-file -s ":$path")
+    total=$((total + size))
+done < <(git diff --cached --name-only --diff-filter=AM -z)
+if (( total > PUSH_LIMIT_BYTES )); then
+    git reset -q -- "${paths[@]}"
+    echo "push too large: $(( (total + 1048575) / 1048576 )) MB staged, GitHub refuses pushes over 2 GB; commit fewer runs at a time (e.g. once per session)" >&2
+    exit 1
 fi
 
 git diff --cached --stat -- "${paths[@]}" | tail -1
