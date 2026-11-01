@@ -1,6 +1,6 @@
 # What the merge changes on each car
 
-**Status:** awaiting the team lead's approval (plan Task 13, step 4). Car 1 drives car 2's newer gap_follow and SLAM code only after this file is approved, and then in the usual order: wheels off the ground with LB held, the floor at low speed, then race speed.
+**Status:** approved by the team lead on 2026-11-01 (plan Task 13, step 4), with `swept_clearance_max_length` kept at 5.0 m for both cars. Car 1 may now drive car 2's newer gap_follow and SLAM code, in the usual order: wheels off the ground with LB held, the floor at low speed, then race speed.
 
 This file lists every difference the unified workspace makes to what each car runs, measured against that car's own repo before the merge (car 1: `ae7ceeb`; car 2: Racerbot-Car-2-Workspace `9c2c2ed`). Two checks back it:
 
@@ -58,7 +58,7 @@ Commands, from `~/racerbot-merge`: `res/t13_ab.sh all`, `res/t13_ab_rb2_multi.sh
 1. Keep 5.0 m (recommended). The braking check then looks as far as the car needs to stop from its 5 m/s cap. Car 1 pays 0.27 to 0.56 s a lap on the hallway layouts and gains on square corners and on its own course forward.
 2. Set the shared value back to 3.0 m. Car 1 gets its old hallway times back, and both cars again treat a path clear for 3 m as clear at any speed.
 
-Approved by: ______ on ______ (choice: 1 / 2).
+Approved by the team lead on 2026-11-01: choice 1, keep 5.0 m.
 
 Per-row results:
 
