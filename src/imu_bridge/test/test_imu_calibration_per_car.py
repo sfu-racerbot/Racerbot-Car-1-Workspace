@@ -30,13 +30,13 @@ def test_default_car_yaml_is_car_profile(car):
     assert resolve_car_yaml('') == CAR / car / 'imu/car.yaml'
 
 
-def test_missing_car_imu_refuses(monkeypatch, tmp_path):
+def test_missing_car_imu_refuses(car, monkeypatch, tmp_path):
     from imu_bridge.imu_bridge_node import resolve_car_yaml
-    (tmp_path / 'rb1').mkdir()
-    (tmp_path / 'rb1/car.yaml').write_text('{}')
+    (tmp_path / car).mkdir()
+    (tmp_path / car / 'car.yaml').write_text('{}')
     (tmp_path / 'machines.yaml').write_text('{}')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path))
-    expected = tmp_path / 'rb1/imu/car.yaml'
+    expected = tmp_path / car / 'imu/car.yaml'
     with pytest.raises(FileNotFoundError, match=str(expected)):
         resolve_car_yaml('')
 
