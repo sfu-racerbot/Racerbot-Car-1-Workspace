@@ -37,7 +37,8 @@ def stub_probes():
 # oracle: fixture YAML and launch descriptions specify the expected behavior.
 def test_capture_never_spawns(demo, tmp_path):
     assert not (tmp_path / 'spawned').exists()
-    assert demo['processes'][0]['cmd'] == ['touch', '<TMP>/spawned']
+    relative = (tmp_path / 'spawned').relative_to(tempfile.gettempdir())
+    assert demo['processes'][0]['cmd'] == ['touch', f'<TMP>/{relative}']
     assert node(demo, '/demo_node')['executable'] == 'does_not_exist_exe'
 
 
@@ -179,7 +180,14 @@ def test_capture_one_stdout_is_pure_json(tmp_path):
 
 def test_normalize_replaces_ws_home_tmp():
     assert normalize({'x': ['/workspace/a', os.path.expanduser('~/b'), tempfile.gettempdir() + '/one/two']}, '/workspace') == {
-        'x': ['<WS>/a', '<HOME>/b', '<TMP>/two']}
+        'x': ['<WS>/a', '<HOME>/b', '<TMP>/one/two']}
+
+
+def test_normalize_keeps_temp_relative_path():
+    # oracle: distinct temp subdirectories must remain distinguishable.
+    tmp = tempfile.gettempdir()
+    assert normalize([f'{tmp}/old/map.yaml', f'{tmp}/new/map.yaml'], '/workspace') == [
+        '<TMP>/old/map.yaml', '<TMP>/new/map.yaml']
 
 
 def test_normalize_matrix_dir_beats_ws():

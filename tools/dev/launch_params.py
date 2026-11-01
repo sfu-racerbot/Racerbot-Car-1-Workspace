@@ -96,8 +96,8 @@ def normalize(obj, ws_root, sandbox=None, *, matrix_dir=None):
         replacements.append((os.path.realpath(matrix_dir), '<MATRIX>'))
     for path, replacement in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
         obj = obj.replace(path, replacement)
-    tmp = re.escape(tempfile.gettempdir().rstrip('/'))
-    return re.sub(r'(?<!>)' + tmp + r'/[^\s\"\']+', lambda m: '<TMP>/' + os.path.basename(m.group()), obj)
+    tmp = tempfile.gettempdir().rstrip('/')
+    return re.sub(r'(?<!>)' + re.escape(tmp) + r'(?=/|$)', '<TMP>', obj)
 
 
 def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=None):
