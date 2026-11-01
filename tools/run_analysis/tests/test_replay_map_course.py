@@ -158,7 +158,11 @@ def test_its_ros_domain_is_not_the_cars_or_the_test_suites():
     assert rmc.ROS_DOMAIN not in ('0', '79')
 
 
-def test_the_environment_stays_on_this_machine_and_this_domain(tmp_path):
+def test_the_environment_stays_on_this_machine_and_this_domain(tmp_path, monkeypatch):
+    # The caller's shell set the other way, so the result cannot be inherited from it.
+    monkeypatch.setenv('ROS_DOMAIN_ID', '0')
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'SUBNET')
+    monkeypatch.setenv('ROS_STATIC_PEERS', '192.168.0.99')
     env = rmc._environment(tmp_path, tmp_path / 'ws')
     assert env['ROS_DOMAIN_ID'] == rmc.ROS_DOMAIN
     assert env['ROS_AUTOMATIC_DISCOVERY_RANGE'] == 'LOCALHOST'
