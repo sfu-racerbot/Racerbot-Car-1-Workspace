@@ -6,7 +6,7 @@
 
 ROS 2 Jazzy workspace for both SFU Racerbot roboracer/F1TENTH cars: car 1 is `rb1`, and car 2 is `rb2`.
 
-Each car knows its identity through its launch-time profile; see [docs/car-profiles.md](docs/car-profiles.md). Each car's physical values live in `src/racerbot_car/cars/<id>/`, and its recorded runs live in `data/<id>/`.
+A car finds out which car it is from its Jetson serial number, listed in `src/racerbot_car/cars/machines.yaml`; on a development machine or in the simulator, `RACERBOT_CAR=rb1` or `rb2` chooses instead. See [docs/car-profiles.md](docs/car-profiles.md). Each car's physical values live in `src/racerbot_car/cars/<id>/`, and its recorded runs live in `data/<id>/`.
 
 ## Hardware summary (see [docs/hardware-reference.md](docs/hardware-reference.md) for exact values)
 - **VESC** motor controller — USB serial, exposed as a stable `/dev/sensors/vesc` symlink (udev rule at `/etc/udev/rules.d/99-vesc.rules`).
