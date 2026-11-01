@@ -131,7 +131,11 @@ def test_every_tunable_node_can_also_be_stopped():
 def test_the_map_folders_are_the_two_run_folders_and_none_is_refused():
     log = _Log()
     roots = _section('web_dashboard_node')['map_roots']
-    assert roots == ['~/.ros/racerbot_auto', '~/.ros/racerbot_sim/auto']
+    assert roots == [
+        '~/racerbot-ws/data/rb1/racerbot_auto',
+        '~/racerbot-ws/data/rb1/racerbot_sim/auto',
+    ]
+    assert all(root.startswith('~/racerbot-ws/data/rb1/') for root in roots)
     assert len(mapstore.sanitize_roots(roots, log)) == 2
     assert log.lines == []
 
