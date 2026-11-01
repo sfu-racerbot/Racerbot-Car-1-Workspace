@@ -41,6 +41,8 @@ def effective_values(paths: list[str], node_name: str | None) -> dict:
             entries.setdefault(block, {}).update(params)
     keys = {'/**'}
     if node_name:
+        if not node_name.startswith('/'):
+            node_name = '/' + node_name
         basename = node_name.rsplit('/', 1)[-1]
         keys.update((node_name, basename, '/**/' + basename))
     result = {}

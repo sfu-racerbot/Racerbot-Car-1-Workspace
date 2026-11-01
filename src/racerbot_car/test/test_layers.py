@@ -107,6 +107,21 @@ def test_effective_values_other_node_block_ignored(tmp_path):
     assert effective_values([p], 'n') == {'y': 2}
 
 
+def test_effective_values_basename_matches_fqn_block(tmp_path):
+    path = write(tmp_path / 'params.yaml', {'/n': block(x=5)})
+    assert effective_values([path], 'n')['x'] == 5
+
+
+def test_effective_values_basename_and_fqn_agree(tmp_path):
+    shared = write(tmp_path / 'shared.yaml', {
+        '/**': block(x=1), '/n': block(x=5), 'n': block(y=2),
+        '/**/n': block(z=3)})
+    overlay = write(tmp_path / 'overlay.yaml', {'/**': block(x=9)})
+    expected = {'x': 5, 'y': 2, 'z': 3}
+    assert effective_values([shared, overlay], 'n') == expected
+    assert effective_values([shared, overlay], '/n') == expected
+
+
 @pytest.mark.parametrize('fqn', ['/demo_node', '/ns2/named_node'])
 def test_effective_values_agrees_with_launch_params(fqn):
     root = Path(__file__).resolve().parents[3]
