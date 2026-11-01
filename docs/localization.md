@@ -22,7 +22,7 @@ Every autonomous thing this car does needs one number: **where am I on the map, 
 
 ## What "localization" actually means here
 
-A **frame** ([glossary](glossary.md)) is just a coordinate system with a name. This car uses three that matter:
+A **frame** ([glossary](glossary.md)) is just a coordinate system with a name. Both cars use three that matter:
 
 - **`map`** — fixed to the building. The origin is wherever the car was when mapping started. This is the one a **racing line** ([glossary](glossary.md)) — the path the car races round — is stored in.
 - **`odom`** — fixed to wherever the car powered up. It drifts over time, but it moves *smoothly*: no jumps, ever.
@@ -47,7 +47,7 @@ So the car always has a position. What it does not always have is a *recently co
 
 ## Which point on the car "the position" means
 
-A position is a single point, and a car is 0.58 m long. So every pose has to say *which* point on the car it is.
+A position is a single point. Both cars use a configured padded length of 0.58 m, not a measured body length, so every pose has to say *which* point on the car it is.
 
 In this workspace the answer is always **`base_link`, the centre of the rear axle** ([hardware-reference.md](hardware-reference.md)). The racing line, the pure pursuit steering maths, the collision footprint, and the dashboard's car drawing all assume it.
 
@@ -68,7 +68,7 @@ Each node that reads a pose therefore has to be told which one it is getting:
 - `auto_map_race_node`: converts the filter's pose back to the rear axle before republishing it on `/slam_pose`, and moves its seed forward to the LiDAR before sending it.
 - `web_dashboard`: `laser_pose_topics` lists the topics to convert before drawing.
 
-All of them use `laser_offset_x: 0.26`, the measured LiDAR position.
+Both car profiles use `laser_offset_x: 0.26`. This was measured on car 2 on 2026-08-24 and is assumed, not yet measured, on car 1.
 
 > **Until 2026-09-27 nothing converted.** Every particle-filter pose was used as though it were the rear axle, so the car believed it was 0.26 m ahead of where it really was.
 >
@@ -85,7 +85,7 @@ Racing lines recorded before this fix with `waypoint_recorder` in particle-filte
 | `odom -> base_link` | `vesc_to_odom_node` | Every report from the VESC motor controller ([glossary](glossary.md)), fast | Drifts, especially in heading |
 | `map -> odom` | `slam_toolbox` | Only when its gates open | Arrives late, as a visible jump |
 
-The complaint that started this work was "finding where it is with respect to the map is really slow." Measured on the 2026-08-19 run, that was the second row.
+The complaint that started this work was "finding where it is with respect to the map is really slow." Measured on car 2's 2026-08-19 run, that was the second row.
 
 `slam_toolbox`'s stock configuration will not even *attempt* a correction until the car has travelled 0.5 m, **or** turned 0.5 rad (29°), **and** at least 0.5 s has passed. Between corrections the car is running on dead reckoning alone.
 
@@ -117,11 +117,11 @@ Two of those deserve their own explanation, because they are about a different s
 
 "The map does not close" is a different problem from "localization is slow", and it has its own cause.
 
-The course this car maps is a hallway loop around a building block: **126 m round, with the far side 38.8 m from the start.** Those are measured numbers, read straight off the lap recorder in the 2026-08-19 run.
+Car 2's course was a hallway loop around a building block: **126 m round, with the far side 38.8 m from the start.** Those numbers came from the lap recorder in car 2's 2026-08-19 run.
 
 When the car finally arrives back where it started, SLAM has to *recognise* that it has been there before. It does that by looking for an earlier scan near its current estimated position. Stock, "near" meant **within 3 m**.
 
-After 126 m of driving, the estimate is very unlikely to still be within 3 m of the truth — this car's dead reckoning has no gyro in it by default (see the deep dive below). Nothing inside 3 m means no candidate, means no loop closure, however good the scans are.
+After 126 m of driving, the estimate was very unlikely to still be within 3 m of the truth: car 2's dead reckoning then had no gyro by default. Nothing inside 3 m means no candidate, and no loop closure, however good the scans are. Today `map_course` defaults to gyro odometry on both cars.
 
 8.0 m matches the window SLAM already uses to *verify* a candidate once it finds one (`loop_search_space_dimension`, 8 m, unchanged). Searching a smaller radius than the matcher can correct over was simply leaving that capability unused.
 
@@ -131,9 +131,11 @@ That mode also loads [`src/racerbot_launch/config/slam_gyro.yaml`](../src/racerb
 
 Why 3 m: with the gyro, the position estimate is only about 1 m off after a lap. A stretch of the same course 2.2 to 2.6 m away sits inside the 8 m search's matching window (±4 m), so SLAM closed onto it. The 3 m window (±1.5 m) cannot reach that stretch.
 
-On two replayed runs, `20261026-194714` and `20261026-194913`, the largest correction with the 8 m search was 2.45 m and 2.75 m. With the 3 m search it was 0.47 m on both. The replays used `tools/run_analysis/slam_replay.py`, so check a change that way first.
+On car 1's two replayed runs, `20261026-194714` and `20261026-194913`, the largest correction with the 8 m search was 2.45 m and 2.75 m. With the 3 m search it was 0.47 m on both. The replays used `tools/run_analysis/slam_replay.py`, so check a change that way first.
 
-**`slam_gyro.yaml` also makes SLAM listen to the gyro (2026-10-30).** With its old settings, SLAM's heading was 5.3° off over 25 m of track while the gyro alone was 1.0° off, because a scan match paid almost nothing for disagreeing with the gyro. That drift, in one direction every lap, is what pushed the car outside the closure window and doubled walls. The file now holds SLAM to the gyro, and only this file may: steering odometry is 15° out over 5 m, so holding SLAM to it would hold it to a wrong answer. Measurements and every replay: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+**`slam_gyro.yaml` also makes SLAM listen to the gyro.** In car 2's 2026-10-30 replays, SLAM's heading was 5.3° off over 25 m while the gyro alone was 1.0° off: a scan match paid almost nothing for disagreeing with the gyro. That drift pushed car 2 outside the closure window and doubled walls.
+
+The file now holds SLAM to the gyro. Steering odometry was 15° out over 5 m on car 2, so holding SLAM to it would hold it to a wrong answer. Measurements and every replay: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
 
 ### Why the chain size moved with it
 
@@ -145,7 +147,7 @@ Halving the spacing to 0.25 m would have quietly halved that evidence to 2.5 m �
 
 **If you change `minimum_travel_distance`, change `loop_match_minimum_chain_size` to match.**
 
-> **Correction, 2026-10-30: at driving speed the chain is longer than that.** The sum above is only true below about 1.25 m/s. Faster than that, `minimum_time_interval` (0.2 s) sets the spacing instead: **0.57 m** median at this car's pace, so a chain of 20 is about 11 m, not 5 m.
+> **Correction, car 2, 2026-10-30: at driving speed the chain is longer than that.** The sum above is only true below about 1.25 m/s. Faster than that, `minimum_time_interval` (0.2 s) sets the spacing instead: **0.57 m** median at car 2's pace, so a chain of 20 is about 11 m, not 5 m.
 >
 > A chain also has to fit inside `loop_search_maximum_distance`: it is consecutive older nodes *within that radius*. A 3 m radius holds about 6 m of path, so about 11 nodes. So `slam_gyro.yaml`'s 3 m with a chain of 20 could never close a loop while the pose was right (0.0% of nodes could), which is why it now sets the chain to 10.
 >
@@ -168,10 +170,10 @@ ros2 launch racerbot_launch auto_map_race_launch.py
 **Terminal 2** — after the run, read the result.
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<timestamp>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<timestamp>
 ```
 
-**Working when:** it prints a pose section with `lag_max_sec`. Under 0.15 s is healthy; that threshold is `race_diagnostics`' own.
+Replace `<id>` with `rb1` or `rb2` and `<timestamp>` with the recorded run's folder. **Working when:** it prints a pose section with `lag_max_sec`. Under 0.15 s is healthy; that threshold is `race_diagnostics`' own.
 
 Full detail on what else it records is in [run-diagnostics.md](run-diagnostics.md).
 
@@ -206,7 +208,7 @@ So the car's heading is an open-loop integration of what it *asked* the steering
 
 **The VESC's gyro works, once it is switched on.** A directly measured yaw rate beats one inferred from a commanded steering angle by a wide margin, and the VESC publishes `/sensors/imu/raw` at a steady 50 Hz.
 
-Measured on 2026-08-19, every field of that message was exactly zero: the IMU was disabled in firmware (**VESC Tool → App Settings → IMU**, sample rate 0 means off). It has since been turned on, and the team's October 2026 tests show it working.
+Measured on car 2 on 2026-08-19, every field of that message was exactly zero: the IMU was disabled in firmware (**VESC Tool → App Settings → IMU**, sample rate 0 means off). It has since been turned on, and the team's October 2026 tests show it working on both cars.
 
 If it reads all zeros again, it has been switched off again. It can only be checked in VESC Tool, not from ROS — see [hardware-reference.md](hardware-reference.md#vesc-motor--steering-controller) for the exact re-check procedure.
 
@@ -214,7 +216,7 @@ If it reads all zeros again, it has been switched off again. It can only be chec
 
 ## Deep dive: what would improve this next
 
-> **Skip this unless** you are picking up localization work. This is a ranked plan, not something already built.
+> **Skip this unless** you are picking up localization work. This is the historical ranked plan from car 2; the status notes below identify what has since been built.
 
 Everything above was tuning: config only, no new dependencies, reversible. Here is what comes after, ranked by how much accuracy they buy per unit of work.
 
@@ -228,15 +230,15 @@ Worse, adding an EKF *between* them would be actively wrong. SLAM's pose output 
 
 **An EKF is not the missing piece. A second independent sensor is.** With only wheel odometry there is nothing to fuse: an EKF over one sensor is an expensive copy of that sensor.
 
-It becomes worth installing the moment there is a second, genuinely independent measurement of *rotation* — the one channel this car has no sensor for at all.
+At the time, car 2 had no working rotation measurement. Both cars now have gyro inputs as described below.
 
 ### 1. Get a real rotation measurement, then fuse it — the big one
 
-> **Car 2, 2026-10-31:** gyro mapping is the default ([car1-vs-car2.md](car1-vs-car2.md)), with the BNO085 first and the VESC's gyro behind it. The status below is car 1's.
+> **Both cars:** gyro mapping is now the `map_course` default ([car1-vs-car2.md](car1-vs-car2.md)), with the BNO085 first and the VESC's gyro behind it. The earlier status below is car 1's.
 >
 > **Status, car 1, 2026-10-24: built, not yet driven on.** Car 1 has a BNO085 gyro on the front axle (option b below) and the VESC's own IMU (option a). Instead of an EKF owning `odom -> base_link`, `imu_bridge`'s `vehicle_state_node` publishes **gyro odometry** in a new frame, `odom_imu`, with `odom_imu -> odom` chosen so `odom_imu -> base_link` is the gyro-headed pose. `slam_toolbox` maps on it with `map_course gyro_odom:=true`. `vesc_to_odom_node` keeps its transform, so nothing in bringup changes and the step is reversible per run. Distance stays the wheels'; only heading changes, as ForzaETH's race stack also does (wheel speed plus IMU yaw rate, no IMU acceleration). Details: [src/imu_bridge/README.md](../src/imu_bridge/README.md#gyro-odometry-for-slam). The first test is the A/B in [launchstart.md](launchstart.md#testing-the-imu-in-mapping-ab).
 
-**The problem:** heading comes from a commanded steering angle, as above. Nothing on this car measures how much it actually rotated.
+**The original problem on car 2:** steering odometry took heading from a commanded steering angle. The historical options below predate the gyro odometry now available on both cars.
 
 **The fix, in the order worth trying:**
 
@@ -295,7 +297,7 @@ Turn it off with `localize_after_mapping: false` in `auto_map_race.yaml`.
 
 ### 4. Tune further, with measurements
 
-The values in `slam_tracking.yaml` are a deliberately moderate first step, not a floor. Going lower costs CPU: every gate opening adds a node to the pose graph, and at 0.25 m spacing this car's 126 m course is already about 500 nodes per lap for Ceres to optimize on an 8 GB Jetson.
+The values in `slam_tracking.yaml` are a deliberately moderate first step, not a floor. Going lower costs CPU: every gate opening adds a node to the pose graph, and at 0.25 m spacing car 2's 126 m course is already about 500 nodes per lap for Ceres to optimize on an 8 GB Jetson.
 
 Measure before going further. `race_diagnostics` gives pose lag; `htop` gives the CPU headroom that limits it.
 
@@ -311,7 +313,7 @@ Measure before going further. `race_diagnostics` gives pose lag; `htop` gives th
 
 **A pose that is stale or frozen is more dangerous than no pose at all.**
 
-**Pure pursuit** ([glossary](glossary.md)), the racing controller, steers toward a point ahead on the racing line based on where it believes the car is. If the belief is a second out of date at 2 m/s, the car is steering from 2 m behind itself — it will cut the corner it thinks it is still approaching. On 2026-07-27 that put this car into a wall.
+**Pure pursuit** ([glossary](glossary.md)), the racing controller, steers toward a point ahead on the racing line based on where it believes the car is. If the belief is a second out of date at 2 m/s, the car is steering from 2 m behind itself — it will cut the corner it thinks it is still approaching. On 2026-07-27 that put car 2 into a wall.
 
 `pure_pursuit_node` therefore has **watchdogs** ([glossary](glossary.md)): checks that stop the car when something they guard looks wrong. One fires when the pose is too old. Another fires when odometry says the car is moving while localization says it is not.
 

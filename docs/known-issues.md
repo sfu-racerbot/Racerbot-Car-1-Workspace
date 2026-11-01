@@ -4,7 +4,7 @@
 > **Read first:** nothing.
 > **What's in it:** one entry per problem: what is wrong, the evidence, and the suggested fix.
 
-This list was written on car 1 ([Racerbot-Car-1-Workspace](https://github.com/sfu-racerbot/Racerbot-Car-1-Workspace), checked at `881c409`) and ported to car 2 on 2026-10-24 with the rest of car 1's changes. Entries were re-checked on car 2 where they could be without the car running, and say so; the rest still describe car 1. When you fix one, delete its entry in the same commit. The 2026-10-29 port of car 1's Part B-1 racing work brought car 1's resolved simulator entry below.
+This list was written on car 1 (checked at `881c409`) and ported to car 2 on 2026-10-24. Entries say where car 2 was checked; the remaining historical observations describe car 1. The two cars now share this workspace. When fixing an issue, retain its evidence under Resolved.
 
 ## Contents
 
@@ -18,7 +18,7 @@ This list was written on car 1 ([Racerbot-Car-1-Workspace](https://github.com/sf
 
 ### Two nodes still declare the pre-October 0.26 rad steering default
 
-`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The shipped YAMLs set 0.349 and 0.30 on car 2 (0.33 and 0.30 on car 1), so the race path is unaffected, but any launch or test that builds either node without its YAML gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
+`pure_pursuit_node.py` declares `max_steering_angle` with a default of 0.26 and `auto_map_race_node.py` declares `profile_max_steering_angle` with 0.26. The car profiles set 0.33 rad for car 1 and 0.349 rad for car 2; the shared planner config sets 0.30 rad. A launch or test that builds either node without its config gets the old limit. `docs/racing-autonomy.md` ("`max_steering_angle` uses the smaller magnitude (`0.26`)") quotes the same old value.
 
 **Fix:** match the declared defaults to the YAMLs, or read them from `docs/hardware-reference.md`'s numbers, and correct the racing-autonomy sentence. Check which node tests rely on the declared default first.
 
@@ -46,11 +46,11 @@ Wheelbase 0.36 m, width 0.30 m and the LiDAR offset 0.26 m were tape-measured on
 
 **Fix:** measure wheelbase, tire-to-tire width, LiDAR-to-front-axle and bumper-to-bumper on car 1, then change every file in its row of `docs/hardware-reference.md#where-each-number-lives` together.
 
-### Both simulators model car 2's steering, not car 1's
+### Simulator steering calibration (historical)
 
-`racerbot_sim/sim_bridge.py` and `tools/f1tenth_sim/sim_fidelity/calibration.py` use car 2's servo map and full-lock limits (0.436 rad). Car 1's full stick is 0.38 rad, so simulator results for car 1 come from a car that steers further than car 1 can. Already recorded in `docs/car1-vs-car2.md` as a known gap.
+The earlier issue was that `racerbot_sim/sim_bridge.py` and `tools/f1tenth_sim/sim_fidelity/calibration.py` used car 2's servo map and full-lock limits (0.436 rad), even for car 1, whose full stick is 0.38 rad. Both now select the car profile. Historical simulator results made before car selection can therefore overstate car 1's steering range.
 
-**Fix:** once car 1's full-lock circles are trusted, give both simulators car 1's servo map and limits behind a car selection, with a test that fails if they disagree with `vesc.yaml` and `joy_teleop.yaml`.
+**Follow-up:** validate car 1's full-lock circles against the selected profile before relying on simulated steering limits.
 
 ## Setup on the car
 
@@ -80,9 +80,9 @@ On car 2 `import osqp` works (2026-10-24). `python3 -c "import osqp"` fails on c
 
 ## Cross-car drift
 
-Differences between the two repos that are not hardware differences, so one of the two is behind. They are not in `docs/car1-vs-car2.md` because no hardware requires them.
+Historical differences between the two repositories before the shared workspace.
 
-Car 2 took every row of car 1's list (`max_speed:=`, the `map_course` IMU options, `record_bag:=true`, `imu_bridge`) in the 2026-10-24 port, so none are left. The one remaining difference in that area, `map_course imu:=false` by default on car 2, exists because car 2 has no BNO085 yet, so it is in `docs/car1-vs-car2.md` instead.
+Car 2 took car 1's `max_speed:=`, `map_course` IMU options, `record_bag:=true` and `imu_bridge` in the 2026-10-24 port. The later shared `map_course_launch.py` defaults `imu` and `gyro_odom` on for both cars. Car 2 has a BNO085, but its mount yaw and position remain provisional in `src/racerbot_car/cars/rb2/imu/car.yaml`.
 
 ## Resolved
 

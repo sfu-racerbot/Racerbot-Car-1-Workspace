@@ -25,6 +25,12 @@ Every section follows the same pattern: what it does (one line), the terminals, 
 
 ## Every terminal, first
 
+On a development machine or in the simulator, set `RACERBOT_CAR=rb1` or `RACERBOT_CAR=rb2` before launching. Without a Jetson serial or this setting, the error is `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator`.
+
+On either car, `racerbot_car.identity.current_car_id()` reads `/proc/device-tree/serial-number` and looks it up in `src/racerbot_car/cars/machines.yaml`. Leave `RACERBOT_CAR` unset or matching the serial. A mismatch refuses every launch with `serial ... identifies rbN, but RACERBOT_CAR is ...; unset RACERBOT_CAR`. An unknown serial prints the exact line to add to `machines.yaml`.
+
+In each terminal on the selected machine:
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/racerbot-ws/install/setup.bash
@@ -49,7 +55,7 @@ Why: [operations.md, safety checklist](operations.md#safety-checklist-every-time
 ros2 run racerbot_doctor doctor
 ```
 
-**Working when:** the last line reads `0 FAIL`. Read-only; safe any time.
+**Working when:** the last line reads `0 FAIL`. The first line identifies the car, its serial and any tuning overrides. The check is read-only and safe any time.
 
 ## Drive by hand
 
@@ -147,13 +153,13 @@ ros2 launch f1tenth_stack bringup_launch.py
 ros2 run racerbot_launch map_course
 ```
 
-**This maps on the gyro by default.** It starts the BNO085 and the IMU side, and SLAM takes its heading from the BNO, then the VESC if the BNO stops. Without a gyro SLAM takes its heading from the steering command, which was 15° out over 5 m of track on 2026-10-30, and `184826`'s corrections reached 3.4 m. If the bridge prints `sensor hub is not running`, power-cycle the BNO: the run still maps, on the VESC's gyro alone.
+**This maps on the gyro by default on both cars.** It starts the BNO085 and the IMU side; SLAM takes its heading from the BNO, then the VESC if the BNO stops. On car 2, steering-derived heading was 15° out over 5 m of track on 2026-10-30, and run `184826`'s corrections reached 3.4 m. If the bridge prints `sensor hub is not running`, power-cycle the BNO: the run still maps, on the VESC's gyro alone.
 
 **Keep the car still for the first 3 seconds** while the IMU's gyro bias is measured, **then hold LB for the whole run.** The car stays still for a moment at the start, until SLAM has recorded the start pose (`Start pose recorded: ...`). Releasing LB pauses mapping; holding it again carries on.
 
 **Working when:** you see `Closed mapping lap 1/3`, `2/3` and `3/3`. The car stops just past the line, `Saved occupancy map successfully.` appears, Terminal 2 shuts down (Terminal 1 keeps running), and the last thing on screen is a block starting `MAPPING FINISHED.` with the race commands in it. Copy them from there.
 
-After the launch stops, `map_course` **checks the map against the run's own scans**, and this happens whether the laps finished or you pressed `Ctrl+C`. It writes a folder named `<run>-rebuilt` in `data/racerbot_auto/`, and prints `GO:` or `NO-GO:` with the reason.
+After the launch stops, `map_course` **checks the map against the run's own scans**, and this happens whether the laps finished or you pressed `Ctrl+C`. It writes a folder named `<run>-rebuilt` in `data/<id>/racerbot_auto/`, and prints `GO:` or `NO-GO:` with the reason. Here and below, replace `<id>` with `rb1` for car 1 or `rb2` for car 2, and replace the other angle-bracketed placeholders with the actual names.
 
 - **`GO`:** the map is good, and the race commands at the end point at that folder. Its racing line comes from where the car really was on the finished map, capped at **1.5 m/s** for the first drive. The commands show how to go faster.
 - **`NO-GO`:** do not race on it. The most common reason is walls drawn twice. Map again, with the gyro on.
@@ -163,12 +169,12 @@ After the launch stops, `map_course` **checks the map against the run's own scan
 - **It finished by itself:** the check above, then the commands. Nothing else.
 - **You pressed `Ctrl+C`, or it failed:** a line saying it is stopping and that nothing is driving the car, up to 15 s while the nodes shut down, the check, a short `RUN STOPPED` summary (laps closed, the verdict, where the recording is), then the commands. Press `Ctrl+C` once: it is still working until the prompt comes back.
 
-**The in-depth reports do not run by themselves**, because they take minutes. Add `analysis:=true` to run them straight after a run, or run them any time on the recording, whose path is on the `Recording run to:` line:
+**The in-depth reports do not run by themselves**, because they take minutes. Add `analysis:=true` to run them straight after a run, or run them in a terminal at the workspace root on the recording, whose path is on the `Recording run to:` line:
 
 ```bash
-python3 tools/run_analysis/slam_report.py ~/racerbot-ws/data/racerbot_runs/<time>
-python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<time>
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<time>
+python3 tools/run_analysis/slam_report.py ~/racerbot-ws/data/<id>/racerbot_runs/<time>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/<id>/racerbot_runs/<time>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<time>
 ```
 
 **Working when:** each prints its report and saves it under that run's `analysis/` folder.
@@ -186,12 +192,12 @@ Options, added to the end of the command:
 | `mapping_max_speed:=1.5` | a course nobody has driven yet |
 | `laps:=4` | a different number of laps (at least 2) |
 | `fused_speed:=true` | `gap_follow` brakes and accelerates on the IMU-fused speed (`/odom/fused`) instead of the wheel speed. Never more than 0.3 m/s from the wheel speed. **Not yet driven on:** do one normal run first. See [the IMU README](../src/imu_bridge/README.md#in-map_course) |
-| `gyro_odom:=false` | SLAM maps on the steering model instead of the gyro. **Worse on this car.** The default, `true`, maps on **gyro odometry** (`/odom/imu`) and loads `slam_gyro.yaml`, which holds SLAM to the gyro and makes loop closure reachable. Only the map changes: `gap_follow` drives the same either way. |
+| `gyro_odom:=false` | SLAM maps on the steering model instead of the gyro. Car 2's replay measurements found this worse. The default, `true`, maps on **gyro odometry** (`/odom/imu`) and loads `slam_gyro.yaml`. Only the map changes: `gap_follow` drives the same either way. |
 | `imu_lap_turns:=false` | Count laps in the steering model's `odom` instead of `odom_imu`. **Do not use this with the gyro:** a hard turn then reads as a SLAM correction, and laps stop closing. |
 | `imu_all:=true` | Enable `fused_speed` as well. An explicit `false` overrides it. |
 | `analysis:=true` | Run the in-depth reports after the launch exits. They take minutes. |
 | `rebuild:=false` | Skip the map check after the launch exits. A run stopped early then keeps nothing. |
-| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
+| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/<id>/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=false` | Run with no IMU at all: no BNO, no `vehicle_state`, and SLAM on the steering model. Maps worse; only for when the IMU side itself is broken. |
 | `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
 
@@ -209,14 +215,14 @@ Car 1's corrected `imu_all:=true` simulator run `20261029-170502` (recorded on c
 
 ## Finishing the BNO085 calibration
 
-**This takes about 15 minutes and never drives the car.** Battery off is fine: the BNO runs from the Jetson. Nothing else may be using the BNO, so have no `map_course` or `gap_follow` running.
+**This car 2 procedure takes about 15 minutes and never drives the car.** Battery off is fine: the BNO runs from the Jetson. Nothing else may be using the BNO, so have no `map_course` or `gap_follow` running.
 
 Mapping and steering damping do not need this. **`fused_speed:=true` does**, because until the mount yaw is measured the BNO's forward and sideways may be swapped.
 
 **Terminal 1:** the bridge that reads the sensor.
 
 ```bash
-cd ~/imu-calibration
+cd ~/racerbot-ws/tools/imu_calibration
 python3 tools/bno_i2c_bridge.py --pty /tmp/bno085 --no-dyncal
 ```
 
@@ -225,11 +231,11 @@ python3 tools/bno_i2c_bridge.py --pty /tmp/bno085 --no-dyncal
 **Terminal 2:** the mount yaw, about a minute. On level ground, keep the car still for 3 s when it asks, then push it straight forward by hand.
 
 ```bash
-cd ~/imu-calibration
+cd ~/racerbot-ws/tools/imu_calibration
 python3 tools/calibrate_imu.py --imu bno --step mount
 ```
 
-**Working when:** it prints `still for ... s, then push detected` and an `rpy_deg`. Put that `rpy_deg` under `imus: bno:` in `~/imu-calibration/config/car.yaml`.
+**Working when:** it prints `still for ... s, then push detected` and an `rpy_deg`. Put that `rpy_deg` under `imus: bno:` in `src/racerbot_car/cars/rb2/imu/car.yaml`.
 
 **Terminal 2:** the accelerometer, about 5 minutes. Hold the car still in 12 different orientations, about 2 s each: the 6 faces, then tilts in between. It captures each pose by itself.
 
@@ -237,13 +243,13 @@ python3 tools/calibrate_imu.py --imu bno --step mount
 python3 tools/calibrate_imu.py --imu bno --step accel
 ```
 
-**Working when:** it reports 12 poses and writes `calib/bno_calib.json`. Gravity should then read about 9.81 m/s², not 9.65.
+**Working when:** it reports 12 poses and writes `src/racerbot_car/cars/rb2/imu/calib/bno_calib.json`. Gravity should then read about 9.81 m/s², not 9.65.
 
-**Last, with a tape measure:** how far the BNO chip is ahead of the rear axle. Put it in `bno_x_offset` in `src/imu_bridge/config/vehicle_state.yaml` (`0.36` today is car 1's mount), and its position from the car's centre under `position` in `car.yaml`.
+**Last, with a tape measure:** measure how far car 2's BNO chip is ahead of the rear axle and its position from the car's centre. TODO(verify): determine the correct per-car destination for `bno_x_offset` and update `position` in `src/racerbot_car/cars/rb2/imu/car.yaml` after confirming how the calibration tools consume it; do not write car 2's measurement into the shared `vehicle_state.yaml`.
 
 ## Testing the IMU in mapping (A/B)
 
-On car 2 the gyro is already the default, so the "without" run below is the one that needs `gyro_odom:=false`.
+On both cars the gyro is the default, so the "without" run below needs `gyro_odom:=false`.
 
 The question: does SLAM make a better map when its odometry gets its heading from the gyro? The test is two mapping runs of the same course from the same spot, one without and one with `gyro_odom:=true`, both recorded. Everything but the odometry SLAM uses stays the same, so the difference between the two maps is the IMU's.
 
@@ -251,7 +257,7 @@ The question: does SLAM make a better map when its odometry gets its heading fro
 - The car on **battery**, on the track. Mark the start spot and direction with tape.
 - Terminal 1: `ros2 launch f1tenth_stack bringup_launch.py`, left running for every step below.
 
-**1. Check the BNO085 points forward** (once; 2 minutes). Its roll and pitch were set from gravity on 2026-10-24, but which way is "forward" can only be seen while moving.
+**1. Check the BNO085 points forward** (once per car; 2 minutes). Car 2's roll and pitch were set from gravity on 2026-10-29, but which way is "forward" can only be seen while moving.
 
 **Terminal 2:**
 
@@ -267,13 +273,13 @@ ros2 topic echo /imu/bno/data --field linear_acceleration
 
 **Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/racerbot-ws/tools/imu_calibration`. Then `Ctrl+C` terminals 2 and 3.
 
-**2. Run A, today's odometry.** Car on the tape mark. **Terminal 2:**
+**2. Run A, steering odometry.** Car on the tape mark. **Terminal 2:**
 
 ```bash
-ros2 run racerbot_launch map_course
+ros2 run racerbot_launch map_course gyro_odom:=false
 ```
 
-Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/racerbot-ws/data/racerbot_runs/<time>` near the start. Write that folder down as run A.
+Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/racerbot-ws/data/<id>/racerbot_runs/<time>` near the start. Write that folder down as run A.
 
 **3. Run B, gyro odometry.** Put the car back on the tape mark, facing the same way. **Terminal 2:**
 
@@ -286,7 +292,7 @@ ros2 run racerbot_launch map_course gyro_odom:=true
 **4. Compare.** For each run's folder:
 
 ```bash
-python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<time>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/<id>/racerbot_runs/<time>
 ```
 
 **Working when:** it prints three sections: turn rate from each source, the steering lag and turning gain the gyro measured, and how much heading correction SLAM had to apply. Run B should need far less heading correction than run A.
@@ -302,7 +308,7 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 **Terminal 2, first:** check the car really is on the spot. This reads one LiDAR scan and publishes nothing, so it cannot move the car:
 
 ```bash
-ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run>
+ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
 ```
 
 **Working when:** it prints `GO: car is 0.05 m and 2 deg from the start pose`. **If it prints `NO-GO`:** it says how far to move the car. Do this before racing, because the race launch cannot tell: it reports `racing can begin` wherever the car really is.
@@ -311,13 +317,13 @@ ros2 run pure_pursuit check_start --ros-args -p run_dir:=$HOME/racerbot-ws/data/
 
 ```bash
 # pure pursuit (the default racing controller)
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run>
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run>
 # Stanley
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=stanley
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=stanley
 # LQR
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=lqr
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=lqr
 # MPC
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=mpc
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/<id>/racerbot_auto/<run> steering_law:=mpc
 ```
 
 **Working when:** `Particle filter is at the start pose; racing can begin.` appears (the race controller only starts after it), then the car drives the racing line while you hold LB.
@@ -327,8 +333,8 @@ ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racer
 **Forgot the run folder?**
 
 ```bash
-ls -t ~/racerbot-ws/data/racerbot_auto | head -3                    # newest first
-cat ~/racerbot-ws/data/racerbot_auto/<run>/commands.txt             # that run's commands again
+ls -t ~/racerbot-ws/data/<id>/racerbot_auto | head -3                    # newest first
+cat ~/racerbot-ws/data/<id>/racerbot_auto/<run>/commands.txt             # that run's commands again
 ```
 
 **In the simulator** (map, then race without moving the car): pure pursuit, LQR and MPC each raced 128–142 m with no contact. In one run Stanley swerved around something it wrongly took for another car, and brushed a wall. Start with pure pursuit.
@@ -359,15 +365,15 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 ## Record a run and analyse it
 
-**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
+**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/<id>/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
 To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
 
 Afterwards, in **any terminal**:
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<ts>
-python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<ts>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/<id>/racerbot_runs/<ts>
+python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/<id>/racerbot_runs/<ts>
 ```
 
 **Working when:** the second writes `analysis/report.md` in the run folder, explaining every stop. The mapping commands above record a run by themselves. Details: [gap-follow.md, recording a floor run](gap-follow.md#recording-a-floor-run) and [run-analysis.md](run-analysis.md).
@@ -401,9 +407,11 @@ Battery off **last**.
 
 | What | Where |
 |---|---|
-| Maps, racing lines, `commands.txt` from mapping runs | `~/racerbot-ws/data/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
-| The same from the simulator | `~/racerbot-ws/data/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
-| Run recordings (logs, events, optional bag) | `~/racerbot-ws/data/racerbot_runs/<ts>/` |
+| Maps, racing lines, `commands.txt` from mapping runs | `~/racerbot-ws/data/<id>/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
+| The same from the simulator | `~/racerbot-ws/data/<id>/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
+| Run recordings (logs, events, optional bag) | `~/racerbot-ws/data/<id>/racerbot_runs/<ts>/` |
 | Saving those three to GitHub after a session | `tools/save_runs.sh` (see [data/README.md](../data/README.md)) |
 | Speeds and limits for `gap_follow` | `src/gap_follow/config/gap_follow.yaml` |
 | Racing-line limits for mapping runs | `src/pure_pursuit/config/auto_map_race.yaml` |
+
+Each car's physical values are in `src/racerbot_car/cars/<id>/`, including `car.yaml`, `calibration/*.yaml` and `imu/`. Shared configs hold the algorithm tuning used by both cars.
