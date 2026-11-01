@@ -21,32 +21,32 @@ WS = Path(__file__).resolve().parents[3]
 
 # (file, the default it must contain) -- oracle: spec, data/README.md's table.
 EXPECTED = [
-    ('src/race_diagnostics/launch/record_run.py', "'~/racerbot-ws/data/racerbot_runs'"),
+    ('src/race_diagnostics/launch/record_run.py', "str(data_dir('racerbot_runs', car_id))"),
     ('src/pure_pursuit/pure_pursuit/auto_map_race_node.py',
-     "'output_directory', '~/racerbot-ws/data/racerbot_auto'"),
+     "'output_directory', ''"),
     ('src/pure_pursuit/config/auto_map_race.yaml',
-     'output_directory: ~/racerbot-ws/data/racerbot_auto'),
-    ('src/racerbot_launch/launch/auto_map_race_launch.py', "'~/racerbot-ws/data/racerbot_auto'"),
+     "output_directory: ''"),
+    ('src/racerbot_launch/launch/auto_map_race_launch.py', "str(data_dir('racerbot_auto', car_id))"),
     ('src/racerbot_launch/launch/auto_map_race_launch.py',
-     "'output_directory': '~/racerbot-ws/data/racerbot_runs'"),
-    ('src/racerbot_launch/launch/map_course_launch.py', "'~/racerbot-ws/data/racerbot_auto'"),
+     "'output_directory': str(data_dir('racerbot_runs', car_id))"),
+    ('src/racerbot_launch/launch/map_course_launch.py', "str(data_dir('racerbot_auto', car_id))"),
     ('src/racerbot_launch/launch/map_course_launch.py',
-     "'output_directory': '~/racerbot-ws/data/racerbot_runs'"),
+     "'output_directory': str(data_dir('racerbot_runs', car_id))"),
     ('src/racerbot_launch/scripts/map_course',
-     "DEFAULT_OUTPUT = '~/racerbot-ws/data/racerbot_auto'"),
+     "return data_dir('racerbot_auto')"),
     ('src/racerbot_launch/scripts/map_course',
-     "LOG_DIRECTORY = '~/racerbot-ws/data/racerbot_runs'"),
+     "return data_dir('racerbot_runs')"),
     ('src/racerbot_sim/launch/sim_auto_map_race_launch.py',
-     "'~/racerbot-ws/data/racerbot_sim/auto'"),
+     "str(data_dir('racerbot_sim', car_id) / 'auto')"),
     # Bringup's automatic recorder: its node default, its YAML (which bringup
     # loads, so it wins over the node's) and the launch argument bringup
     # forwards as record_output_directory (which wins over both).
     ('src/race_diagnostics/race_diagnostics/auto_record_node.py',
-     "p('output_directory', '~/racerbot-ws/data/racerbot_runs')"),
+     "p('output_directory', '')"),
     ('src/race_diagnostics/config/auto_record.yaml',
-     'output_directory: ~/racerbot-ws/data/racerbot_runs'),
+     "output_directory: ''"),
     ('src/race_diagnostics/launch/auto_record_launch.py',
-     "'record_output_directory', default_value='~/racerbot-ws/data/racerbot_runs'"),
+     "'record_output_directory', default_value=str(data_dir('racerbot_runs', car_id))"),
 ]
 
 OLD_PATH = re.compile(r'\.ros/racerbot_(runs|auto|sim/auto)\b')

@@ -104,7 +104,7 @@ def test_map_course_forwards_opponent_argument(tmp_path, monkeypatch):
     ros2.chmod(ros2.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv('PATH', f'{bin_dir}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setattr(wrapper, '_running', lambda name: name == wrapper.SIM_DRIVER)
-    monkeypatch.setattr(wrapper, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     assert wrapper.main(['opponent_awareness:=true']) == 0
     # oracle: scripts/map_course launch_arguments docstring; approved 2026-10-29:
     # name:=value reaches ros2 launch, with simulated IMU hardware readers off.

@@ -114,7 +114,7 @@ def generate_launch_description():
       facing the same way, before launching. This is what map_course prints.
 
           ros2 launch racerbot_launch race_launch.py \
-              run_dir:=$HOME/racerbot-ws/data/racerbot_auto/20261022-101500 steering_law:=stanley
+              run_dir:=$HOME/racerbot-ws/data/<car>/racerbot_auto/<time> steering_law:=stanley
 
     * Neither: the map named in particle_filter's localize.yaml and
       ``waypoints_file`` (default: pure_pursuit.yaml's), seeded by hand with
@@ -179,7 +179,7 @@ def generate_launch_description():
             if missing:
                 raise RuntimeError(
                     f"run_dir '{run_dir}' is missing {', '.join(missing)}. Pass "
-                    'the directory a mapping run printed (ls ~/racerbot-ws/data/racerbot_auto/).')
+                    'the directory a mapping run printed (data/<car>/racerbot_auto/<time>).')
             localize = [IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(
                     get_package_share_directory('racerbot_launch'),
