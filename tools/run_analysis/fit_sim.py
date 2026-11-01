@@ -42,9 +42,18 @@ def empty_floor() -> str:
     global _FLOOR
     if _FLOOR is None:
         from racerbot_sim import tracks
+        import os
+        import shutil
         directory = ROOT / ".sim" / "fit_sim_floor"
         line = tracks.rounded_rectangle_centerline(27.0, 27.0, 25.0, spacing=0.5)
-        _FLOOR = str(tracks.write_track(directory, "floor", line, 48.0, resolution=0.1).with_suffix(""))
+        # Written beside the floor and renamed into place: worker processes each build it,
+        # and one reading a half-written image crashed sweeps (PIL UnidentifiedImageError).
+        scratch = directory / f".tmp-{os.getpid()}"
+        built = tracks.write_track(scratch, "floor", line, 48.0, resolution=0.1)
+        for item in scratch.iterdir():
+            os.replace(item, directory / item.name)
+        shutil.rmtree(scratch, ignore_errors=True)
+        _FLOOR = str((directory / built.name).with_suffix(""))
     return _FLOOR
 
 
