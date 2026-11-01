@@ -16,15 +16,9 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from odom_calibration import teleop_yaml, vesc_yaml  # noqa: E402
 from racerbot_car.layers import effective_config
-from racerbot_car.paths import cars_dir
 
 REAL = (Path(__file__).resolve().parents[2]
         / 'f1tenth_system' / 'f1tenth_stack' / 'config' / 'joy_teleop.yaml')
-
-
-@pytest.fixture
-def original():
-    return (cars_dir() / 'rb1/calibration/joy_teleop.yaml').read_text(encoding='utf-8')
 
 
 @pytest.fixture
@@ -37,6 +31,11 @@ def effective_teleop(tmp_path):
     path = tmp_path / 'joy_teleop.yaml'
     path.write_text(text, encoding='utf-8')
     return path.read_text(encoding='utf-8')
+
+
+@pytest.fixture
+def original(effective_teleop):
+    return effective_teleop
 
 
 def _profiles(text):
