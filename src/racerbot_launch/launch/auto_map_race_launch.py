@@ -11,9 +11,11 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import effective_values, layered, launch_car_id
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     opponent_arg = DeclareLaunchArgument(
         'opponent_awareness', default_value='false',
         description='Mapping is one car; opponent awareness is for racing. '
@@ -89,6 +91,8 @@ def generate_launch_description():
         get_package_share_directory('gap_follow'), 'config', 'gap_follow.yaml')
     pure_config = os.path.join(
         get_package_share_directory('pure_pursuit'), 'config', 'pure_pursuit.yaml')
+    gap_layers = layered(gap_config, 'gap_follow.yaml', car_id)
+    pure_layers = layered(pure_config, 'pure_pursuit.yaml', car_id)
 
     def mapping_controller(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
@@ -110,13 +114,14 @@ def generate_launch_description():
         speeds = mapping_speed_overrides(
             gap_config,
             LaunchConfiguration('mapping_max_speed').perform(context),
-            LaunchConfiguration('mapping_min_speed').perform(context))
+            LaunchConfiguration('mapping_min_speed').perform(context),
+            defaults=effective_values(gap_layers, 'gap_follow_node'))
         return [Node(
             package='gap_follow',
             executable='gap_follow_node',
             name='gap_follow_node',
             output='screen',
-            parameters=[gap_config, {'enable_opponent_awareness': enabled == 'true',
+            parameters=[*gap_layers, {'enable_opponent_awareness': enabled == 'true',
                          # one car, mapping: no race start (docs/gap-follow.md#launch-boost)
                          'enable_launch_boost': False}, dict(
                 {'drive_topic': '/auto_map/drive'}, **speeds)],
@@ -127,7 +132,7 @@ def generate_launch_description():
         executable='pure_pursuit_node',
         name='pure_pursuit_node',
         output='screen',
-        parameters=[pure_config, {
+        parameters=[*pure_layers, {
             'waypoints_file': '',
             'wait_for_waypoints': True,
             'pose_topic': '/slam_pose',

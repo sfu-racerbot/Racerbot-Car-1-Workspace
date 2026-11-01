@@ -3,11 +3,12 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import car_params, launch_car_id
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     config_path = os.path.join(
         get_package_share_directory('odom_calibration'),
         'config',
@@ -24,7 +25,7 @@ def generate_launch_description():
             executable='calibration_node',
             name='odom_calibration_node',
             output='screen',
-            parameters=[LaunchConfiguration('config')],
+            parameters=car_params('config', config_path, 'odom_calibration.yaml', car_id),
             # The wizard may run under a different Linux account from
             # bringup. Fast DDS shared memory cannot cross that account
             # boundary; UDP keeps discovery and telemetry working for both.

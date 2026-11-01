@@ -72,6 +72,7 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import effective_values, layered, launch_car_id
 
 FUSED_ODOM = '/odom/fused'   # vehicle_state.yaml's fused_odom_topic
 IMU_ODOM_FRAME = 'odom_imu'  # vehicle_state.yaml's imu_odom_frame
@@ -161,6 +162,7 @@ def _wiring(context, imu_probe=None):
 
 
 def generate_launch_description(imu_probe=None):
+    car_id = launch_car_id()
     args = [
         DeclareLaunchArgument(
             'opponent_awareness', default_value='false',
@@ -250,6 +252,7 @@ def generate_launch_description(imu_probe=None):
     )
     gap_config = os.path.join(
         get_package_share_directory('gap_follow'), 'config', 'gap_follow.yaml')
+    gap_layers = layered(gap_config, 'gap_follow.yaml', car_id)
 
     def nodes(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
@@ -261,7 +264,8 @@ def generate_launch_description(imu_probe=None):
         speeds = mapping_speed_overrides(
             gap_config,
             LaunchConfiguration('mapping_max_speed').perform(context),
-            LaunchConfiguration('mapping_min_speed').perform(context))
+            LaunchConfiguration('mapping_min_speed').perform(context),
+            defaults=effective_values(gap_layers, 'gap_follow_node'))
         odom = odom_overrides(LaunchConfiguration('imu').perform(context),
                               LaunchConfiguration('fused_speed').perform(context))
         laps = int(LaunchConfiguration('laps').perform(context))
@@ -272,7 +276,7 @@ def generate_launch_description(imu_probe=None):
         gap_follow = Node(
             package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
             output='screen',
-            parameters=[gap_config, {'enable_opponent_awareness': enabled == 'true',
+            parameters=[*gap_layers, {'enable_opponent_awareness': enabled == 'true',
                          # one car, mapping: no race start (docs/gap-follow.md#launch-boost)
                          'enable_launch_boost': False},
                         dict({'drive_topic': '/auto_map/drive'}, **speeds, **odom)],

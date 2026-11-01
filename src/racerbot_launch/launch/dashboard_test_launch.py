@@ -5,9 +5,11 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from racerbot_car.layers import layered, launch_car_id
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     """Everything the web dashboard can show, minus anything that can move
     the car: LiDAR + UVC webcam stream + the
     dashboard itself, all in one launch, for testing the dashboard/sensors
@@ -38,7 +40,7 @@ def generate_launch_description():
         package='urg_node',
         executable='urg_node_driver',
         name='urg_node',
-        parameters=[sensors_config],
+        parameters=layered(sensors_config, 'sensors.yaml', car_id),
     )
     static_tf_node = Node(
         package='tf2_ros',

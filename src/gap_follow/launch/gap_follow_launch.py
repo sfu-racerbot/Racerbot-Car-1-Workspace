@@ -7,8 +7,9 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
+from gap_follow.launch_speed import speed_cap_overrides
 from gap_follow.launch_imu import select_imu_hardware
+from racerbot_car.layers import effective_values, layered, launch_car_id
 
 
 FUSED_ODOM = '/odom/fused'   # vehicle_state.yaml's fused_odom_topic
@@ -25,11 +26,13 @@ def _flag(name, value):
 
 
 def generate_launch_description(imu_probe=None):
+    car_id = launch_car_id()
     gap_follow_config = os.path.join(
         get_package_share_directory('gap_follow'),
         'config',
         'gap_follow.yaml'
     )
+    config_layers = layered(gap_follow_config, 'gap_follow.yaml', car_id)
 
     opponent_arg = DeclareLaunchArgument(
         'opponent_awareness', default_value='true',
@@ -140,14 +143,14 @@ def generate_launch_description(imu_probe=None):
                         f'{name}:=true{source} needs imu:=true; '
                         f'pass imu:=true or {name}:=false')
         speed = speed_cap_overrides(
-            yaml_parameters(gap_follow_config),
+            effective_values(config_layers, 'gap_follow_node'),
             LaunchConfiguration('max_speed').perform(context))
         actions = [Node(
             package='gap_follow',
             executable='gap_follow_node',
             name='gap_follow_node',
             output='screen',
-            parameters=[gap_follow_config,
+            parameters=[*config_layers,
                         {'enable_opponent_awareness': enabled == 'true',
                          'enable_steering_damping': damping,
                          'enable_adaptive_grip': grip,

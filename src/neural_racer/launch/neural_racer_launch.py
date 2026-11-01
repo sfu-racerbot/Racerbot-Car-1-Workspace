@@ -11,9 +11,11 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from racerbot_car.layers import layered, launch_car_id
 
 
 def generate_launch_description():
+    car_id = launch_car_id()
     config = os.path.join(get_package_share_directory('neural_racer'), 'config', 'neural_racer.yaml')
     args = [
         DeclareLaunchArgument('model_hash', description='approved model hash (required)'),
@@ -25,7 +27,7 @@ def generate_launch_description():
     node = Node(
         package='neural_racer', executable='neural_racer_node', name='neural_racer_node',
         output='screen',
-        parameters=[config, {
+        parameters=[*layered(config, 'neural_racer.yaml', car_id), {
             'model_hash': LaunchConfiguration('model_hash'),
             'shadow': ParameterValue(LaunchConfiguration('shadow'), value_type=bool),
             'max_speed': ParameterValue(LaunchConfiguration('max_speed'), value_type=float),

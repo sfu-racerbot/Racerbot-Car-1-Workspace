@@ -2,6 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>racerbot_launch</name>
+  <exec_depend>racerbot_car</exec_depend>
   <version>0.1.0</version>
   <description>Top-level launch files tying together this car's driver, mapping, and autonomy stack</description>
   <maintainer email="bryanmaubc@gmail.com">racerbotcar-1</maintainer>

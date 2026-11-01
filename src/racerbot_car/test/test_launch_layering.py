@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'src/racerbot_car'))
 from racerbot_car import hardware, identity
 from gap_follow.launch_speed import speed_cap_overrides, yaml_parameters
+from gap_follow.speed_overrides import mapping_speed_overrides
 
 spec = importlib.util.spec_from_file_location('launch_params', ROOT / 'tools/dev/launch_params.py')
 launch_params = importlib.util.module_from_spec(spec)
@@ -27,7 +28,7 @@ EXCLUDED = {'racerbot_a', 'racerbot_b', 'web_dashboards', 'realsense-ros', 'part
 def car(monkeypatch, tmp_path):
     monkeypatch.setenv('RACERBOT_CAR', 'rb1')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(CARS))
-    monkeypatch.setattr(identity, 'read_serial', lambda: None)
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing-serial'))
     monkeypatch.setattr(hardware, 'USB_DEVICES_ROOT', tmp_path / 'usb')
 
 
@@ -112,3 +113,30 @@ def test_inline_overrides_still_last(car):
     params = node(capture('racerbot_launch', 'map_course_launch.py'), '/gap_follow_node')['params']
     # Mapping defaults opponent awareness off, despite the racing YAML.
     assert params['enable_opponent_awareness'] is False
+
+
+def test_map_course_speed_overrides_read_effective_values(car, monkeypatch, tmp_path):
+    cars = tmp_path / 'cars'
+    shutil.copytree(CARS, cars)
+    tuning = cars / 'rb1/tuning/gap_follow.yaml'
+    tuning.parent.mkdir(exist_ok=True)
+    tuning.write_text('gap_follow_node:\n  ros__parameters:\n    corner_speed: 2.6\n')
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
+    defaults = {**yaml_parameters(SHARED), 'corner_speed': 2.6}
+    expected = mapping_speed_overrides(SHARED, '4.0', '', defaults=defaults)
+    assert expected != mapping_speed_overrides(SHARED, '4.0', '')
+    params = node(capture('racerbot_launch', 'map_course_launch.py',
+                          ['mapping_max_speed:=4.0']), '/gap_follow_node')['params']
+    for key, value in expected.items():
+        assert params[key] == value
+
+
+def test_pure_pursuit_launch_defaults_read_effective_values(car, monkeypatch, tmp_path):
+    cars = tmp_path / 'cars'
+    shutil.copytree(CARS, cars)
+    tuning = cars / 'rb1/tuning/pure_pursuit.yaml'
+    tuning.parent.mkdir(exist_ok=True)
+    tuning.write_text('pure_pursuit_node:\n  ros__parameters:\n    steering_law: stanley\n')
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
+    params = node(capture('pure_pursuit', 'pure_pursuit_launch.py'), '/pure_pursuit_node')['params']
+    assert params['steering_law'] == 'stanley'

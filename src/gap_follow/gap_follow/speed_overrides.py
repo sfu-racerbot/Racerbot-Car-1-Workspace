@@ -69,7 +69,7 @@ def _requested(value):
 
 
 def mapping_speed_overrides(config_path, max_speed, min_speed,
-                            node_name='gap_follow_node'):
+                            node_name='gap_follow_node', defaults=None):
     """Parameter overrides that cap gap_follow's speeds self-consistently.
 
     Returns an **empty dict** when no `max_speed` is asked for: the car
@@ -102,7 +102,8 @@ def mapping_speed_overrides(config_path, max_speed, min_speed,
         # scaling. A bare min_speed still passes through.
         return {} if min_speed is None else {'min_speed': min_speed}
 
-    defaults = load_defaults(config_path, node_name)
+    if defaults is None:
+        defaults = load_defaults(config_path, node_name)
     if min_speed is None:
         # No floor asked for, so the config's own floor stands -- but it was
         # chosen against the config's top speed, and a floor above the new
