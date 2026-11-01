@@ -210,6 +210,45 @@ def test_diff_reports_added_removed_changed():
     assert diff_captures(a, b) == ['+ node /new', '- /n old=3', '~ /n servo 0.05 -> 0.15']
 
 
+# oracle: scalar type changes are behavioral differences, including nested values.
+def test_diff_reports_bool_to_int():
+    a = {'nodes': [record('/n', {'x': True})], 'processes': []}
+    b = {'nodes': [record('/n', {'x': 1})], 'processes': []}
+    assert diff_captures(a, b) == ['~ /n x true -> 1']
+
+
+def test_diff_reports_int_to_float():
+    a = {'nodes': [record('/n', {'x': 1})], 'processes': []}
+    b = {'nodes': [record('/n', {'x': 1.0})], 'processes': []}
+    assert diff_captures(a, b) == ['~ /n x 1 -> 1.0']
+
+
+@pytest.mark.parametrize('old, new, expected', [
+    (1, None, '~ /n x 1 -> null'),
+    (None, 1, '~ /n x null -> 1'),
+    (1, '1', '~ /n x 1 -> "1"'),
+])
+def test_diff_reports_value_to_null(old, new, expected):
+    a = {'nodes': [record('/n', {'x': old})], 'processes': []}
+    b = {'nodes': [record('/n', {'x': new})], 'processes': []}
+    assert diff_captures(a, b) == [expected]
+
+
+def test_diff_reports_type_change_inside_list():
+    a = {'nodes': [record('/n', {'x': [{'nested': [True]}]})], 'processes': []}
+    b = {'nodes': [record('/n', {'x': [{'nested': [1]}]})], 'processes': []}
+    assert diff_captures(a, b) == ['~ /n x [{"nested": [true]}] -> [{"nested": [1]}]']
+
+
+def test_diff_reports_type_change_inside_unnamed_blocks():
+    a = {'nodes': [record(None, {})], 'processes': []}
+    a['nodes'][0]['executable'] = 'exe'
+    a['nodes'][0]['blocks'] = {'/**': {'x': [True]}}
+    b = copy.deepcopy(a)
+    b['nodes'][0]['blocks']['/**']['x'] = [1]
+    assert diff_captures(a, b) == ['~ p/exe blocks {"/**": {"x": [true]}} -> {"/**": {"x": [1]}}']
+
+
 def test_diff_ignores_param_files():
     a = {'nodes': [record('/n', {'x': 1}, ['a'])], 'processes': []}
     b = copy.deepcopy(a)

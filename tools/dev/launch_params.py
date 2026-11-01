@@ -358,10 +358,11 @@ def diff_captures(a, b):
         for param in y['params'].keys() - x['params'].keys():
             lines.append(f"+ {name} {param}={value(y['params'][param])}")
         for param in x['params'].keys() & y['params'].keys():
-            if x['params'][param] != y['params'][param]:
+            # JSON retains scalar types recursively (unlike True == 1 == 1.0).
+            if value(x['params'][param]) != value(y['params'][param]):
                 lines.append(f"~ {name} {param} {value(x['params'][param])} -> {value(y['params'][param])}")
         for field in ('remaps', 'deferred', 'blocks'):
-            if x.get(field) != y.get(field):
+            if value(x.get(field)) != value(y.get(field)):
                 lines.append(f"~ {name} {field} {value(x.get(field))} -> {value(y.get(field))}")
     for sign, first, second in [('-', a, b), ('+', b, a)]:
         counts = Counter(json.dumps(p, sort_keys=True) for p in first['processes']) - Counter(json.dumps(p, sort_keys=True) for p in second['processes'])
