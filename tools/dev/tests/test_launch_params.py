@@ -242,3 +242,19 @@ def test_matrix_ids_unique_and_safe():
     assert ids
     assert len(ids) == len(set(ids))
     assert all(re.fullmatch(r'[a-z0-9][a-z0-9._-]*', item) for item in ids)
+
+
+def test_matrix_run_dir_fixture_complete():
+    # oracle: every matrix argument referencing the shared run has both inputs
+    # required by race_launch.py and localize_run_launch.py.
+    matrix = load_matrix(str(ROOT / 'tools/dev/launch_matrix.yaml'))
+    fixture_marker = 'fixtures/launch_params/run_dir'
+    references = [arg for entry in matrix['entries'] for car in ('rb1', 'rb2')
+                  for arg in resolve_args(entry, car, str(ROOT)) if fixture_marker in arg]
+    assert references
+    for arg in references:
+        path = Path(arg.split(':=', 1)[1])
+        directory = path.parent if path.name == 'map.yaml' else path
+        assert directory.is_dir()
+        assert (directory / 'map.yaml').is_file()
+        assert (directory / 'raceline_profiled.csv').is_file()
