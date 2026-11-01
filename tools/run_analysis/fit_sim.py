@@ -30,6 +30,8 @@ if str(SIM) not in sys.path:
     sys.path.insert(0, str(SIM))
 
 from sim_fidelity.bootstrap import bootstrap  # noqa: E402
+from sim_fidelity.calibration import (  # noqa: E402
+    add_car_argument, calibration_for_car, car_from_args)
 
 bootstrap()
 sys.path.insert(0, str(ROOT / "src" / "racerbot_sim"))
@@ -101,14 +103,12 @@ def score(ticks, sim_speed, sim_yaw_rate, motion, skip_s: float = 1.0) -> dict:
                 yaw_rate_rms=float(np.sqrt(np.mean((w - motion.w[keep]) ** 2))))
 
 
-def fit(run, motion, t0: float, t1: float, grid: dict, base=None) -> list:
+def fit(run, motion, t0: float, t1: float, grid: dict, base=None, car_id=None) -> list:
     """Score every combination in ``grid`` ({calibration field: [values]}).
 
     Returns [(score dict, {field: value}), ...] sorted by speed + yaw-rate RMS.
     """
-    from sim_fidelity import CALIBRATION
-
-    base = base or CALIBRATION
+    base = base or calibration_for_car(car_id)
     ticks, commands = resample_commands(run.drive, t0, t1)
     results = []
     names = sorted(grid)
@@ -129,26 +129,28 @@ def main(argv=None) -> int:
     from run_analysis.scan_motion import scan_motion
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("run_dir")
     ap.add_argument("--window", type=int, default=0, help="which LB hold to use (0 = first)")
     ap.add_argument("--grid", action="append", default=[],
                     help="field=v1,v2,... (repeatable), e.g. speed_delay_ticks=1,4,8")
     args = ap.parse_args(argv)
+    car_id = car_from_args(ap, args)
+    base = calibration_for_car(car_id)
     run = load_run(args.run_dir)
     t0, t1 = run.lb_windows()[args.window]
     motion = scan_motion(run, t0, t1)
     grid = {}
     for item in args.grid or ["speed_delay_ticks=1,4,8", "steering_delay_ticks=1,3,5"]:
         name, _, vals = item.partition("=")
-        grid[name] = [type_of(name)(float(v)) for v in vals.split(",")]
-    for s, setting in fit(run, motion, t0, t1, grid)[:10]:
+        grid[name] = [type_of(name, base)(float(v)) for v in vals.split(",")]
+    for s, setting in fit(run, motion, t0, t1, grid, base=base)[:10]:
         print(f"speed RMS {s['speed_rms']:.3f} m/s  yaw-rate RMS {s['yaw_rate_rms']:.3f} rad/s  {setting}")
     return 0
 
 
-def type_of(name: str):
-    from sim_fidelity import CALIBRATION
-    return type(getattr(CALIBRATION, name))
+def type_of(name: str, calibration=None, car_id=None):
+    return type(getattr(calibration or calibration_for_car(car_id), name))
 
 
 if __name__ == "__main__":

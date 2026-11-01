@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from run_analysis import actuation, replay  # noqa: E402
 from run_analysis.runlog import analysis_dir, load_run, read_events  # noqa: E402
 from run_analysis.scan_motion import scan_motion  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 
 
 def parse_overrides(items) -> dict:
@@ -118,9 +119,9 @@ def plot(run, t0, t1, motion, ticks, path):
     plt.close(fig)
 
 
-def analyze(run_dir, overrides=None, refresh=False, yaml_path=None) -> str:
+def analyze(run_dir, overrides=None, refresh=False, yaml_path=None, car_id=None) -> str:
     run = load_run(run_dir, refresh=refresh)
-    params = None
+    params = replay.gap_mirror.node_params(car_id=car_id) if not yaml_path else None
     config_name = "shipped YAML"
     if yaml_path:
         params = replay.gap_mirror.node_params(Path(yaml_path), fill_legacy=True)
@@ -165,6 +166,7 @@ def analyze(run_dir, overrides=None, refresh=False, yaml_path=None) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("run_dir")
     ap.add_argument("--set", action="append", default=[],
                     help="counterfactual replay with this gap_follow parameter changed (repeatable)")
@@ -173,7 +175,8 @@ def main(argv=None) -> int:
                                    "An older file is accepted: parameters it predates take the "
                                    "value that reproduces the old behaviour")
     args = ap.parse_args(argv)
-    print(analyze(args.run_dir, parse_overrides(args.set), args.refresh, args.yaml))
+    car_id = car_from_args(ap, args)
+    print(analyze(args.run_dir, parse_overrides(args.set), args.refresh, args.yaml, car_id))
     return 0
 
 
