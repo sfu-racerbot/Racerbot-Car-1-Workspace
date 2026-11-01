@@ -104,7 +104,7 @@ def test_explicit_car_may_differ_from_machine(tmp_path, monkeypatch, capsys):
     assert selected == 'rb1'
     assert calibration.calibration_for_car(selected).speed_to_erpm_gain == effective_config(
         'vesc.yaml', '/**', 'rb1')['speed_to_erpm_gain']
-    assert 'Machine identity is rb2; explicitly selected rb1' in capsys.readouterr().out
+    assert capsys.readouterr().out == 'Note: machine identity is rb2; explicitly selected rb1.\n'
 
 
 def test_explicit_unknown_car_refuses():

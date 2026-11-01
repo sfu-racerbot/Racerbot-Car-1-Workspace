@@ -28,6 +28,8 @@ def car_profiles(tmp_path, monkeypatch):
 
     base = effective_config('vesc.yaml', '/**', 'rb1')
     directory = tmp_path / 'cars'
+    directory.mkdir(parents=True)
+    (directory / 'machines.yaml').write_text('{}\n')
     values = {}
     for car, gain, angle, accel in (('rb1', 2000.0, 0.2, 3.0),
                                      ('rb2', 4000.0, 0.3, 1.0)):

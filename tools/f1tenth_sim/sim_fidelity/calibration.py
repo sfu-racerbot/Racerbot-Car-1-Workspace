@@ -25,6 +25,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'src/racerbot_car'))
+from racerbot_car import identity  # noqa: E402
 from racerbot_car.identity import UnknownCarError, known_car_ids  # noqa: E402
 from racerbot_car.layers import effective_config  # noqa: E402
 from racerbot_car.paths import cars_dir  # noqa: E402
@@ -388,31 +389,42 @@ for _name in ('speed_to_erpm_gain', 'steering_angle_to_servo_gain',
     PROVENANCE[_name] = (Provenance.DERIVED, "selected car's effective vesc.yaml " + _name)
 
 
-def selected_car(car_id: str | None = None) -> str:
-    """Resolve a tool's explicit selection; tools never infer a default car."""
-    car = car_id or os.environ.get('RACERBOT_CAR')
-    if not car:
-        raise UnknownCarError('pass --car or set RACERBOT_CAR')
-    if car not in known_car_ids(cars_dir()):
-        raise UnknownCarError(f'unknown car {car!r}; pass --car or set RACERBOT_CAR')
-    return car
+def selected_car(car_id: str | None = None, *, note: bool = True) -> str:
+    """Resolve implicit identity strictly; allow known explicit offline targets."""
+    directory = cars_dir()
+    known = known_car_ids(directory)
+    if car_id is None:
+        return identity.current_car_id()
+    if car_id not in known:
+        raise UnknownCarError(f'unknown car {car_id!r}; pass --car or set RACERBOT_CAR')
+    env = dict(os.environ)
+    env.pop(identity.ENV_VAR, None)
+    try:
+        machine_car = identity.resolve_car_id(
+            env, identity.read_serial(identity.SERIAL_PATH),
+            identity.load_machines(directory / 'machines.yaml', known), known)
+    except (UnknownCarError, OSError, ValueError):
+        machine_car = None
+    if note and machine_car and machine_car != car_id:
+        print(f'Note: machine identity is {machine_car}; explicitly selected {car_id}.')
+    return car_id
 
 
 def add_car_argument(parser):
-    parser.add_argument('--car', default=os.environ.get('RACERBOT_CAR'),
+    parser.add_argument('--car', default=None,
                         help='car profile ID (default: $RACERBOT_CAR; required)')
 
 
 def car_from_args(parser, args) -> str:
     try:
-        return selected_car(args.car)
+        return selected_car(args.car) if args.car is not None else selected_car()
     except UnknownCarError as exc:
         parser.error(str(exc))
 
 
 def calibration_for_car(car_id: str | None = None) -> CarCalibration:
     """Build a fresh calibration from the selected car's effective VESC values."""
-    car_id = selected_car(car_id)
+    car_id = selected_car(car_id, note=False)
     vesc = effective_config('vesc.yaml', '/**', car_id)
     throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
     speed_max = vesc['speed_max'] / abs(vesc['speed_to_erpm_gain'])

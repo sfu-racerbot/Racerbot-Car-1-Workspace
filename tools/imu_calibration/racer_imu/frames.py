@@ -28,11 +28,12 @@ ROOT = Path(__file__).resolve().parent.parent
 def default_config_path() -> Path:
     """The selected car's IMU profile; never borrow another car's mount."""
     repo = ROOT.parent.parent
-    profiles = repo / 'src/racerbot_car/cars'
     source = str(repo / 'src/racerbot_car')
     if source not in sys.path:
         sys.path.insert(0, source)
     from racerbot_car.identity import current_car_id, UnknownCarError, CarMismatchError
+    from racerbot_car.paths import cars_dir
+    profiles = cars_dir()
     try:
         car = current_car_id()
     except (UnknownCarError, CarMismatchError, OSError, ValueError) as exc:
