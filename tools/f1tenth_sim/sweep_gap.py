@@ -19,16 +19,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_gap  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 
 
 def _one(job):
-    track, seed, params, timeout, reverse = job
-    return eval_gap.run_track(track, params, seed, timeout, reverse)
+    return eval_gap.run_track(*job)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("--track", default="all")
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--first-seed", type=int, default=12345)
@@ -39,9 +40,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reverse", action="store_true",
                     help="drive each track the other way round (right turns)")
     args = ap.parse_args(argv)
+    car_id = car_from_args(ap, args)
     tracks = eval_gap.select_tracks(args.track)
-    params = eval_gap.parse_set(args.set)
-    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse)
+    params = eval_gap.parse_set(args.set, car_id)
+    jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse, car_id)
             for t in tracks for k in range(args.seeds)]
     for track in tracks:
         eval_gap.track_path(track)  # build layouts once, before forking

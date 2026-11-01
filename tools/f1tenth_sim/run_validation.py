@@ -52,7 +52,9 @@ from gap_follow import gap_logic
 from gap_mirror import GapController, node_params
 from pure_pursuit import racing_math, tracking_laws
 
-from sim_fidelity import CALIBRATION, FidelityPlant, PROFILES
+from sim_fidelity import calibration_for_car, FidelityPlant, PROFILES
+from sim_fidelity.calibration import add_car_argument, car_from_args
+from racerbot_car.layers import effective_config
 from sim_fidelity.calibration import unmeasured as unmeasured_parameters
 from sim_fidelity.plant import DEFAULT_PROFILE, env_components
 
@@ -65,20 +67,11 @@ PURE_PURSUIT_CONFIG = (Path(__file__).resolve().parents[2] / "src" / "pure_pursu
                        / "config" / "pure_pursuit.yaml")
 
 
-def _pure_pursuit_params() -> dict:
-    import yaml
-    data = yaml.safe_load(PURE_PURSUIT_CONFIG.read_text())
-    return data["pure_pursuit_node"]["ros__parameters"]
+def _pure_pursuit_params(car_id=None) -> dict:
+    return effective_config('pure_pursuit.yaml', 'pure_pursuit_node', car_id)
 
 
-PURE_PURSUIT_PARAMS = _pure_pursuit_params()
-CONTROL_DT = 1.0 / float(PURE_PURSUIT_PARAMS["control_rate_hz"])  # 40 Hz
 INTEGRATOR_DT = 0.005
-WHEELBASE = CALIBRATION.wheelbase
-CAR_WIDTH = CALIBRATION.width
-CAR_LENGTH = CALIBRATION.length
-STEERING_LIMIT = float(PURE_PURSUIT_PARAMS["max_steering_angle"])
-LIDAR_OFFSET_X = CALIBRATION.lidar_offset_x
 FORWARD_STOP_CLEARANCE = 0.25
 FORWARD_STOP_FOV = math.radians(60.0)
 TTC_COMMAND_SPEED_TIMEOUT = 0.5
@@ -86,11 +79,6 @@ TTC_COMMAND_FALLBACK_MAX_ODOM_SPEED = 0.10
 GAP_MAX_LATERAL_ACCEL = 1.0
 GAP_MAX_ACCELERATION = 3.0
 GAP_MAX_BRAKING_DECEL = 3.0
-MAX_STEERING_RATE = float(PURE_PURSUIT_PARAMS["max_steering_rate"])
-PURE_MAX_LATERAL_ACCEL = float(PURE_PURSUIT_PARAMS["max_lateral_accel"])
-PURE_MAX_ACCELERATION = float(PURE_PURSUIT_PARAMS["max_acceleration"])
-PURE_MAX_BRAKING_DECEL = float(PURE_PURSUIT_PARAMS["max_braking_decel"])
-PURE_MAX_SPEED = float(PURE_PURSUIT_PARAMS["max_speed"])
 # Mirrors pure_pursuit.yaml's overtake_lookahead_distance. Values at or below
 # max_lookahead (1.5) make the passing line a sharp turn that the curvature
 # speed cap brakes for, and the ego then stalls behind the opponent.
@@ -108,20 +96,54 @@ OPPONENT_RESERVE_DISTANCE = 0.5
 # Which fidelity fixes are in force. Set from --fidelity in main(); the
 # module-level default keeps probe scripts that import this file honest.
 PROFILE = PROFILES[DEFAULT_PROFILE]
-COMPONENTS = env_components(PROFILE, CALIBRATION)
-LIDAR = COMPONENTS["lidar_config"]
+_CAR_ID = None
 
 
-def select_profile(name: str) -> None:
+def select_profile(name: str, car_id=None) -> None:
     """Switch the active fidelity profile, rebuilding what depends on it."""
-    global PROFILE, COMPONENTS, LIDAR
+    global PROFILE, COMPONENTS, LIDAR, CALIBRATION, _CAR_ID
+    global PURE_PURSUIT_PARAMS, CONTROL_DT, WHEELBASE, CAR_WIDTH, CAR_LENGTH
+    global STEERING_LIMIT, LIDAR_OFFSET_X, MAX_STEERING_RATE
+    global PURE_MAX_LATERAL_ACCEL, PURE_MAX_ACCELERATION, PURE_MAX_BRAKING_DECEL, PURE_MAX_SPEED
+    from sim_fidelity.calibration import selected_car
+    _CAR_ID = selected_car(car_id)
+    CALIBRATION = calibration_for_car(_CAR_ID)
+    PURE_PURSUIT_PARAMS = _pure_pursuit_params(_CAR_ID)
+    CONTROL_DT = 1.0 / float(PURE_PURSUIT_PARAMS['control_rate_hz'])
+    WHEELBASE = CALIBRATION.wheelbase
+    CAR_WIDTH = CALIBRATION.width
+    CAR_LENGTH = CALIBRATION.length
+    LIDAR_OFFSET_X = CALIBRATION.lidar_offset_x
+    STEERING_LIMIT = float(PURE_PURSUIT_PARAMS['max_steering_angle'])
+    MAX_STEERING_RATE = float(PURE_PURSUIT_PARAMS['max_steering_rate'])
+    PURE_MAX_LATERAL_ACCEL = float(PURE_PURSUIT_PARAMS['max_lateral_accel'])
+    PURE_MAX_ACCELERATION = float(PURE_PURSUIT_PARAMS['max_acceleration'])
+    PURE_MAX_BRAKING_DECEL = float(PURE_PURSUIT_PARAMS['max_braking_decel'])
+    PURE_MAX_SPEED = float(PURE_PURSUIT_PARAMS['max_speed'])
     PROFILE = PROFILES[name]
     COMPONENTS = env_components(PROFILE, CALIBRATION)
     LIDAR = COMPONENTS["lidar_config"]
 
 
-def make_plant(track: str, num_agents: int, seed: int) -> FidelityPlant:
+def _ensure_config(car_id=None):
+    if car_id is not None or _CAR_ID is None:
+        select_profile(PROFILE.name, car_id)
+
+
+def __getattr__(name):
+    if name in {'CALIBRATION', 'COMPONENTS', 'LIDAR', 'PURE_PURSUIT_PARAMS',
+                'CONTROL_DT', 'WHEELBASE', 'CAR_WIDTH', 'CAR_LENGTH',
+                'STEERING_LIMIT', 'LIDAR_OFFSET_X', 'MAX_STEERING_RATE',
+                'PURE_MAX_LATERAL_ACCEL', 'PURE_MAX_ACCELERATION',
+                'PURE_MAX_BRAKING_DECEL', 'PURE_MAX_SPEED'}:
+        _ensure_config()
+        return globals()[name]
+    raise AttributeError(name)
+
+
+def make_plant(track: str, num_agents: int, seed: int, car_id=None) -> FidelityPlant:
     """Build the environment and wrap it in this car's fidelity layer."""
+    _ensure_config(car_id)
     config = EnvConfig(
         seed=seed,
         map_name=track,
@@ -160,6 +182,7 @@ def plan_initial_pose(plan, shipped_line) -> np.ndarray:
 
 
 def cone_indices(half_angle_rad: float) -> tuple[int, int]:
+    _ensure_config()
     lo = int((-half_angle_rad - LIDAR.angle_min) / LIDAR.angle_increment)
     hi = int((half_angle_rad - LIDAR.angle_min) / LIDAR.angle_increment)
     return max(0, lo), min(LIDAR.num_beams - 1, hi)
@@ -199,6 +222,7 @@ def optimized_raceline(track) -> np.ndarray:
     optimize_raceline defaults to, so what is measured here is what the tool
     would actually produce for this track.
     """
+    _ensure_config()
     key = getattr(track, "spec", None)
     key = getattr(key, "name", None) or id(track)
     if key in _OPTIMIZED_CACHE:
@@ -265,13 +289,16 @@ class PathPlan:
 class CommandShaper:
     """Deterministic equivalent of pure_pursuit_node's final command stage."""
 
-    def __init__(self):
+    def __init__(self, car_id=None):
+        _ensure_config(car_id)
         self.previous_steering = 0.0
         self.previous_speed = 0.0
 
     def command(self, desired_steering: float, desired_speed: float,
-                hard_speed_cap: float = PURE_MAX_SPEED,
+                hard_speed_cap: Optional[float] = None,
                 measured_speed: Optional[float] = None) -> tuple[float, float]:
+        if hard_speed_cap is None:
+            hard_speed_cap = PURE_MAX_SPEED
         if desired_speed <= 0.0 or hard_speed_cap <= 0.0:
             self.previous_steering = desired_steering
             self.previous_speed = 0.0
@@ -308,6 +335,16 @@ class CommandShaper:
         return steering, self.previous_speed
 
 
+class _DefaultVehicleLimits:
+    """Keep the class-level probe API without reading config during import."""
+
+    def __get__(self, instance, owner):
+        _ensure_config()
+        return tracking_laws.VehicleLimits(
+            wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
+            max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
+
+
 class PathFollower:
     """Follows a PathPlan with a pluggable steering law (spec 01).
 
@@ -318,9 +355,7 @@ class PathFollower:
     and increments law_fail_steps, mirroring the node's stop.
     """
 
-    VEHICLE_LIMITS = tracking_laws.VehicleLimits(
-        wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
-        max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
+    VEHICLE_LIMITS = _DefaultVehicleLimits()
 
     def __init__(
         self,
@@ -329,11 +364,22 @@ class PathFollower:
         law=None,
         law_name: str = "pure_pursuit",
         law_params: Optional[dict] = None,
-        min_lookahead: float = float(PURE_PURSUIT_PARAMS["min_lookahead"]),
-        max_lookahead: float = float(PURE_PURSUIT_PARAMS["max_lookahead"]),
-        lookahead_gain: float = float(PURE_PURSUIT_PARAMS["lookahead_speed_gain"]),
+        min_lookahead: Optional[float] = None,
+        max_lookahead: Optional[float] = None,
+        lookahead_gain: Optional[float] = None,
         use_measured_lookahead: bool = True,
+        car_id=None,
     ):
+        _ensure_config(car_id)
+        self.VEHICLE_LIMITS = tracking_laws.VehicleLimits(
+            wheelbase=WHEELBASE, max_steering_angle=STEERING_LIMIT,
+            max_steering_rate=MAX_STEERING_RATE, control_dt=CONTROL_DT)
+        if min_lookahead is None:
+            min_lookahead = float(PURE_PURSUIT_PARAMS['min_lookahead'])
+        if max_lookahead is None:
+            max_lookahead = float(PURE_PURSUIT_PARAMS['max_lookahead'])
+        if lookahead_gain is None:
+            lookahead_gain = float(PURE_PURSUIT_PARAMS['lookahead_speed_gain'])
         self.plan = plan
         self.path_context = plan.path_context()
         self.min_lookahead = min_lookahead
@@ -405,8 +451,10 @@ class PathFollower:
                 float(target_override[0] - car_x), float(target_override[1] - car_y),
                 float(yaw))
             curvature = racing_math.steering_arc_curvature(x_body, y_body)
-            steering = racing_math.steering_from_curvature(curvature, WHEELBASE)
-            steering = float(np.clip(steering, -STEERING_LIMIT, STEERING_LIMIT))
+            limits = self.VEHICLE_LIMITS
+            steering = racing_math.steering_from_curvature(curvature, limits.wheelbase)
+            steering = float(np.clip(steering, -limits.max_steering_angle,
+                                     limits.max_steering_angle))
             return steering, speed_command, nearest, target_index, float(error)
 
         started = time.perf_counter()
@@ -498,6 +546,7 @@ def corridor_offset(scan: np.ndarray) -> Optional[float]:
     "the middle" is not defined there and averaging a made-up number in would
     hide the cases that matter.
     """
+    _ensure_config()
     clean, valid = gap_logic.sanitize_ranges(scan, max_range=10.0, range_min=0.05)
     angles = LIDAR.angle_min + np.arange(
         clean.size, dtype=float) * LIDAR.angle_increment
@@ -512,7 +561,7 @@ def corridor_offset(scan: np.ndarray) -> Optional[float]:
     return (right - left) / 2.0
 
 
-def gap_controller() -> GapController:
+def gap_controller(car_id=None) -> GapController:
     """gap_follow's pipeline (gap_mirror.GapController) with the shipped
     gap_follow.yaml -- the controller the car runs, not a hand-kept copy.
 
@@ -521,13 +570,15 @@ def gap_controller() -> GapController:
     vs 3.5, steering 0.26 vs 0.349, no adaptive width, hysteresis, escape
     creep, swept-path clearance, arc guard or corner setup).
     """
-    params = node_params()
+    _ensure_config(car_id)
+    params = node_params(car_id=_CAR_ID)
     params["enable_centering"] = ENABLE_CENTERING
     return GapController(params, LIDAR)
 
 
 def nearest_valid_range(scan: np.ndarray) -> float:
     """Closest valid return in the forward 180 degrees (the gap window)."""
+    _ensure_config()
     clean, valid = gap_logic.sanitize_ranges(scan, max_range=10.0, range_min=LIDAR.range_min)
     lo, hi = cone_indices(math.pi / 2.0)
     return gap_logic.closest_valid(clean[lo:hi + 1], valid[lo:hi + 1])[1]
@@ -554,7 +605,8 @@ def result_base(
     }
 
 
-def run_gap_solo(track: str, seed: int, timeout_s: float) -> dict:
+def run_gap_solo(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
+    select_profile(PROFILE.name, car_id)
     plant = make_plant(track, 1, seed)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(initial_pose(line, 0).reshape(1, 3))
@@ -693,7 +745,8 @@ def apply_fallback_safety(
 
 def run_pure_solo(track: str, seed: int, timeout_s: float,
                   law_name: str = "pure_pursuit",
-                  law_params: Optional[dict] = None) -> dict:
+                  law_params: Optional[dict] = None, car_id=None) -> dict:
+    select_profile(PROFILE.name, car_id)
     plant = make_plant(track, 1, seed)
     line = plant.env.unwrapped.track.raceline
     plan = PathPlan.from_track(plant.env.unwrapped.track)
@@ -815,7 +868,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     return result
 
 
-def run_pure_traffic(track: str, seed: int, timeout_s: float) -> dict:
+def run_pure_traffic(track: str, seed: int, timeout_s: float, car_id=None) -> dict:
+    select_profile(PROFILE.name, car_id)
     plant = make_plant(track, 2, seed)
     line = plant.env.unwrapped.track.raceline
     opponent_start_index = max(1, int(6.0 / 0.2))
@@ -1115,8 +1169,9 @@ def run_pure_traffic(track: str, seed: int, timeout_s: float) -> dict:
     return result
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_car_argument(parser)
     parser.add_argument(
         "--scenario",
         choices=("all", "gap", "pure", "traffic"),
@@ -1209,7 +1264,9 @@ def parse_args() -> argparse.Namespace:
              "promotion verdicts. Implies --scenario pure. Requires "
              "--fidelity car.",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    args.car = car_from_args(parser, args)
+    return args
 
 
 def _parse_law_params(overrides):
@@ -1231,12 +1288,12 @@ def _parse_law_params(overrides):
     return params
 
 
-def main() -> int:
+def main(argv=None) -> int:
     global ENABLE_CENTERING, RACELINE_SOURCE
-    args = parse_args()
+    args = parse_args(argv)
     ENABLE_CENTERING = not args.no_centering
     RACELINE_SOURCE = args.raceline
-    select_profile(args.fidelity)
+    select_profile(args.fidelity, args.car)
     tracks = args.tracks[:1] if args.quick else args.tracks
     law_params = _parse_law_params(args.law_param)
 
@@ -1257,13 +1314,13 @@ def main() -> int:
     for seed in range(args.seed, args.seed + max(1, args.repeat_seeds)):
         batch: list[dict] = []
         if args.scenario in ("all", "gap"):
-            batch += [run_gap_solo(t, seed, args.timeout) for t in tracks]
+            batch += [run_gap_solo(t, seed, args.timeout, args.car) for t in tracks]
         if args.scenario in ("all", "pure"):
             batch += [run_pure_solo(t, seed, args.timeout,
                                     law_name=args.steering_law,
-                                    law_params=law_params) for t in tracks]
+                                    law_params=law_params, car_id=args.car) for t in tracks]
         if args.scenario in ("all", "traffic"):
-            batch.append(run_pure_traffic(tracks[0], seed, args.timeout))
+            batch.append(run_pure_traffic(tracks[0], seed, args.timeout, args.car))
         for result in batch:
             result["seed"] = seed
             result["raceline"] = RACELINE_SOURCE
@@ -1282,7 +1339,7 @@ def main() -> int:
         # Parameters still inherited from gym rather than justified for this
         # car. Recorded in the report so a stale result cannot quietly claim
         # more authority than it has.
-        "unmeasured_parameters": unmeasured_parameters(),
+        "unmeasured_parameters": unmeasured_parameters(CALIBRATION),
         "passed": all(item["passed"] for item in results),
         "results": results,
     }
@@ -1314,7 +1371,7 @@ def _run_comparison(args, tracks, law_params) -> int:
             for track in tracks:
                 result = run_pure_solo(
                     track, seed, args.timeout,
-                    law_name=law, law_params=law_params)
+                    law_name=law, law_params=law_params, car_id=args.car)
                 result["seed"] = seed
                 result["raceline"] = RACELINE_SOURCE
                 # The verdict is only meaningful on the car fidelity profile.

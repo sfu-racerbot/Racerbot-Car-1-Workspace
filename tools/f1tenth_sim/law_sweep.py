@@ -25,14 +25,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import law_compare  # noqa: E402
 import run_validation as rv  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 
 TRACKS = ("Spielberg", "Silverstone", "BrandsHatch")
 
 
 def _one(job):
-    law, track, seed, params, timeout = job
+    law, track, seed, params, timeout, car_id = job
     result = rv.run_pure_solo(track, seed, timeout, law_name=law,
-                              law_params=params if law != "pure_pursuit" else {})
+                              law_params=params if law != "pure_pursuit" else {}, car_id=car_id)
     result["seed"] = seed
     result["raceline"] = rv.RACELINE_SOURCE
     return result
@@ -41,6 +42,7 @@ def _one(job):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("--laws", nargs="+", required=True)
     ap.add_argument("--tracks", nargs="+", default=list(TRACKS))
     ap.add_argument("--seed", type=int, default=1000)
@@ -53,6 +55,7 @@ def main(argv=None) -> int:
                     help="reuse pure pursuit's rows from this JSON if it matches "
                          "the tracks x seeds, else run them and write it")
     args = ap.parse_args(argv)
+    car_id = car_from_args(ap, args)
 
     params = rv._parse_law_params(args.law_param)
     seeds = list(range(args.seed, args.seed + args.repeat_seeds))
@@ -64,7 +67,7 @@ def main(argv=None) -> int:
         if {(r["track"], r["seed"]) for r in cached} != wanted:
             cached = []
     run_laws = laws[1:] if cached else laws
-    jobs = [(law, t, s, params, args.timeout) for law in run_laws for t in args.tracks for s in seeds]
+    jobs = [(law, t, s, params, args.timeout, car_id) for law in run_laws for t in args.tracks for s in seeds]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = cached + list(pool.map(_one, jobs))
     if args.baseline_cache and not cached:

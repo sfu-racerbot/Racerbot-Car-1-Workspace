@@ -256,8 +256,11 @@ LEGACY_VALUES = {
 
 def node_params(config_path: Path = NODE_CONFIG, fill_legacy: bool = False,
                 car_id: str | None = None) -> dict:
-    """gap_follow_node's ros__parameters from the shipped YAML, minus the
-    ones the mirror has no use for.
+    """Effective current config, or an explicit snapshot exactly as recorded.
+
+    The shipped path uses the selected car's overlays. A separate config path
+    is a historical input and is never overlaid. Remove only parameters the
+    mirror has no use for.
 
     Refuses a config that enables something the mirror does not model, so a
     simulator run can never quietly measure a different controller.
