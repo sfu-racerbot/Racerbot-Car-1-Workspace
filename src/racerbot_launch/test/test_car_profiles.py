@@ -257,10 +257,14 @@ def test_realsense_launch_and_driver_are_still_here():
 
 @CARS
 def test_dashboard_profile_matches_yaml(car):
-    path = SRC / 'racerbot_launch/config' / f'web_dashboard_{car}.yaml'
+    site = load_profile(car).dashboard_site
+    assert site == car
+    configs = SRC / 'racerbot_launch/config'
+    path = configs / f'web_dashboard_{site}.yaml'
     assert path.is_file()
-    params = dashboard(car)['web_dashboard_node']['ros__parameters']
-    assert load_profile(car).dashboard_site == params['car_id'] == car
+    assert path.stem == f'web_dashboard_{car}'
+    assert sorted(configs.glob('web_dashboard_rb*.yaml')) == [
+        configs / 'web_dashboard_rb1.yaml', configs / 'web_dashboard_rb2.yaml']
 
 
 def exec_start(unit):

@@ -19,6 +19,8 @@ class ImuNoise:
     accel_std: float  # m/s^2, per axis
 
 
+# CAR 1'S NOISE, not car 2's: until car 2 records a stationary stretch with
+# its BNO085, the simulator models car 1's sensors (docs/car1-vs-car2.md).
 # Measured run 20261026-194514, bag-relative 3.5..21.3 s, after startup
 # bias in the initial stationary stretch (/odom: 890 samples, max |v| = 0 m/s).
 # Population std after axis-mean removal, averaged across the three axes.
