@@ -18,7 +18,7 @@ real collision that night. The postmortem is at the end.
 
 **Since 2026-10-26, every run of an algorithm is recorded for you.** Start
 bringup the usual way, start any algorithm on top, and a run directory
-appears under `~/.ros/racerbot_runs/` while it runs. You do not need the
+appears under `~/racerbot-ws/data/racerbot_runs/` while it runs. You do not need the
 recorder terminal from the [TL;DR](#tldr) below any more, unless you want
 one for a run that is not an algorithm (manual driving, say).
 
@@ -67,15 +67,24 @@ source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch gap_follow gap_follow_launch.py
 ```
 
-**Working when:** about 3 seconds later, Terminal 1 prints
-`recording /gap_follow_node on /drive -> /home/.../.ros/racerbot_runs/<time>`.
+**Working when:** within about 2 seconds, Terminal 1 prints
+`recording /gap_follow_node on /drive -> /home/.../racerbot-ws/data/racerbot_runs/<time>`.
+
+**Then wait for the second line before you press LB:**
+`recording live: /drive /joy /odom /scan are in the bag, <n> s after the algorithm appeared`.
+From that line on, what the car does is in the recording. Expect it about 3 to 7 seconds
+after the algorithm appears (measured on car 2, 2026-10-31).
+
+The recorder never holds the car back: LB works before that line appears. The
+beginning of the run is just not recorded. If that happens the run says so
+(see `activity` below), and `summarize_run` prints `STARTED LATE`.
 
 When you stop the algorithm with `Ctrl+C`, about 3 seconds later Terminal 1
 prints `saved run ... (<seconds> s, bag <size> MB)` and the command to
 analyse it:
 
 ```bash
-python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/<time>
+python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<time>
 ```
 
 **If it says** `another recorder is on the graph (...): not recording it`:
@@ -86,7 +95,12 @@ that is correct. Something else (a `record_run.py` you started, or the one
 
 **Disk use:** about 0.8 MB per second of driving (3 GB an hour), almost all
 of it [LiDAR](glossary.md#lidar) scans. Nothing deletes old runs. It refuses to start a recording
-with less than 2 GB free, and says so in Terminal 1.
+with less than 2 GB free, and says so in Terminal 1 and in `auto_record.log`.
+
+**To see what it decided,** read `data/racerbot_runs/auto_record.log`. It keeps one
+line for every start, stop, refusal and late start, across sessions. This is the
+place to look when a run you expected is not there. The same lines are in
+`~/.ros/log/python3_<pid>_*.log`, which is hard to find and is not saved with the runs.
 
 ### What a run directory holds, beyond the usual
 
@@ -95,12 +109,31 @@ plus three files only automatic runs have:
 
 | File | What it says |
 |---|---|
-| `auto_record.yaml` | Which node started the recording and on which topic, when it started and stopped, why it stopped (`no algorithm publishing for 3.0 s`, `another recorder started: ...`, `bringup shut down`), and whether the bag closed cleanly (`recorder_exit_code: 0`) |
+| `auto_record.yaml` | Which node started the recording and on which topic, when it started and stopped, and why it stopped (`no algorithm publishing for 3.0 s`, `another recorder started: ...`, `bringup shut down`). See the fields below for how to tell whether it went well |
 | `metadata/processes.txt` | The command line of every ROS process running when it started: which [launch file](glossary.md#launch-file), which executable, which params files. This is how you tell team A's code from ours later |
 | `recorder.log` | `record_run.py`'s own output, for when a recording went wrong |
 
 `metadata/git/` also holds `racerbot_a.txt` and `racerbot_a.diff`: team A's
 commit and uncommitted edits. That holds whether the run was theirs or ours.
+
+**How to tell whether a recording went well.** These are the `auto_record.yaml`
+fields to check. `summarize_run` prints a `Recording problems` section if any of them is bad.
+
+| Field | Good value | What a bad value means |
+|---|---|---|
+| `recorder_failures` | `[]` | These recording processes died. Check this one first: `recorder_exit_code` stays `0` even when a process under it dies |
+| `bag_exit_code` | `0` | The bag did not close normally |
+| `recorder_killed` | `false` | It did not stop within 15 s and was killed. The bag may need `ros2 bag reindex` |
+| `bag_live_sec` | Under about 7 | Seconds from the algorithm appearing to the bag listening, as seen on the graph. Missing means it never got that far |
+| `activity.started_late` | `false` | The car was already moving at the bag's first `/odom`, so **the start of the run is not in the bag** |
+| `activity.moved` | `true` | The car never moved. `null` means the bag has no `/odom`, so it is unknown |
+| `superseded` | absent | Another recorder replaced this one within 10 s, so this run is only a stub |
+
+`activity` also has `first_odom_speed_mps`, `max_speed_mps` and `lb_held_fraction`.
+It appears a few seconds after the run stops, because `run_activity` reads the closed bag at low priority.
+
+`tools/save_runs.sh` lists the runs where the car never moved and the stubs before
+committing. `tools/save_runs.sh --skip-idle` leaves those uncommitted. Nothing deletes them.
 
 <details>
 <summary><b>How it decides, and every setting</b> (click to expand). Skip unless you're changing it.</summary>
@@ -115,11 +148,12 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    ignore list. `ackermann_mux` and `ackermann_to_vesc_node` are there
    because they publish the motor command topics all the time, as part of
    bringup. `rosbag2_player` is there because it is a bag being played back.
-2. An algorithm that has been up for `start_delay_sec` (3 s) starts a
+2. An algorithm that has been up for `start_delay_sec` (1.5 s) starts a
    recording, unless another recorder is on the graph. The delay gives a
    launch that brings its own recorder (`map_course`) time to get it up:
    measured on the car, `map_course`'s recorder appears about 1 s after its
-   algorithm.
+   algorithm. If one still arrives later, the recording stops and is labelled
+   `superseded: true`.
 3. **Another recorder** is any node named `race_diag_node` or
    `rosbag2_recorder*`. The recording `auto_record` starts is
    `record_run.py` run with `name_prefix:=auto_`, so its own nodes are
@@ -132,10 +166,45 @@ file has no ROS in it and is tested in `test/test_auto_record.py`.
    algorithm has gone and come back, so a broken recorder cannot restart in
    a loop.
 
+**Why the bag is started separately.** Starting a recording starts `ros2 bag record`
+first and on its own, and `record_run.py` with `record_bag:=false` only once the bag
+is live (or after 5 s). Measured on the Jetson on 2026-10-31:
+
+| How the bag is started | Start of recording to topics subscribed |
+|---|---|
+| Through `record_run.py`, as it was | 5.4 to 5.9 s |
+| Beside `record_run.py`, both at once | Slower than alone: the two compete for the CPU |
+| Alone | 1.4 to 2.6 s in that timing run; up to about 4 s in the test suite |
+
+On 2026-10-30, with the 3 s delay and the first row, the bag began about 9 to 10 s after
+the launch command, and two runs (`20261030-183134`, `-184149`) were already moving at
+2.3 and 3.5 m/s at their first `/odom`.
+
+**How much of a run's start the bag misses now.** This is from the algorithm's first
+message to the bag's first message, measured on the Jetson on 2026-10-31 with two small test topics:
+
+| Recorder | Missed | Median | Runs |
+|---|---|---|---|
+| Before this change | 5.45 to 7.0 s | about 6.6 s | 4 |
+| Now | 2.95 to 6.9 s | about 4 s | 8 |
+
+The typical run improved by about 2.5 s, **but the worst case barely moved**. The cost is the
+1.5 s delay, about 1 s of `ros2 bag` startup, and 0.3 to 2.7 s for ROS discovery to
+find the topics. So **wait for the `recording live` line if the start matters**.
+
+Only an always-running recorder could remove that discovery wait. It was left out on purpose: it
+would keep a process subscribed to every topic all the time, including during manual driving.
+
 Stopping is designed not to lose the bag:
 
 - On bringup's `Ctrl+C`, `auto_record` closes the recording first (up to
   `stop_timeout_sec`, 15 s) and only then exits.
+- The bag gets its stop signal at once. `record_run.py` gets its signal once
+  `race_diag_node` has written `events.jsonl` (or after 8 s), because a `ros2 launch`
+  signalled while still starting its processes can hang until it is killed.
+- `ros2 launch` can also hang at exit with all its children gone. `record_run.py`
+  therefore exits on its own 18 s after shutdown begins. A normal stop that hits this
+  still reports `recorder_killed: true` after 15 s, though the bag is fine (`bag_exit_code: 0`).
 - If `auto_record` is killed outright, the recording still gets `SIGINT` from
   the kernel (`setpriv --pdeathsig`) and closes its bag.
 - The recording runs in its own process session, so killing it as a last
@@ -144,21 +213,24 @@ Stopping is designed not to lose the bag:
 All settings are in `src/race_diagnostics/config/auto_record.yaml`, each
 commented there. They are `trigger_topics`, `ignore_publishers`,
 `other_recorders`, `start_delay_sec`, `stop_delay_sec`, `poll_period_sec`,
-`record_bag`, `topics` (empty means the same topic list as `record_run.py`),
+`record_bag`, `live_topics`, `topics` (empty means the same topic list as `record_run.py`),
 `min_free_gb` and `stop_timeout_sec`.
 
-Recordings go to `~/.ros/racerbot_runs`. Pass
+Recordings go to `~/racerbot-ws/data/racerbot_runs`. Pass
 `record_output_directory:=<dir>` to bringup to send them elsewhere.
 
-**Tests.** Three files cover it:
+**Tests.** These files cover it:
 
 - `test_auto_record.py`: the decisions, no ROS.
+- `test_run_activity.py`: what `activity` says about a run, no ROS.
+- `test_save_runs.py`: `tools/save_runs.sh` against a throwaway git repository, no ROS.
 - `test_bringup_auto_record.py`: every bringup includes the recorder, on by
   default and off with `record:=false`, and a missing `race_diagnostics`
   cannot stop bringup.
 - `test_auto_record_node.py`: the real node on an isolated ROS domain. It
   records, closes the bag, defers to another recorder and survives being
-  killed. It takes about a minute.
+  killed. It also judges how much of a run's start the bag misses, from the bag's
+  own first message. It takes about two minutes.
 
 The last one needs ROS sourced. **Any terminal:**
 
@@ -186,10 +258,10 @@ ros2 launch race_diagnostics record_run.py
 # --- Terminal 2: the driving stack. Note the `| tee` (optional, see below). ---
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
 ros2 launch racerbot_launch auto_map_race_launch.py \
-  2>&1 | tee ~/.ros/racerbot_runs/<the-dir-it-printed>/launch.log
+  2>&1 | tee ~/racerbot-ws/data/racerbot_runs/<the-dir-it-printed>/launch.log
 
 # --- Terminal 3 (optional): live high-signal view of terminal 2 ---
-ros2 run race_diagnostics filter_log ~/.ros/racerbot_runs/<dir>/launch.log
+ros2 run race_diagnostics filter_log ~/racerbot-ws/data/racerbot_runs/<dir>/launch.log
 ```
 
 > **`auto_map_race_launch.py` already starts this for you.** It runs the probe by default (`diagnostics:=true`), so a one-command map-and-race run leaves a machine-readable record without a second terminal. The rosbag stays off there unless you pass `record_bag:=true`. Everything below still applies to any other workflow.
@@ -197,7 +269,7 @@ ros2 run race_diagnostics filter_log ~/.ros/racerbot_runs/<dir>/launch.log
 Afterwards:
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<dir>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir>
 ```
 
 **`| tee` is no longer strictly required, but is still the simplest option.**
@@ -225,7 +297,9 @@ months, and nothing prunes them.)*
 
 ## What gets captured, and why each piece earns its place
 
-One timestamped directory per run under `~/.ros/racerbot_runs/`:
+One timestamped directory per run under `~/racerbot-ws/data/racerbot_runs/`. That folder is inside the git repo on purpose, so runs can be committed and pushed. After a session, run `tools/save_runs.sh` to do both ([data/README.md](../data/README.md)).
+
+The bag is split into 50 MB files (`bag/bag_0.mcap`, `bag_1.mcap`, ...) because GitHub refuses any file over 100 MB. You never open those files one at a time: `ros2 bag play <run>/bag` and the analysis tools read the whole `bag/` folder as one recording.
 
 | Artifact | Produced by | Answers |
 |---|---|---|
@@ -239,7 +313,7 @@ One timestamped directory per run under `~/.ros/racerbot_runs/`:
 | `metadata/files/` | `record_run.py` at start | Copies of imu-calibration's `car.yaml` and calibration JSONs: the IMU mounts and calibration, which no ROS parameter holds |
 | `metadata/packages.txt` | `record_run.py` at start | The installed version of every `ros-jazzy-*` apt package, with `slam_toolbox` listed first. Git state cannot say which `slam_toolbox` ran, because it is apt-installed, not code in this repo — so this file is the answer to "did a package upgrade change SLAM" |
 | `metadata/submodules.txt` | `record_run.py` at start | For each submodule in `.gitmodules` — team A's `src/racerbot_a` and B's `src/racerbot_b` included — the commit that was checked out, the commit the workspace itself records for it, and whether it is dirty. A `MOVED: <path>` line at the end names any submodule whose checked-out commit differs from what the workspace expects, which usually means someone advanced it without committing the change in the main repo |
-| `metadata/params/` | `snapshot_params`, from 15 s in and every 2 s for the whole run | Each node's parameters in `ros2 param dump` YAML format (usable as `--params-file`). A node that starts later gets a file when it appears. A restarted node gets `<name>.<n>.yaml`. Namespaced nodes use `ns__name.yaml`; names that collide get `~2`, `~3`, and so on before any restart number. Later parameter changes are in the bag's `/parameter_events` |
+| `metadata/params/` | `snapshot_params`, from 3 s in and every 2 s for the whole run | Each node's parameters in `ros2 param dump` YAML format (usable as `--params-file`). A node that starts later gets a file when it appears. A restarted node gets `<name>.<n>.yaml`. Namespaced nodes use `ns__name.yaml`; names that collide get `~2`, `~3`, and so on before any restart number. Later parameter changes are in the bag's `/parameter_events` |
 | `map.pgm` / `map.yaml` | `slam_toolbox` save | The map as SLAM saw it |
 | `raceline_*.csv` | `auto_map_race_node` | The line that was generated and driven. `raceline_raw.csv` is the unmodified recording and is written even when the cleanup *refuses* the run, so a refusal can be plotted against the map |
 
@@ -289,7 +363,7 @@ Because "what did the car actually see at the moment it hit the wall" is
 not answerable from log text. The bag makes a run replayable:
 
 ```bash
-ros2 bag play ~/.ros/racerbot_runs/<dir>/bag --clock
+ros2 bag play ~/racerbot-ws/data/racerbot_runs/<dir>/bag --clock
 ```
 
 `/scan` is ~90% of the size. Drop it for a 10× smaller bag if you only
@@ -305,7 +379,7 @@ ros2 launch race_diagnostics record_run.py \
 To read them back:
 
 ```bash
-ros2 bag play ~/.ros/racerbot_runs/<dir>/bag --clock &
+ros2 bag play ~/racerbot-ws/data/racerbot_runs/<dir>/bag --clock &
 ros2 topic echo /parameter_events
 ```
 
@@ -316,8 +390,8 @@ Keep `/parameter_events` in the list if you pass your own `topics:=`, as above.
 ## Reading the results
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<dir>
-ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<dir> --json   # for an agent
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<dir> --json   # for an agent
 ```
 
 It reports, in the order that matters:
@@ -855,7 +929,7 @@ then automatic handover to pure pursuit]
 [e.g. handover completed, car accelerated, then hit a wall on the left]
 
 ## Recorded evidence
-Run directory: ~/.ros/racerbot_runs/<dir>
+Run directory: ~/racerbot-ws/data/racerbot_runs/<dir>
 - launch.log       full terminal output of every node
 - events.jsonl     probe stream: pipeline state + pose lag
 - bag/             replayable with `ros2 bag play <dir>/bag --clock`

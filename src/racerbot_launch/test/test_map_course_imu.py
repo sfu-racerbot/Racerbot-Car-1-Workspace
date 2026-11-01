@@ -376,5 +376,5 @@ def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested
                 entity.execute(ctx)
 
     visit(ld.entities)
-    assert recorded == ['~/.ros/racerbot_runs']
-    assert supervisors == [requested or '~/.ros/racerbot_auto']
+    assert recorded == ['~/racerbot-ws/data/racerbot_runs']
+    assert supervisors == [requested or '~/racerbot-ws/data/racerbot_auto']
