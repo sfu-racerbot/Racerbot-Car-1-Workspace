@@ -1,0 +1,76 @@
+entries:
+  - {id: gap_follow-default, package: gap_follow, launch: gap_follow_launch.py, args: []}
+  - {id: gap_follow-no-opponent, package: gap_follow, launch: gap_follow_launch.py, args: ['opponent_awareness:=false']}
+  - {id: gap_follow-no-boost, package: gap_follow, launch: gap_follow_launch.py, args: ['launch_boost:=false']}
+  - {id: gap_follow-fused, package: gap_follow, launch: gap_follow_launch.py, args: ['fused_speed:=true']}
+  - {id: imu-ekf-shadow, package: imu_bridge, launch: imu_ekf_shadow_launch.py, args: []}
+  - {id: imu-vehicle-state, package: imu_bridge, launch: vehicle_state_launch.py, args: []}
+  - {id: imu-bridge, package: imu_bridge, launch: imu_bridge_launch.py, args: []}
+  - {id: auto-record, package: race_diagnostics, launch: auto_record_launch.py, args: []}
+  - {id: record-run, package: race_diagnostics, launch: record_run.py, args: []}
+  - {id: neural-racer, package: neural_racer, launch: neural_racer_launch.py, args: ['model_hash:=capture-placeholder']}
+  - {id: waypoint-recorder, package: pure_pursuit, launch: waypoint_recorder_launch.py, args: []}
+  - {id: pure-pursuit, package: pure_pursuit, launch: pure_pursuit_launch.py, args: []}
+  - {id: odom-calibration, package: odom_calibration, launch: odom_calibration_launch.py, args: []}
+  - {id: sim-bringup, package: racerbot_sim, launch: sim_bringup_launch.py, args: []}
+  - {id: sim-auto-map, package: racerbot_sim, launch: sim_auto_map_race_launch.py, args: []}
+  - {id: sim-auto-map-dashboard, package: racerbot_sim, launch: sim_auto_map_race_launch.py, args: ['dashboard:=true']}
+  - {id: sim-race, package: racerbot_sim, launch: sim_race_launch.py, args: []}
+  - id: localize-run
+    package: racerbot_launch
+    launch: localize_run_launch.py
+    args: []
+    args_by_car:
+      rb1: ['map_yaml:={data:racerbot_auto}/20261026-194514-clean/map.yaml']
+      rb2: ['map_yaml:={data:racerbot_auto}/20261030-185036-fixed/map.yaml']
+  - {id: auto-map-race, package: racerbot_launch, launch: auto_map_race_launch.py, args: []}
+  - {id: auto-map-speed, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['mapping_max_speed:=1.5']}
+  - {id: auto-map-no-diagnostics, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['diagnostics:=false']}
+  - {id: auto-map-bag, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['record_bag:=true']}
+  - {id: auto-map-no-bringup, package: racerbot_launch, launch: auto_map_race_launch.py, args: ['include_bringup:=false']}
+  - {id: slam, package: racerbot_launch, launch: slam_launch.py, args: []}
+  - {id: dashboard-test, package: racerbot_launch, launch: dashboard_test_launch.py, args: []}
+  - {id: webcam, package: racerbot_launch, launch: webcam_launch.py, args: [], cars: [rb1]}
+  - id: race
+    package: racerbot_launch
+    launch: race_launch.py
+    args: []
+    args_by_car:
+      rb1: ['run_dir:={data:racerbot_auto}/20261026-194514-clean']
+      rb2: ['run_dir:={data:racerbot_auto}/20261030-185036-fixed']
+  - id: race-stanley
+    package: racerbot_launch
+    launch: race_launch.py
+    args: ['steering_law:=stanley']
+    args_by_car:
+      rb1: ['run_dir:={data:racerbot_auto}/20261026-194514-clean']
+      rb2: ['run_dir:={data:racerbot_auto}/20261030-185036-fixed']
+  - id: race-lqr
+    package: racerbot_launch
+    launch: race_launch.py
+    args: ['steering_law:=lqr']
+    args_by_car:
+      rb1: ['run_dir:={data:racerbot_auto}/20261026-194514-clean']
+      rb2: ['run_dir:={data:racerbot_auto}/20261030-185036-fixed']
+  - id: race-mpc
+    package: racerbot_launch
+    launch: race_launch.py
+    args: ['steering_law:=mpc']
+    args_by_car:
+      rb1: ['run_dir:={data:racerbot_auto}/20261026-194514-clean']
+      rb2: ['run_dir:={data:racerbot_auto}/20261030-185036-fixed']
+  - {id: dashboard, package: racerbot_launch, launch: dashboard_launch.py, args: []}
+  - {id: map-course, package: racerbot_launch, launch: map_course_launch.py, args: []}
+  - {id: autonomous-mapping, package: racerbot_launch, launch: autonomous_mapping_launch.py, args: []}
+  - {id: mouse-teleop, package: mouse_teleop, launch: mouse_teleop.launch.py, args: []}
+  - {id: joy-teleop-example, package: joy_teleop, launch: example.launch.py, args: []}
+  - {id: vesc-driver, package: vesc_driver, launch: vesc_driver_node.launch.py, args: []}
+  - {id: ackermann-mux, package: ackermann_mux, launch: ackermann_mux_launch.py, args: []}
+  - {id: no-lidar-bringup, package: f1tenth_stack, launch: no_lidar_bringup_launch.py, args: []}
+  - {id: bringup, package: f1tenth_stack, launch: bringup_launch.py, args: []}
+  - {id: bringup-no-record, package: f1tenth_stack, launch: bringup_launch.py, args: ['record:=false']}
+  - {id: teleop, package: f1tenth_stack, launch: teleop_launch.py, args: []}
+  - {id: sick-bringup, package: f1tenth_stack, launch: sick_bringup_launch.py, args: []}
+  - {id: wiimote-driver, package: racerbot_wiimote_driver, launch: wiimote_driver_launch.py, args: []}
+  - {id: wiimote-teleop, package: racerbot_wiimote_driver, launch: wiimote_teleop_launch.py, args: []}
+excluded: []
