@@ -10,9 +10,11 @@ Every root path is a parameter, so tests run against a fake tree in
 tmp_path.
 """
 import os
+import socket
+import subprocess
 
 from . import car
-from .snapshot import Process, Snapshot, UsbDevice
+from .snapshot import NetIface, Process, Snapshot, UsbDevice
 
 
 def _read(path, default=''):
@@ -115,13 +117,66 @@ def _symlink(dev_root, rel):
     return os.path.realpath(link), os.access(link, os.R_OK | os.W_OK)
 
 
-def gather(*, sys_root='/sys', dev_root='/dev', proc_root='/proc', env=None):
+def parse_ip_addr(text):
+    """`ip -o -4 addr` -> {iface: ['a.b.c.d/nn', ...]}"""
+    out = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or parts[2] != 'inet' or not parts[0].endswith(':'):
+            continue
+        out.setdefault(parts[1], []).append(parts[3])
+    return out
+
+
+def read_carrier(sys_root, iface):
+    """True/False from carrier; None if missing or administratively down."""
+    value = _read(os.path.join(sys_root, 'class/net', iface, 'carrier'), None)
+    if value == '1':
+        return True
+    if value == '0':
+        return False
+    return None
+
+
+def _run_quiet(run, argv, timeout):
+    try:
+        return run(argv, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _gather_network(spec, snap, sys_root, run, connect, probe_lidar_tcp):
+    ip = _run_quiet(run, ['ip', '-o', '-4', 'addr'], 2.0)
+    addrs = parse_ip_addr(ip.stdout) if ip is not None else {}
+    for name in set(addrs) | {spec.iface}:
+        snap.ifaces[name] = NetIface(name, read_carrier(sys_root, name),
+                                     addrs.get(name, []))
+    ping = _run_quiet(run, ['ping', '-c', '1', '-W', '1', spec.ip], 3.0)
+    snap.lidar_ping = None if ping is None else ping.returncode == 0
+    if probe_lidar_tcp == 'auto':
+        # Never open a second session to a sensor the driver owns.
+        probe_lidar_tcp = not any(p.runs(car.EXE_URG) for p in snap.processes)
+    if probe_lidar_tcp:
+        try:
+            s = connect((spec.ip, spec.port), timeout=1.0)
+            s.close()
+            snap.lidar_tcp = True
+        except OSError:
+            snap.lidar_tcp = False
+
+
+def gather(*, spec=car.RB1, sys_root='/sys', dev_root='/dev', proc_root='/proc',
+           env=None, run=subprocess.run, connect=socket.create_connection,
+           probe_lidar_tcp='auto'):
     snap = Snapshot(env=dict(os.environ if env is None else env))
     snap.usb = read_usb_devices(sys_root)
     snap.processes = read_processes(proc_root)
 
     snap.vesc_symlink, snap.vesc_symlink_rw = _symlink(dev_root, car.VESC_SYMLINK)
-    snap.lidar_symlink, snap.lidar_symlink_rw = _symlink(dev_root, car.LIDAR_SYMLINK)
+    if isinstance(spec.lidar, car.SerialLidarSpec):
+        snap.lidar_symlink, snap.lidar_symlink_rw = _symlink(dev_root, spec.lidar.symlink)
+    elif isinstance(spec.lidar, car.EthernetLidarSpec):
+        _gather_network(spec.lidar, snap, sys_root, run, connect, probe_lidar_tcp)
 
     ttys = [os.path.join(dev_root, t) for d in snap.usb for t in d.ttys]
     ttys += [t for t in (snap.vesc_symlink, snap.lidar_symlink) if t]
@@ -132,7 +187,8 @@ def gather(*, sys_root='/sys', dev_root='/dev', proc_root='/proc', env=None):
             snap.input_readable[node] = os.access(
                 os.path.join(dev_root, 'input', node), os.R_OK)
 
-    cam = os.path.join(dev_root, car.CAMERA_DEVICE)
-    if os.path.exists(cam):
-        snap.camera_device = os.access(cam, os.R_OK | os.W_OK)
+    if isinstance(spec.camera, car.UvcCameraSpec):
+        cam = os.path.join(dev_root, spec.camera.device)
+        if os.path.exists(cam):
+            snap.camera_device = os.access(cam, os.R_OK | os.W_OK)
     return snap

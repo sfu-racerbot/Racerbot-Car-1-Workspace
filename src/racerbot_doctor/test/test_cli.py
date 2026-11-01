@@ -33,12 +33,13 @@ def _run(argv, snap, live=None, sample_exc=None):
         calls['gather'].append(kw)
         return snap
 
-    def sample(window_s):
+    def sample(window_s, **kw):
         calls['sample'].append(window_s)
         if sample_exc:
             raise sample_exc
         return live
 
+    argv = argv if '--car' in argv else ['--car', 'rb1', *argv]
     code = main(argv, gather_fn=gather, sample_fn=sample, out=out)
     return code, out.getvalue(), calls
 
@@ -112,7 +113,7 @@ def test_gather_crash_exits_two():
 
     def gather(**kw):
         raise PermissionError('/proc')
-    assert main([], gather_fn=gather, sample_fn=None, out=out) == 2
+    assert main(['--car', 'rb1'], gather_fn=gather, sample_fn=None, out=out) == 2
     assert 'PermissionError' in out.getvalue()
 
 
@@ -120,7 +121,8 @@ def test_gather_takes_no_lidar_probe_option():
     # Car 1's LiDAR is a USB tty: there is no TCP probe to opt into, and
     # the doctor never opens a tty (system.py).
     _, _, calls = _run([], healthy_snap(), healthy_live())
-    assert calls['gather'] == [{}]
+    from racerbot_car.profile import load_profile
+    assert calls['gather'] == [{'spec': car.spec_for(load_profile('rb1'))}]
 
 
 def test_teleop_alone_still_samples_the_graph():
@@ -191,3 +193,28 @@ def test_package_never_publishes_or_opens_device_nodes():
                     hits.append(f'{path.name}:{n}: {line.strip()}')
     assert hits == []
     assert len(list(PKG.glob('*.py'))) >= 7    # the scan saw the package
+
+
+def test_car_override_selects_rb2_ladders(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    from test_rb2_checks import healthy_snap as rb2_snap, live
+    code, text, _ = _run(['--car', 'rb2', '--no-color'], rb2_snap(), live())
+    assert code == 0
+    assert 'Ethernet link' in text and 'realsense2_camera_node' in text
+    assert '/dev/sensors/hokuyo' not in text
+
+
+def test_identity_resolution_and_refusal(monkeypatch):
+    from racerbot_car import identity
+    monkeypatch.setattr(identity, 'SERIAL_PATH', '/nonexistent/doctor-test-serial')
+    out = io.StringIO()
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    assert main(['--no-live'], gather_fn=lambda **kw: healthy_snap(), out=out) == 0
+    assert '/dev/sensors/hokuyo' in out.getvalue()
+    monkeypatch.delenv('RACERBOT_CAR')
+    out = io.StringIO()
+    assert main([], out=out) == 2
+    assert 'RACERBOT_CAR' in out.getvalue() and '--car' in out.getvalue()
+    out = io.StringIO()
+    assert main(['--car', 'unknown'], out=out) == 2
+    assert 'rb1' in out.getvalue() and 'rb2' in out.getvalue()

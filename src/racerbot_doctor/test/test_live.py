@@ -155,3 +155,25 @@ def test_nothing_on_the_graph_is_empty_not_an_error():
     assert all(st.count == 0 for st in live.topics.values())
     assert live.laser_tf is None
     assert live.joy_lb_held == 0 and live.motor_nonzero == 0
+
+
+def test_rb2_results_include_camera_topic(fake_car):
+    from racerbot_car.profile import load_profile
+    from sensor_msgs.msg import Image
+    node, _ = fake_car
+    topics = dict(TOPICS, camera='/test_only/camera')
+    publisher = node.create_publisher(Image, topics['camera'], 10)
+    timer = node.create_timer(0.05, lambda: publisher.publish(Image()))
+    try:
+        live = sample(1.0, discovery_s=1.0, topics=topics,
+                      spec=car.spec_for(load_profile('rb2')))
+    finally:
+        node.destroy_timer(timer)
+        node.destroy_publisher(publisher)
+    assert sorted(live.topics) == sorted(
+        ['/sensors/core', '/scan', '/odom', '/joy',
+         '/camera/camera/color/image_raw', '/teleop', '/ackermann_cmd',
+         '/commands/motor/speed', '/commands/servo/position'])
+    camera = live.topics['/camera/camera/color/image_raw']
+    assert 15.0 <= camera.hz <= 25.0  # 20 Hz timer, +/- 5 Hz jitter, as scan test
+    assert camera.last is None       # raw count-only subscription
