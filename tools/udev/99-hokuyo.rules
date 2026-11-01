@@ -1,0 +1,3 @@
+# Hokuyo UST-30LX LiDAR (USB URG-Series driver, 15d1:0000)
+# Creates a stable /dev/sensors/hokuyo symlink; MODE=0666 so it is usable without dialout/re-login.
+KERNEL=="ttyACM*", ATTRS{idVendor}=="15d1", ATTRS{idProduct}=="0000", MODE="0666", SYMLINK+="sensors/hokuyo"

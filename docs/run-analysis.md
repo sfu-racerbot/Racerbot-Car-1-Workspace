@@ -40,7 +40,7 @@ The car can record everything it saw and did. These tools turn that recording in
 | `launch.log` | Everything the driving node printed: one decision line a second, plus every state change (`DRIVE [...]` / `STOP [...]`) | you; `summarize_run` |
 | `events.jsonl` | The probe's machine-readable events: first messages, LB pressed/released, periodic status lines | `summarize_run`; `analyze_run.py` counts them |
 | `bag/` | A rosbag (a recording of ROS messages, replayable later): every message on `/scan`, `/odom`, `/drive`, `/joy`, `/ackermann_cmd`, `/tf` and `/parameter_events`, with timestamps | `analyze_run.py` |
-| `metadata/` | What the run was made with: git state and uncommitted diff of `racerbot-ws` and `imu-calibration`, copies of the IMU calibration files, every node's parameters (see [run-diagnostics.md](run-diagnostics.md#what-gets-captured-and-why-each-piece-earns-its-place)) | you, weeks later |
+| `metadata/` | What the run was made with: git state and uncommitted diff of `racerbot-ws` (which includes `tools/imu_calibration/`), copies of the IMU calibration files, every node's parameters (see [run-diagnostics.md](run-diagnostics.md#what-gets-captured-and-why-each-piece-earns-its-place)) | you, weeks later |
 | `analysis/` | Written by the tools below: `run.npz` (the bag as arrays), motion caches, `report.md`, plots | you |
 
 The 1 Hz lines in `launch.log` are a summary. Between them the node made about 39 more decisions, and only the bag has them. Only the bag also has the scans, so only it can answer "what did the car see when it braked".
@@ -162,6 +162,15 @@ Speed error went from 0.46 to 0.24 m/s, and turning-rate error from 0.25 to 0.15
 
 ## Adding a map to the simulator
 
+**A map from a recorded run, first.** If the run saved no map (the 2026-10-26 runs failed their laps), take the last live one from its bag, then clean it. In **any terminal**, with ROS sourced, from the workspace root:
+
+```bash
+python3 tools/run_analysis/extract_map.py data/racerbot_runs/<run>/bag /tmp/live   # raw: /tmp/live.pgm/.yaml/.png
+python3 tools/run_analysis/clean_map.py data/racerbot_runs/<run> /tmp/<run>-clean     # race-ready map.pgm + map.yaml
+```
+
+**Working when:** the second prints `track cells ..., wall cells ... -> /tmp/<run>-clean` and its `raw_vs_clean.png` shows the raw map on the left and one clean wall ring on the right. **If it says `the bag has no /map or no SLAM pose`:** the run wasn't a mapping run. `clean_map.py` keeps only free space reachable from where the car actually drove, so a corridor it never entered is dropped. Then import the clean map as below.
+
 Any ROS occupancy map ([glossary](glossary.md#occupancy-grid)) can be a simulator track. That covers a SLAM map from `auto_map_race`, one saved with `map_saver_cli`, or one from another team's repo. The importer:
 - turns unexplored grey into wall, so the simulated car can't drive into space the map never saw;
 - finds the loop's centreline as the line equally far from the inner island and the outer walls;
@@ -248,6 +257,10 @@ Everything lives in two places and imports no ROS, except reading the bag:
 | `tools/run_analysis/fit_sim.py` | Plays recorded commands into `FidelityPlant` on an empty floor; grid search over `calibration.py` fields |
 | `tools/run_analysis/analyze_run.py` | All of the above, one report |
 | `tools/f1tenth_sim/track_import.py` | Occupancy map → gym track triplet + catalog entry |
+| `tools/run_analysis/extract_map.py` | The last `/map` in a bag → `.pgm` + `.yaml` + `.png`. Made the live maps in `data/racerbot_runs/20261026-*/live_map/` |
+| `tools/run_analysis/clean_map.py` | A run's final SLAM map → a clean map: specks cleared, rays leaking through wall gaps cut, a wall ring round the driven track. Made `data/racerbot_auto/20261026-194514-clean/`, the simulator's car 1 course. Tested in `tests/test_clean_map.py` |
+| `tools/run_analysis/render_maps.py` | Several runs' SLAM maps side by side, each with its driven path coloured by time |
+| `tools/run_analysis/accel_check.py` | Commanded vs achieved acceleration inside each LB hold (from `/drive` and `/odom`) |
 | `tools/f1tenth_sim/eval_gap_multi.py` | N `gap_follow` cars on one track |
 
 <details>

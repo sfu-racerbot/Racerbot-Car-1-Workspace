@@ -17,7 +17,7 @@ Physical connections, addresses, and config values for this specific car. Everyt
 | | |
 |---|---|
 | Connection | USB, exposed as `/dev/sensors/vesc` (symlink to whatever `/dev/ttyACM*` it enumerates as) |
-| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `MODE=0666` with no group, `SYMLINK+="sensors/vesc"`, so any user can open it without `dialout` or a re-login |
+| udev rule | `/etc/udev/rules.d/99-vesc.rules` — matches idVendor `0483`, idProduct `5740` (STMicroelectronics Virtual COM Port), `MODE=0666` with no group, `SYMLINK+="sensors/vesc"`, so any user can open it without `dialout` or a re-login. Copy in the repo: `tools/udev/99-vesc.rules`; `sudo tools/udev/install.sh` installs all of car 1's rules |
 | Firmware | 7.0 (confirmed via `vesc_driver_node`'s connection log) |
 | Group access | Not needed for the VESC (`MODE=0666`). `racerbotcar-1` is in `dialout` anyway (checked 2026-10-24) |
 
@@ -77,7 +77,7 @@ Reading or writing the VESC's app configuration (including that servo-output fla
 | | |
 |---|---|
 | Connection | USB (not Ethernet) — enumerates as `/dev/ttyACM*`, exposed as a stable `/dev/sensors/hokuyo` symlink |
-| udev rule | `/etc/udev/rules.d/99-hokuyo.rules` — matches idVendor `15d1`, idProduct `0000` (Hokuyo Data Flex for USB, URG-Series USB Driver), `MODE=0666`, `SYMLINK+="sensors/hokuyo"` |
+| udev rule | `/etc/udev/rules.d/99-hokuyo.rules` — matches idVendor `15d1`, idProduct `0000` (Hokuyo Data Flex for USB, URG-Series USB Driver), `MODE=0666`, `SYMLINK+="sensors/hokuyo"`. Copy in the repo: `tools/udev/99-hokuyo.rules` (`sudo tools/udev/install.sh`) |
 | Config | `src/f1tenth_system/f1tenth_stack/config/sensors.yaml` sets `serial_port: "/dev/sensors/hokuyo"` (`ip_address`/`ip_port` are commented out — this car doesn't use `urg_node`'s Ethernet mode at all) |
 | Scan rate | ~40Hz, ±180° (`angle_min`/`angle_max`: ±3.14 rad in `sensors.yaml`) |
 | Frame | `laser`, offset from `base_link`: +0.26m forward, +0.11m up, no rotation — **car 2's measurement, assumed for car 1; not yet measured on this chassis** (see [Physical dimensions](#physical-dimensions-used-in-config)) |
