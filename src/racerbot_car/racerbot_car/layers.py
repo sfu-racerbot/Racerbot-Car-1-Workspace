@@ -82,6 +82,11 @@ def layered(shared_path: str, config_name: str, car_id: str | None = None,
             raise MissingCalibrationError(
                 f'Car {car_id}: {calibration} is missing required calibration keys: '
                 f'{", ".join(missing)}. Configure src/racerbot_car/cars/{car_id}/calibration/{config_name}.')
+    tuning = directory / car_id / 'tuning' / config_name
+    if tuning.is_file():
+        problems = guards.check_tuning_overlay(tuning, Path(shared_path), config_name)
+        if problems:
+            raise guards.TuningOverlayError('\n'.join(problems))
     return [shared_path, *overlay_files(config_name, car_id, directory)]
 
 
