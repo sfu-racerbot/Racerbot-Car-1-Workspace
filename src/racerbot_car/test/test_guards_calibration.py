@@ -6,10 +6,12 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from racerbot_car.guards import CalibrationOverlayError, check_calibration_overlay, overlay_blocks
+from racerbot_car import paths
 
 
-CARS = Path(__file__).resolve().parents[1] / 'cars'
-REAL_OVERLAYS = sorted(CARS.glob('*/calibration/*.yaml'))
+with pytest.MonkeyPatch.context() as patch:
+    patch.delenv('RACERBOT_CARS_DIR', raising=False)
+    REAL_OVERLAYS = sorted(paths.cars_dir().glob('*/calibration/*.yaml'))
 
 
 @pytest.fixture
@@ -67,5 +69,7 @@ def test_every_real_car_calibration_overlay_is_clean(path):
     assert check_calibration_overlay(path, path.name) == []
 
 
-def test_real_calibration_scan_finds_the_cars_dir():
-    assert CARS.is_dir() and (CARS / 'rb1').is_dir()
+def test_real_calibration_scan_finds_the_cars_dir(monkeypatch):
+    monkeypatch.delenv('RACERBOT_CARS_DIR', raising=False)
+    cars = paths.cars_dir()
+    assert cars.is_dir() and (cars / 'rb1').is_dir()
