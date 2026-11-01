@@ -22,6 +22,20 @@ from race_diagnostics import run_metadata as rm  # noqa: E402
 LAUNCH = Path(__file__).resolve().parents[1] / 'launch' / 'record_run.py'
 
 
+def test_metadata_copies_car_imu_calibration(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(root / 'src/racerbot_car/cars'))
+    imu = root / 'src/racerbot_car/cars/rb1/imu'
+    files = rm.imu_calibration_files(root / 'tools/imu_calibration')
+    meta = rm.write_run_metadata(tmp_path / 'run', {}, files)
+    expected = [imu / 'car.yaml', *sorted((imu / 'calib').glob('*.json'))]
+    assert files == expected
+    for source in expected:
+        assert (meta / 'files' / source.name).read_bytes() == source.read_bytes()
+    assert (meta / 'car_id.txt').read_text().strip() == 'rb1'
+
+
 def _git(repo, *args):
     return subprocess.run(['git', '-C', str(repo), *args], check=True,
                           capture_output=True, text=True).stdout
