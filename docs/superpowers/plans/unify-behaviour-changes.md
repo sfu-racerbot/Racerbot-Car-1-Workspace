@@ -1,1 +1,2 @@
 - ROS simulator and f1tenth_sim: car 1's full lock is now car 1's (left +0.401 measured, right -0.463 computed) instead of car 2's (+0.509 / -0.448); autonomy is capped at 0.33 rad on car 1, so no controller reaches it.
+- Task 12e, step 3: all 45 rb1 launch captures succeeded. Against `merge-t11/cap-rb1`, only `/gym_bridge_node car="rb1"` was added in `sim-bringup`, `sim-auto-map`, `sim-auto-map-dashboard` and `sim-race`.
