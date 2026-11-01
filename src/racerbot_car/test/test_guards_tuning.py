@@ -85,6 +85,18 @@ def test_tuning_rejects_empty_why(tmp_path):
     rejected(check(tmp_path, 'max_speed', '0.9', why='# why:   '), 'max_speed')
 
 
+def test_tuning_reports_all_violations(tmp_path):
+    shared = tmp_path / 'shared.yaml'
+    shared.write_text('node:\n  ros__parameters:\n    enable_deadman: true\n    max_speed: 1.0\n')
+    overlay = tmp_path / 'overlay.yaml'
+    overlay.write_text('node:\n  ros__parameters:\n    enable_deadman: false\n    max_speed: 2.0\n')
+    problems = guards.check_tuning_overlay(overlay, shared, 'gap_follow.yaml')
+    assert len(problems) == 4
+    assert sum('enable_deadman' in p for p in problems) == 2
+    assert sum('max_speed' in p for p in problems) == 2
+    assert all(str(overlay) in p and 'node.' in p for p in problems)
+
+
 def test_tuning_accepts_a_why_above_a_nested_leaf(tmp_path):
     shared = tmp_path / 'shared.yaml'
     shared.write_text('node:\n  ros__parameters:\n    group:\n      max_speed: 1.0\n')
