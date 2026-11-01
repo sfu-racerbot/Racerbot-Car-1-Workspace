@@ -5,7 +5,7 @@
 > `tools/imu_calibration/` with its history, and `imu_bridge` reads it from here by default
 > (`racer_imu_root`). `config/car.yaml` and `calib/` hold **car 1's** values. Raw calibration recordings
 > go in `data/imu_calibration/`. Tests, from the workspace root: `python3 -m pytest tools/imu_calibration/tests/ -q`
-> (two known failures in `test_online.py`, see the workspace CLAUDE.md).
+> (two `test_online.py` failures that appear only with car 1's mount in `config/car.yaml`; see the workspace CLAUDE.md).
 
 Two IMUs on the car:
 - **VESC built-in IMU**, read over USB with the VESC binary protocol.
