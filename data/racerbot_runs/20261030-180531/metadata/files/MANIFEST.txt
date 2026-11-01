@@ -1,0 +1,4 @@
+/home/racerbotcar-1/imu-calibration/config/car.yaml -> /home/racerbotcar-1/.ros/racerbot_runs/20261030-180531/metadata/files/car.yaml
+/home/racerbotcar-1/imu-calibration/calib/bno_calib.json -> /home/racerbotcar-1/.ros/racerbot_runs/20261030-180531/metadata/files/bno_calib.json
+/home/racerbotcar-1/imu-calibration/calib/bno_calib_run1_dyncal_on.json -> /home/racerbotcar-1/.ros/racerbot_runs/20261030-180531/metadata/files/bno_calib_run1_dyncal_on.json
+/home/racerbotcar-1/imu-calibration/calib/vesc_calib.json -> /home/racerbotcar-1/.ros/racerbot_runs/20261030-180531/metadata/files/vesc_calib.json
