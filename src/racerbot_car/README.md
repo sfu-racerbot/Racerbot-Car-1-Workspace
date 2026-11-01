@@ -52,6 +52,20 @@ The calibration allow-list and required keys are in
 `layered()` refuses to continue; otherwise the node might silently use its
 declared default for that hardware.
 
+## Launch wiring
+
+The `f1tenth_stack` bringup and teleop (manual driving) launch files call
+`launch_car_id()` before creating nodes. It resolves the car and checks connected
+USB IDs against the other car profiles.
+
+An unknown car, a conflicting serial and override, or hardware identified with
+another car stops the launch before any node starts. An unplugged sensor alone
+is not evidence of a different car.
+
+`car_params()` checks required calibration keys and adds the selected car's
+overlays after the shared parameter file. A missing required key stops launch;
+rb2 will refuse these launches until its calibration overlays are supplied.
+
 ## Tests
 
 From a terminal at the workspace root, run:
