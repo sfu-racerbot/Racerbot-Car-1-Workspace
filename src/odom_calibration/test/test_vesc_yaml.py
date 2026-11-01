@@ -236,7 +236,8 @@ def test_live_vesc_yaml_survives_the_editor(key):
     # Oracle: invariants, not values. The live file holds whatever car 1 is
     # calibrated to today; editing one key must change exactly one line, to
     # the new value, keep every comment, and leave every other value alone.
-    live = REAL_VESC_YAML.read_text(encoding='utf-8')
+    from racerbot_car.paths import cars_dir
+    live = (cars_dir() / 'rb1/calibration/vesc.yaml').read_text(encoding='utf-8')
     before = vesc_yaml.read_values(live)
     target = round(before[key] * 1.1 + 0.01, 4)   # always differs from today's
     new = vesc_yaml.update_text(live, {key: target})

@@ -86,6 +86,9 @@ def test_every_named_layout_builds_and_is_big_enough_to_close_a_lap():
 
 
 def _config_params(package, config, node):
+    if config == 'gap_follow.yaml':
+        from racerbot_car.layers import effective_config
+        return effective_config(config, node, 'rb1')
     path = os.path.join(os.path.dirname(__file__), '..', '..',
                         package, 'config', config)
     with open(path, encoding='utf-8') as handle:

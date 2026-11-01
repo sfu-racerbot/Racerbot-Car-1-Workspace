@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 import pytest
+from conftest import car_config_args
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
@@ -21,7 +22,7 @@ DT = 0.025
 
 @contextmanager
 def _node(enabled=True, extra=()):
-    rclpy.init(args=['--ros-args', '--params-file', CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(CONFIG),
                      # Mid-race scene, not a start: the launch boost (on since
                      # 2026-10-30) skips the ramp and traction hold under test.
                      '-p', 'enable_launch_boost:=false',

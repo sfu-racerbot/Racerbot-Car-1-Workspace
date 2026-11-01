@@ -27,6 +27,7 @@ from sensor_msgs.msg import Imu, Joy
 from std_msgs.msg import String
 
 from gap_follow.gap_follow_node import GapFollowNode
+from conftest import car_config_args
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tools', 'f1tenth_sim'))
@@ -81,7 +82,7 @@ def _scene_sequence():
 
 @pytest.fixture
 def node():
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG, *TEST_ONLY_DRIVE])
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG), *TEST_ONLY_DRIVE])
     n = GapFollowNode()
     assert n.drive_pub.topic_name == '/test_only/drive'
     yield n
@@ -253,7 +254,7 @@ def test_mirror_matches_the_node_with_opponent_awareness_on():
     in the scene: ahead in a 2 m corridor, closing, drifting sideways, so the
     tracker confirms it, the follow cap binds and the pass decision is made
     -- in both, identically, every tick."""
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', 'enable_opponent_awareness:=true', *TEST_ONLY_DRIVE])
     node = GapFollowNode()
     try:
@@ -488,7 +489,7 @@ def test_mirror_matches_the_node_with_steering_damping_on():
     sequence. In that third both must add exactly nothing, and they must agree
     on every tick. The healthy part must really exercise the term, or this
     proves nothing about it (docs/gap-follow.md#steering-damping-gyro)."""
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', 'enable_steering_damping:=true', *TEST_ONLY_DRIVE])
     node = GapFollowNode()
     try:
@@ -565,7 +566,7 @@ def test_mirror_matches_the_node_with_adaptive_grip_on():
     cut. The last ten ticks are a faulty IMU, where both must sit at the base.
     The healthy part must really move the limit both ways, or the agreement
     proves nothing (docs/gap-follow.md#adaptive-grip-imu)."""
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', 'enable_adaptive_grip:=true',
                      '-p', 'enable_steering_damping:=false',
                      # A mid-course corridor, not a start: the launch boost

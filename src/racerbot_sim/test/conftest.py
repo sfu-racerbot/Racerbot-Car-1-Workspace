@@ -1,7 +1,11 @@
 """Fail before ROS test setup can create a publisher or start a process."""
 import os
+from pathlib import Path
+import sys
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'racerbot_car'))
 
 
 PRODUCTION_DRIVE_TOPICS = {'/drive', '/car2/drive', '/ackermann_cmd', '/car2/ackermann_cmd'}
