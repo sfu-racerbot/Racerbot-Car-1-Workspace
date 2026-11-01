@@ -94,6 +94,13 @@ def test_event_handler_actions_captured_as_deferred():
     assert result['processes'] == [{'cmd': ['true'], 'deferred': False}]
 
 
+def test_missing_include_package_not_found_error_type():
+    # oracle: a typed missing-package error need not contain the message pattern.
+    result = capture(str(FIXTURES / 'missing_include_type_launch.py'), [])
+    assert result['missing_includes'] == [{'package': 'no_such_pkg_abc', 'deferred': False}]
+    assert node(result, '/after_include')['executable'] == 'exe'
+
+
 def test_lifecycle_node_is_captured_without_ros_manager(monkeypatch):
     import launch_ros.utilities.lifecycle_event_manager as manager
 

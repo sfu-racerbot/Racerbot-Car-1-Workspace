@@ -22,6 +22,7 @@ import types
 from unittest.mock import patch
 
 import yaml
+from ament_index_python.packages import PackageNotFoundError
 import launch.logging
 from launch import LaunchService, LaunchDescriptionSource
 from launch.actions import ExecuteLocal, GroupAction, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, TimerAction
@@ -329,9 +330,10 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
                     return mark(self, original(self, context))
                 except Exception as exc:
                     match = re.search(r"package '([^']+)' not found", str(exc))
-                    if isinstance(self, IncludeLaunchDescription) and match:
+                    if isinstance(self, IncludeLaunchDescription) and (match or isinstance(exc, PackageNotFoundError)):
+                        package = match.group(1) if match else str(exc.args[0])
                         result['missing_includes'].append(
-                            {'package': match.group(1), 'deferred': id(self) in deferred})
+                            {'package': package, 'deferred': id(self) in deferred})
                         return None
                     raise
             stack.enter_context(patch.object(cls, 'execute', propagate))
