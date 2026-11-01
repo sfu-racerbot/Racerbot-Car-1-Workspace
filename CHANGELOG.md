@@ -6,6 +6,18 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
+## 2026-11-01 (latest): one workspace for both cars
+
+### racerbot_car (new)
+
+- **New package.** Each car's identity (Jetson serial to car id, `src/racerbot_car/cars/machines.yaml`), profile (`cars/<id>/car.yaml`: LiDAR, camera, dashboard site, full-lock steering), calibration overlays (`cars/<id>/calibration/`) and tuning overlays (`cars/<id>/tuning/`, each key with a `# why:`, checked by `racerbot_car.guards`). Launches load the shared config, then the running car's overlays. See `src/racerbot_car/README.md`.
+
+### Workspace
+
+- **Car 2's workspace merged in** (Racerbot-Car-2-Workspace `9c2c2ed`), keeping the best of both. Car 2's newer gap_follow, SLAM-on-gyro and recorder work now runs on both cars; every change to what each car runs is listed in `docs/superpowers/plans/unify-behaviour-changes.md`, with a simulator A/B of each car against its old code.
+- **Runs and maps per car:** `data/<id>/racerbot_runs`, `data/<id>/racerbot_auto`, `data/<id>/racerbot_sim`.
+- Sections below marked `(car 1)` or `(car 2)` were written in that car's repo before the merge; unmarked ones are shared history from before the two repos split.
+
 ## 2026-10-31 — Automatic recorder: catch more of a run's start, report failures properly (car 2)
 
 Follows a check of the 2026-10-30 session's 19 automatic recordings. All were intact, but two bags began with the car already moving. **Tested on an isolated ROS domain against fake publishers, not yet on a real run.**
