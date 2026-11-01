@@ -139,3 +139,13 @@ def test_servo_max_is_written_into_the_shared_block_only():
 def test_reading_calibration_values_does_not_return_the_limits():
     values = vesc_yaml.read_values(VESC.read_text(encoding='utf-8'))
     assert set(values) == set(vesc_yaml.CALIBRATION_NAMES)
+
+
+def test_apply_overlay_scale(tmp_path):
+    text = ('joy_teleop:\n  ros__parameters:\n    human_control:\n'
+            '      axis_mappings:\n        drive-steering_angle:\n          scale: 0.38\n')
+    path = tmp_path / 'joy_teleop.yaml'
+    path.write_text(text)
+    result = teleop_yaml.apply(path, 0.4, tmp_path / 'backup')
+    assert path.read_text() == text.replace('scale: 0.38', 'scale: 0.4')
+    assert Path(result['backup']).read_text() == text

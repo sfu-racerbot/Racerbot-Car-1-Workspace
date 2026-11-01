@@ -73,3 +73,12 @@ def test_real_calibration_scan_finds_the_cars_dir(monkeypatch):
     monkeypatch.delenv('RACERBOT_CARS_DIR', raising=False)
     cars = paths.cars_dir()
     assert cars.is_dir() and (cars / 'rb1').is_dir()
+
+
+def test_speed_to_erpm_offset_optional_under_vesc_to_odom(tmp_path, vesc):
+    assert check_calibration_overlay(write(tmp_path, vesc), 'vesc.yaml') == []
+    vesc['vesc_to_odom_node']['ros__parameters']['speed_to_erpm_offset'] = 12.0
+    assert check_calibration_overlay(write(tmp_path, vesc), 'vesc.yaml') == []
+    vesc['/**']['ros__parameters']['speed_to_erpm_offset'] = 12.0
+    assert any('speed_to_erpm_offset' in p for p in
+               check_calibration_overlay(write(tmp_path, vesc), 'vesc.yaml'))

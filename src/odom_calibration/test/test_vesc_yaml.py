@@ -252,3 +252,60 @@ def test_live_vesc_yaml_survives_the_editor(key):
     assert changed[0].strip().startswith(key + ':')
     # And writing today's value back reproduces the file byte for byte.
     assert vesc_yaml.update_text(new, {key: before[key]}) == live
+
+
+@pytest.fixture
+def overlay():
+    return (Path(__file__).resolve().parents[2] / 'racerbot_car' / 'cars' / 'rb1'
+            / 'calibration' / 'vesc.yaml').read_text()
+
+
+def test_apply_overlay_changes_only_target_key(tmp_path, overlay):
+    path = tmp_path / 'vesc.yaml'
+    path.write_text(overlay)
+    vesc_yaml.apply(path, {'servo_min': 0.06}, tmp_path / 'backup', target_is_overlay=True)
+    assert path.read_text() == overlay.replace('servo_min: 0.05', 'servo_min: 0.06')
+    assert _params(path.read_text(), '/**')['servo_min'] == 0.06
+
+
+def test_apply_inserts_absent_key_in_block(tmp_path, overlay):
+    path = tmp_path / 'vesc.yaml'
+    path.write_text(overlay)
+    vesc_yaml.apply(path, {'speed_to_erpm_offset': 12.0}, tmp_path / 'backup',
+                    target_is_overlay=True)
+    assert path.read_text() == overlay.replace('    speed_to_erpm_gain: -4040.0\n',
+                                              '    speed_to_erpm_gain: -4040.0\n'
+                                              '    speed_to_erpm_offset: 12.0\n')
+
+
+def test_apply_absent_block_is_error(tmp_path, overlay):
+    path = tmp_path / 'vesc.yaml'
+    text = overlay.split('vesc_to_odom_node:')[0]
+    path.write_text(text)
+    with pytest.raises(ValueError, match='no vesc_to_odom_node block'):
+        vesc_yaml.apply(path, {'speed_to_erpm_offset': 12.0}, tmp_path / 'backup',
+                        target_is_overlay=True)
+    assert path.read_text() == text
+
+
+def test_apply_missing_required_key_in_overlay_is_error(tmp_path, overlay):
+    path = tmp_path / 'vesc.yaml'
+    text = overlay.replace('    servo_min: 0.05\n', '')
+    path.write_text(text)
+    with pytest.raises(ValueError, match='servo_min'):
+        vesc_yaml.apply(path, {'servo_min': 0.06}, tmp_path / 'backup', target_is_overlay=True)
+    assert path.read_text() == text
+
+
+def test_overlay_still_passes_guard_after_write(tmp_path, overlay):
+    from racerbot_car.guards import check_calibration_overlay
+    path = tmp_path / 'vesc.yaml'
+    path.write_text(overlay)
+    vesc_yaml.apply(path, {'speed_to_erpm_offset': 12.0}, tmp_path / 'backup',
+                    target_is_overlay=True)
+    assert check_calibration_overlay(path, 'vesc.yaml') == []
+    invalid = path.read_text().replace('    servo_min: 0.05\n', '    servo_min: 0.05\n    port: bad\n')
+    path.write_text(invalid)
+    with pytest.raises(ValueError, match='port'):
+        vesc_yaml.apply(path, {'servo_min': 0.06}, tmp_path / 'backup', target_is_overlay=True)
+    assert path.read_text() == invalid
