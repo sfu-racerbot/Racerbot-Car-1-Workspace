@@ -32,3 +32,33 @@ slam_toolbox:
     # the three runs.
     loop_search_maximum_distance: 3.0
     loop_search_space_dimension: 3.0
+
+    # --- Car 2, 2026-10-30: the gyro was being ignored, and closure was out of reach ---
+    # Measured and replayed: docs/superpowers/specs/2026-10-30-slam-reliability.md.
+    #
+    # The chain. A chain is consecutive older nodes inside the search radius above. Above about 1.25 m/s the
+    # 0.2 s time gate spaces nodes, not minimum_travel_distance: 0.57 m median at this car's pace, so 3 m of
+    # radius holds about 11 nodes. slam_tracking.yaml's chain of 20 was out of reach on 100% of nodes when the
+    # pose was right, and a closure fired only once drift had bent the path enough to fit. 10 is about 6 m of
+    # evidence. 7 fires too easily: 0.67-0.74 of walls on the reference map, against 0.92 here.
+    loop_match_minimum_chain_size: 10
+
+    # The prior. Over 25 m the gyro was 1.0 deg off where SLAM's live pose was 5.3 deg off, because a match paid
+    # almost nothing for disagreeing with it: 0.15% for 5 deg at slam_toolbox's 1.0 and 0.9. That drift took the
+    # car 1-2.3 m off by the end of lap 1, and past the +/-1.5 m window above is how maps came out doubled.
+    # Now 5 deg costs about 15%. These are safe only because this profile requires the gyro: steering odometry
+    # is 15 deg out over 5 m, and must never get them (test_slam_gyro_profile.py).
+    angle_variance_penalty: 0.01
+    minimum_angle_penalty: 0.5
+    # +/-10 deg, twice as fine: the same number of coarse angles over the range the gyro can really be out by
+    # in one node's 0.6 m of travel.
+    coarse_search_angle_offset: 0.175
+    coarse_angle_resolution: 0.0175
+    #
+    # Replays, walls on the reference map within 10 cm / live pose error p95, one value per repeat:
+    #
+    #   run               shipped                     chain 10 alone                    this profile
+    #   20261030-184556   0.35, 0.30 / 3.65, 5.85 m   0.86, 0.94, 0.83, 0.89 / 4.69, 0.75, 4.64, 4.89 m   0.91, 0.91, 0.91 / 0.28, 0.18, 0.30 m
+    #   20261030-185036   0.64, 0.32 / 4.01, 4.80 m   0.95, 0.95, 0.95, 0.95 / 0.59, 0.76, 0.77, 0.87 m   0.92, 0.92, 0.91 / 0.21, 0.16, 0.19 m
+    #
+    # So the chain does most of the work on walls, and the prior makes that repeatable and the live pose usable.

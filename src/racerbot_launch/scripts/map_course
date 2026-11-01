@@ -17,10 +17,21 @@ after every node's shutdown messages.
 Everything the launch prints is also saved to
 ~/racerbot-ws/data/racerbot_runs/map_course-<timestamp>.log, lap progress included.
 
+After every run, finished or stopped, tools/run_analysis/rebuild_run.py matches the
+run's scans against its last map and judges it (``rebuild:=false`` skips that), so a
+run stopped with Ctrl+C keeps what it mapped, and the last thing on screen says
+whether the map is good enough to race on.
+
+A run that finishes by itself then just prints the commands. One stopped with Ctrl+C,
+or that fails, gets a short summary first. The in-depth reports take minutes, so they
+only run with ``analysis:=true``; the summary says how to run them later.
+
 Hold LB the whole time the car should move. See docs/launchstart.md.
 """
 
+import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -112,6 +123,75 @@ def repo_root():
     return next((p for p in candidates if (p / 'tools/run_analysis/slam_report.py').is_file()), None)
 
 
+_LAP_CLOSED = re.compile(r'Closed mapping lap (\d+)/(\d+) detected \(([\d.]+)m')
+
+
+def quick_report(run, parent, laps, wanted) -> str:
+    """What a stopped run got: laps, the map check's verdict, and where to look next.
+
+    laps is (lap number, metres) for each lap the supervisor closed, wanted the laps it was asked for.
+    """
+    lines = ['', '=' * 72, 'RUN STOPPED.' if run is not None else 'RUN STOPPED: nothing was recorded.',
+             f'  Laps closed: {len(laps)} of {wanted}'
+             + (' (' + ', '.join(f'{metres:.0f} m' for _, metres in laps) + ')' if laps else '')]
+    result = None
+    if run is not None:
+        try:
+            result = json.loads((Path(parent) / f'{Path(run).name}-rebuilt' / 'rebuild.json').read_text())
+            verdict = result['verdict']
+        except (OSError, ValueError, KeyError, TypeError):
+            result = None
+    if result is None:
+        lines.append('  Map: not checked.')
+    else:
+        lines.append(f"  Map: {'GO' if result.get('raceline_ok') else 'NO-GO'}: {result.get('message', '')}")
+        if 'tracked_path_m' in result:
+            lines.append(f"  The scans place the car over {result['tracked_path_m']:.0f} m on that map, "
+                         f"{result.get('laps', 0)} whole lap(s), using {result.get('odom_source', 'unknown odometry')}.")
+    if run is not None:
+        root = repo_root()
+        tools = (root / 'tools/run_analysis') if root is not None else Path('tools/run_analysis')
+        lines += [f'  Recording: {run}',
+                  f'  Full reports, when you want them: python3 {tools / "slam_report.py"} {run}']
+    lines.append('=' * 72)
+    return '\n'.join(lines) + '\n'
+
+
+def rebuild_step(run, parent, handle):
+    """Turn the recording into a racing folder. Returns False if the operator stopped it.
+
+    Runs before the reports: it is what the operator came for, and its verdict and
+    commands.txt are worth more than any report if they only wait for one thing.
+    """
+    def emit(text):
+        print(text, flush=True)
+        handle.write(text + '\n')
+        handle.flush()
+
+    root = repo_root()
+    script = None if root is None else root / 'tools/run_analysis/rebuild_run.py'
+    if run is None or script is None or not script.is_file():
+        emit('Map check skipped: ' + ('no Recording run to: line in launch output.' if run is None
+                                      else 'workspace rebuild script not found.'))
+        return True
+    command = [sys.executable, str(script), str(run), '--out-root', str(parent)]
+    emit('Checking the map against this run\'s scans (about 20 s; Ctrl+C skips it)...')
+    try:
+        # Its own session, so only the wrapper hears a second Ctrl+C at the terminal.
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors='replace', start_new_session=True)
+    except KeyboardInterrupt:
+        emit(f'Map check interrupted; re-run: {shlex.join(command)}')
+        return False
+    except OSError as exc:
+        emit(f'Map check could not start: {exc}; re-run: {shlex.join(command)}')
+        return True
+    emit(result.stdout.rstrip())
+    if result.returncode not in (0, 1, 2):
+        emit(f'Map check failed (exit {result.returncode}); re-run: {shlex.join(command)}')
+    return True
+
+
 def analyse(run, log, handle):
     def emit(text):
         print(text, flush=True)
@@ -160,17 +240,18 @@ def main(argv=None):
     if bad:
         print(f'map_course: arguments must look like name:=value, got {bad}', file=sys.stderr)
         return 2
-    analysis = True
+    switches = {'analysis': False, 'rebuild': True}
     launch_argv = []
     for arg in argv:
-        if arg.startswith('analysis:='):
-            value = arg.split(':=', 1)[1].lower()
-            if value not in ('true', 'false'):
-                print('map_course: analysis must be true or false', file=sys.stderr)
+        name, _, value = arg.partition(':=')
+        if name in switches:
+            if value.lower() not in ('true', 'false'):
+                print(f'map_course: {name} must be true or false', file=sys.stderr)
                 return 2
-            analysis = value == 'true'
+            switches[name] = value.lower() == 'true'
         else:
             launch_argv.append(arg)
+    analysis = switches['analysis']
     missing = missing_drivers()
     if missing:
         print('map_course: the hardware is not running (no ' + ', '.join(missing) +
@@ -183,6 +264,9 @@ def main(argv=None):
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, 'w', errors='replace') as handle:
         recorded_run = None
+        stopped = False
+        laps = {}
+        wanted = 0
         child = subprocess.Popen(
             ['ros2', 'launch', 'racerbot_launch', 'map_course_launch.py',
              *launch_arguments(launch_argv, _running(SIM_DRIVER))],
@@ -195,13 +279,27 @@ def main(argv=None):
                     handle.write(line)
                     if recorded_run is None and 'Recording run to: ' in line:
                         recorded_run = Path(line.split('Recording run to: ', 1)[1].strip()).expanduser()
+                    closed = _LAP_CLOSED.search(line)
+                    if closed:
+                        laps[int(closed.group(1))] = float(closed.group(3))
+                        wanted = int(closed.group(2))
                 code = child.wait()
                 break
             except KeyboardInterrupt:
                 # The terminal already sent SIGINT to ros2 launch too; keep
                 # copying its shutdown output, then report.
+                if not stopped:
+                    print('\nStopping: nothing is driving the car now. Shutting the nodes down, which '
+                          'can take up to 15 s...', flush=True)
+                stopped = True
                 continue
         handle.flush()
+        if switches['rebuild']:
+            try:
+                analysis = rebuild_step(recorded_run, output_directory(launch_argv), handle) and analysis
+            except KeyboardInterrupt:
+                print('Map check interrupted.', flush=True)
+                analysis = False
         if analysis:
             try:
                 analyse(recorded_run, log, handle)
@@ -209,6 +307,11 @@ def main(argv=None):
                 # Analysis is advisory, including saving/printing its output.
                 # Keep the launch status and always show the race commands.
                 print('Analysis interrupted; remaining reports skipped.', flush=True)
+        if stopped or code != 0:
+            summary = quick_report(recorded_run, output_directory(launch_argv), sorted(laps.items()),
+                                   wanted or 'the laps asked for')
+            print(summary, flush=True)
+            handle.write(summary)
         text = report(output_directory(launch_argv), started)
         handle.write(text)
     print(text)

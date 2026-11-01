@@ -93,16 +93,14 @@ def _gap_follow_params(**overrides):
     return _node_params(gap[0], ctx)
 
 
-def test_defaults_are_imu_off_on_car2_and_fused_speed_off():
-    # oracle: spec -- docs/car1-vs-car2.md#imu: car 2 has no BNO085 and no
-    # ~/imu-calibration yet, so the IMU stack is off by default here (car 1
-    # ships imu:=true); driving on it only when asked, on either car.
+def test_defaults_are_imu_on_and_fused_speed_off():
+    # oracle: spec -- docs/car1-vs-car2.md#imu: the IMU stack runs by default, as on
+    # car 1; gap_follow drives on /odom/fused only when asked, on either car.
     ld = ml.generate_launch_description()
-    defaults = {e.name: ''.join(s.perform(LaunchContext()) for s in e.default_value)
-                for e in ld.entities if isinstance(e, DeclareLaunchArgument)}
-    assert defaults['imu'] == 'false'
+    defaults = _context(ld).launch_configurations  # gyro_odom's default reads imu's
+    assert defaults['imu'] == 'true'
     assert defaults['fused_speed'] == 'false'
-    assert defaults['gyro_odom'] == 'false'
+    assert defaults['gyro_odom'] == 'true'  # follows imu; see test_a_plain_run_maps_on_the_gyro
     # Every run is replayable through SLAM offline (docs/launchstart.md).
     assert defaults['record_bag'] == 'true'
 
@@ -164,10 +162,27 @@ def test_imu_stack_is_included_only_with_imu_true(imu, runs):
     assert includes[0].condition.evaluate(ctx) is runs
 
 
-def test_car2_default_run_does_not_start_the_imu_stack():
-    # oracle: spec -- docs/car1-vs-car2.md#imu: with no override, car 2's
-    # map_course must not include vehicle_state_launch.py (imu_bridge_node
-    # raises without ~/imu-calibration, and there is no BNO085 to read).
+def test_a_plain_run_maps_on_the_gyro():
+    # oracle: spec -- docs/superpowers/specs/2026-10-30-slam-reliability.md: the SLAM fix
+    # is slam_gyro.yaml, so a run with no arguments must load it, on odom_imu.
+    _, ctx = _wired_context()
+    assert ctx.launch_configurations['slam_odom_frame'] == 'odom_imu'
+    assert ctx.launch_configurations['publish_odom_tf'] == 'true'
+    assert ctx.launch_configurations['slam_profile_file'].endswith('/slam_gyro.yaml')
+
+
+def test_imu_false_alone_still_starts_and_maps_on_the_wheels():
+    # The way to run with no IMU: it must not need gyro_odom:=false written out as well,
+    # and must not load the gyro profile, which is wrong on steering odometry.
+    _, ctx = _wired_context(imu='false')
+    assert ctx.launch_configurations['slam_odom_frame'] == 'odom'
+    assert ctx.launch_configurations['publish_odom_tf'] == 'false'
+    assert 'slam_profile_file' not in ctx.launch_configurations
+
+
+def test_default_run_starts_the_imu_stack():
+    # oracle: spec -- docs/car1-vs-car2.md#imu: with no override, map_course includes
+    # vehicle_state_launch.py, as on car 1.
     ld = ml.generate_launch_description()
     ctx = _context(ld)
     includes = []
@@ -177,13 +192,12 @@ def test_car2_default_run_does_not_start_the_imu_stack():
             if e.launch_description_source.location.endswith('/vehicle_state_launch.py'):
                 includes.append(e)
     assert len(includes) == 1
-    assert includes[0].condition.evaluate(ctx) is False
+    assert includes[0].condition.evaluate(ctx) is True
 
 
-def test_car2_default_vehicle_state_launch_starts_no_bno_bridge():
-    # oracle: spec -- docs/car1-vs-car2.md#imu: car 2 has no BNO085, so
-    # vehicle_state_launch.py's default must neither start car 1's I2C bridge
-    # nor hand imu_bridge_node a BNO port.
+def test_default_vehicle_state_launch_starts_the_bno_bridge():
+    # oracle: spec -- docs/car1-vs-car2.md#imu: the default hands imu_bridge_node the I2C bridge's
+    # port, as on car 1. Starting the bridge itself: imu_bridge/test/test_vehicle_state_launch_hardware.py.
     spec = importlib.util.spec_from_file_location(
         'vehicle_state_launch', SRC / 'imu_bridge' / 'launch' / 'vehicle_state_launch.py')
     vl = importlib.util.module_from_spec(spec)
@@ -191,11 +205,9 @@ def test_car2_default_vehicle_state_launch_starts_no_bno_bridge():
     ld = vl.generate_launch_description()
     ctx = _context(ld)
     actions = [e for e in ld.entities if isinstance(e, OpaqueFunction)][0].execute(ctx)
-    # Node subclasses ExecuteProcess: only a bare process is the I2C bridge.
-    assert not [a for a in actions if isinstance(a, ExecuteProcess) and not isinstance(a, Node)]
     bridge = [a for a in actions if isinstance(a, Node) and a.node_executable == 'imu_bridge_node']
     assert len(bridge) == 1
-    assert _node_params(bridge[0], ctx)['bno_port'] == ''
+    assert _node_params(bridge[0], ctx)['bno_port'] == '/tmp/bno085'
 
 
 # ---------------------------------------------------------------- gyro_odom
@@ -275,8 +287,6 @@ SLAM_GYRO = SRC / 'racerbot_launch' / 'config' / 'slam_gyro.yaml'
 def test_gyro_odom_loads_the_gyro_slam_profile():
     # oracle: spec -- A1: the profile is loaded with gyro_odom:=true, from the
     # installed package, where slam_launch.py will read it.
-    # imu:=true stated explicitly: gyro_odom needs it, and car 2's map_course
-    # defaults to imu:=false (docs/car1-vs-car2.md#imu); car 1's defaults to true.
     _, ctx = _wired_context(imu='true', gyro_odom='true')
     profile = ctx.launch_configurations['slam_profile_file']
     assert profile.endswith('/slam_gyro.yaml')
@@ -321,15 +331,13 @@ def test_gyro_profile_window_cannot_reach_the_neighbouring_track():
 @pytest.mark.parametrize('all_value', ['false', 'true'])
 @pytest.mark.parametrize('flag', ['gyro_odom', 'fused_speed', 'imu_lap_turns'])
 def test_imu_all_defaults_and_explicit_false_wins(all_value, flag):
-    # oracle: Task J1a R1: each flag follows imu_all unless explicitly set.
-    # Car 2: imu:=true written out, as its map_course default is false
-    # (docs/car1-vs-car2.md#imu); test_imu_flags_refuse_when_imu_disabled
-    # covers the refusal without it.
+    # oracle: Task J1a R1: each flag follows imu_all unless explicitly set. The exceptions are
+    # car 2's gyro_odom, which follows imu, and imu_lap_turns, which follows gyro_odom
+    # (docs/car1-vs-car2.md#imu), so both are true whatever imu_all says here.
     _, ctx = _wired_context(imu='true', imu_all=all_value)
-    assert ctx.launch_configurations[flag] == all_value
+    expected = 'true' if flag in ('gyro_odom', 'imu_lap_turns') else all_value
+    assert ctx.launch_configurations[flag] == expected
     overrides = {'imu': 'true', 'imu_all': all_value, flag: 'false'}
-    if flag == 'gyro_odom':
-        overrides['imu_lap_turns'] = 'false'
     _, ctx = _wired_context(**overrides)
     assert ctx.launch_configurations[flag] == 'false'
 
@@ -341,10 +349,29 @@ def test_imu_flags_refuse_when_imu_disabled(flag):
         _wired_context(imu='false', **{flag: 'true'})
 
 
-def test_lap_turns_require_gyro_odometry_even_with_imu_all():
+def test_lap_turns_require_gyro_odometry_when_asked_for_by_name():
     # oracle: Task J1a R2: do not let the lap counter consume an absent frame.
     with pytest.raises(RuntimeError, match='imu_lap_turns:=false'):
-        _wired_context(imu='true', imu_all='true', gyro_odom='false')
+        _wired_context(imu='true', imu_lap_turns='true', gyro_odom='false')
+
+
+@pytest.mark.parametrize('overrides', [{'gyro_odom': 'false'}, {'imu': 'false'},
+                                       {'imu_all': 'true', 'gyro_odom': 'false'}])
+def test_lap_turns_follow_the_gyro_off_without_being_told(overrides):
+    # Turning the gyro off must not need a second flag to stop the launch refusing.
+    _, ctx = _wired_context(**overrides)
+    assert ctx.launch_configurations['imu_lap_turns'] == 'false'
+
+
+def test_a_plain_run_counts_laps_in_the_frame_slam_maps_on():
+    # oracle: spec -- docs/superpowers/specs/2026-10-30-slam-reliability.md: the supervisor compares
+    # SLAM's pose with odometry, so it must be the same odometry SLAM was given. In steering
+    # odometry hard turns read as corrections, and run 20261030-180355 never closed a lap.
+    ld, ctx = _wired_context()
+    assert ctx.launch_configurations['slam_odom_frame'] == 'odom_imu'
+    nodes = _opaque(ld, None).execute(ctx)
+    node = next(n for n in nodes if isinstance(n, Node) and n.node_package == 'pure_pursuit')
+    assert _node_params(node, ctx)['odom_frame'] == ctx.launch_configurations['slam_odom_frame']
 
 
 @pytest.mark.parametrize('flag', ['imu', 'imu_all', 'imu_lap_turns', 'gyro_odom', 'fused_speed'])

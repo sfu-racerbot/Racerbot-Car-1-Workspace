@@ -546,6 +546,87 @@ not map the run, the report says so and still shows the other available data.
 
 ---
 
+## Rebuilding a racing folder from a run
+
+`map_course` does this for you after every run. Run it by hand for an older run, or one whose check was interrupted:
+
+**Terminal: any, with ROS sourced. It starts no node and publishes nothing.**
+
+```bash
+python3 tools/run_analysis/rebuild_run.py data/racerbot_runs/<time>
+```
+
+**Working when:** the first line starts `GO:` or `NO-GO:`, followed by `Saved in:` and a folder under `data/racerbot_auto/`. **If it says `NOTHING TO REBUILD`:** the run has no bag, or SLAM never ran in it. Existing folders are never overwritten, so delete or rename one to redo it.
+
+It takes the last `/map` in the bag and matches every scan against it, using odometry only to carry the pose between scans. That gives two scores:
+
+- **Fit:** the share of beams ending on a wall. Low means the map does not match the world. Limits: 0.90 on average, and 0.70 over its worst stretch.
+- **See-through:** the share of beams that pass through a mapped wall before they end, which a laser cannot do. High means walls are drawn twice. Limit: 15%.
+
+Fit alone cannot catch a doubled map, because a beam ending on either copy of a wall still counts: run `20261030-184556`'s doubled map fits at 0.97. Why these scores, and how they did against an independent reference: [the spec](superpowers/specs/2026-10-30-slam-reliability.md).
+
+A map that passes gets `raceline_profiled.csv`, capped at 1.5 m/s (`--max-speed` changes it), with `raceline_2p5.csv` and `raceline_4p0.csv` beside it. A refused map gets no line, so `race_launch.py` refuses that folder too. The numbers are in `rebuild.json`.
+
+The check starts from SLAM's own pose when that fits as well as the best place a search of the whole map finds. On a course that looks the same turned round, like the simulator's oval, the search alone can land on the mirror-image spot and call a good map NO-GO. `rebuild.json`'s `start_from` says which it used.
+
+## When mapping fails: the tools, in order
+
+These are the tools that found what was wrong on 2026-10-30 and 31 ([the spec](superpowers/specs/2026-10-30-slam-reliability.md)). Use them in this order: each one answers the question the next one assumes.
+
+**Terminal: any, with ROS sourced (`source /opt/ros/jazzy/setup.bash && source install/setup.bash`). None of them moves the car.**
+
+**1. What was this recording?** Many "failed maps" are not mapping runs at all.
+
+```bash
+python3 tools/run_analysis/run_triage.py data/racerbot_runs/<time>
+```
+
+**Working when:** it prints the driving code that ran, every LB hold with its distance and top speed, and a last line: `usable`, `not a mapping run`, or `carried between holds`. On 30 Oct most of the runs that "failed" were another team's algorithm, or a few seconds of driving.
+
+**2. Would its laps have closed?** This puts the run's recorded SLAM pose through the real lap counter, on each odometry.
+
+```bash
+python3 tools/run_analysis/lap_replay.py data/racerbot_runs/<time>
+```
+
+**Working when:** it prints one line per odometry frame, `counted in odom_imu 3 lap(s) [...] m`. Lap lengths that disagree, or many SLAM corrections in one frame only, mean the counter is reading the wrong odometry. It needs `/slam_pose`, so `map_course` runs and their replays only.
+
+**3. What does the whole launch do with this recording now?** This runs the real `map_course` launch on the run's recorded sensors, parked, and says whether its laps close and its map passes. It plays the driver's real LB presses, so it refuses to run while any driver or SLAM is up, and runs on ROS domain 78, localhost only.
+
+```bash
+python3 tools/run_analysis/replay_map_course.py data/racerbot_runs/<time> --out /tmp/replays
+python3 tools/run_analysis/replay_map_course.py data/racerbot_runs/<time> --out /tmp/replays imu:=true gyro_odom:=false
+```
+
+**Working when:** it ends with a JSON result, `laps_closed`, `map_go` and the reason, about as long as the run took. Exit 0 means the laps closed and the map passed. Launch arguments go after the run, as `map_course` takes them, so the same run can be tried with different settings. `--from-seconds` starts from a later stop.
+
+**4. How good is a map, against a known-good one?** This scores a map's walls against a reference map of the same course, and SLAM's live pose against the run's own scans tracked on that reference. It doesn't depend on the SLAM under test.
+
+```bash
+python3 tools/run_analysis/slam_score.py --reference data/racerbot_auto/<good run>/map.yaml data/racerbot_runs/<time>
+```
+
+**Working when:** one JSON line per target. `walls` near 0.9 or above is a good map; a map with every wall drawn twice scores about half. `live_p95_m` is how far the live pose strayed. The old settings scored 0.48 walls and 3.2 m on run `184556`; the new profile scored 0.92 and 0.27 m.
+
+**5. Can the tests behind a fix fail?** CLAUDE.md's Hard rule 1, rerunnable.
+
+```bash
+python3 tools/check_mutations.py tools/mutations/slam_reliability.json [--only map_localize]
+```
+
+**Working when:** it ends `N/N breaks caught`. Each break is applied to a temporary copy, so your files are never touched. A `MISSED` line names code no test would notice breaking. The full set of 140 takes about an hour.
+
+<details>
+<summary>What went wrong while finding the faults, so nobody repeats it (safe to skip)</summary>
+
+- **Test what the operator runs.** The SLAM fix sat in a profile that only loaded with two flags, and replaying SLAM alone never showed the lap counter reading the wrong odometry. Running the whole launch on recordings, with no flags, found both.
+- **Judge a SLAM setting over repeats, on more than one run.** Identical settings on identical data gave 0.32 and 0.64 of walls.
+- **Line maps up from many starts.** One start understated a 0.86 map as 0.22.
+- **Don't judge carrying from single scans placed on a map.** A false placement once made a car look carried 12 m. `run_triage.py` judges it from the car's own wheels and scans.
+- **The lap counter must use the odometry SLAM maps on.** It tells SLAM corrections from driving by comparing the two.
+
+</details>
+
 ## Replaying SLAM with the car parked
 
 `tools/run_analysis/slam_replay.py` runs SLAM again on a recorded bag and

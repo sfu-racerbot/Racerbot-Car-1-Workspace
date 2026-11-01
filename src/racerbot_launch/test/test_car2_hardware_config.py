@@ -175,31 +175,38 @@ def test_odometry_gain_is_car_2s():
 
 # -------------------------------------------------------------------- IMU
 
-def test_map_course_does_not_run_the_imu_stack_by_default():
-    # Car 2 has no BNO085 yet and no ~/imu-calibration, without which
-    # imu_bridge_node raises at startup. Car 1 ships imu:=true.
+def test_map_course_runs_the_imu_stack_by_default():
+    # The same as car 1 since 2026-10-31 (docs/car1-vs-car2.md#imu): the BNO085
+    # is mounted and ~/imu-calibration is cloned.
     launch = _read(_SRC, 'racerbot_launch', 'launch', 'map_course_launch.py')
     defaults = re.findall(r"'imu', default_value='(\w+)'", launch)
-    assert defaults == ['false']
+    assert defaults == ['true']
 
 
-def test_vehicle_state_launch_does_not_use_a_bno_by_default():
-    # Car 1's default starts its Jetson-I2C BNO bridge; car 2 has no BNO.
+def test_map_course_maps_on_the_gyro_by_default_on_car_2():
+    # A difference from car 1, on purpose: SLAM's fix is slam_gyro.yaml, which only
+    # gyro_odom loads, and steering odometry maps badly on this car
+    # (docs/superpowers/specs/2026-10-30-slam-reliability.md). It follows imu, so
+    # imu:=false still starts. The lap counter goes with it, into the frame SLAM maps on.
+    launch = _read(_SRC, 'racerbot_launch', 'launch', 'map_course_launch.py')
+    assert re.findall(r"'gyro_odom', default_value=LaunchConfiguration\('imu'\)", launch)
+    assert re.findall(r"'imu_lap_turns', default_value=LaunchConfiguration\('gyro_odom'\)", launch)
+
+
+def test_vehicle_state_launch_uses_the_bno_by_default():
+    # The same as car 1: the Jetson-I2C BNO bridge starts unless bno:=false.
     launch = _read(_IMU_BRIDGE, 'launch', 'vehicle_state_launch.py')
     defaults = re.findall(r"'bno', default_value='(\w+)'", launch)
-    assert defaults == ['false']
+    assert defaults == ['true']
 
 
-def test_gap_follow_steering_damping_is_off_by_default():
-    # The gyro term needs the IMU stack, which needs the BNO085 and
-    # ~/imu-calibration that car 2 does not have yet (docs/car1-vs-car2.md#imu).
-    # Car 1 ships both true since its 2026-10-27 race defaults. Flip these two
-    # with the IMU tests above, in the same commit.
+def test_gap_follow_steering_damping_is_on_by_default():
+    # The same as car 1's race defaults (2026-10-27): on, and off with imu:=false.
     params = _yaml(os.path.join(_SRC, 'gap_follow', 'config', 'gap_follow.yaml'))
-    assert params['gap_follow_node']['ros__parameters']['enable_steering_damping'] is False
+    assert params['gap_follow_node']['ros__parameters']['enable_steering_damping'] is True
     launch = _read(_SRC, 'gap_follow', 'launch', 'gap_follow_launch.py')
-    defaults = re.findall(r"'steering_damping', default_value='(\w+)'", launch)
-    assert defaults == ['false']
+    assert re.findall(r"'steering_damping', default_value=LaunchConfiguration\('imu', "
+                      r"default='true'\)", launch)
 
 
 def test_gap_follow_imu_features_ship_off_on_car2():
@@ -217,7 +224,8 @@ def test_gap_follow_imu_features_ship_off_on_car2():
         assert re.findall(r"'imu_all', default_value='(\w+)'", launch) == ['false'], launch_file
         # Each feature flag either says false outright or follows imu_all.
         for flag in re.findall(r"'((?:fused_speed|imu_\w+))', default_value=", launch):
-            if flag in ('imu_all', 'imu_hardware'):
+            # imu_lap_turns has no car 1 threshold to wait for: it only picks a frame.
+            if flag in ('imu_all', 'imu_hardware', 'imu_lap_turns'):
                 continue
             m = re.search(r"'%s', default_value=(LaunchConfiguration\('imu_all', "
                           r"default='false'\)|'false')" % flag, launch)

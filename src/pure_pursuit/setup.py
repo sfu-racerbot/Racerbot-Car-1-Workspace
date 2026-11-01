@@ -39,6 +39,7 @@ setup(
             'optimize_raceline = pure_pursuit.optimize_raceline:main',
             'auto_map_race_node = pure_pursuit.auto_map_race_node:main',
             'seed_start_pose = pure_pursuit.seed_start_pose:main',
+            'check_start = pure_pursuit.check_start:main',
         ],
     },
 )

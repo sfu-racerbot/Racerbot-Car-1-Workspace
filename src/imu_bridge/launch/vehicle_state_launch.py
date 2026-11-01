@@ -1,16 +1,14 @@
 """The whole IMU side: BNO085 I2C bridge, imu_bridge, vehicle_state.
 
-Written on car 1. On car 2 ``bno`` defaults to false: car 2 has no BNO085 yet
-(docs/car1-vs-car2.md#imu). When it is mounted, decide how it is wired (car
-1's Jetson-I2C bridge below, or a microcontroller on USB with
-``bno_port``) before turning it on.
+Written on car 1. Car 2's BNO085 is wired the same way, on the Jetson's I2C
+bus (docs/car1-vs-car2.md#imu).
 
 Support code: nothing here can move the car. Publishes /imu/* (imu_bridge),
 /odom/fused and /steering/measured (vehicle_state). Run on top of bringup,
 which provides /odom and the VESC's /sensors/imu/raw:
 
-    ros2 launch imu_bridge vehicle_state_launch.py              # car 2: VESC IMU only
-    ros2 launch imu_bridge vehicle_state_launch.py bno:=true    # BNO + VESC IMU (car 1)
+    ros2 launch imu_bridge vehicle_state_launch.py              # BNO + VESC IMU
+    ros2 launch imu_bridge vehicle_state_launch.py bno:=false   # VESC IMU only
 
 publish_odom_tf:=true also publishes odom_imu -> odom (gyro odometry for
 slam_toolbox). Only with slam_toolbox on odom_frame: odom_imu -- map_course
@@ -107,10 +105,8 @@ def generate_launch_description():
             'hardware', default_value='true',
             description='true starts the real IMU stack; false uses simulated IMU topics.'),
         DeclareLaunchArgument(
-            # Car 2: false, no BNO085 mounted yet (docs/car1-vs-car2.md#imu).
-            'bno', default_value='false',
-            description='Use the BNO085 (car 1: front axle, Jetson I2C). false = VESC '
-                        'IMU only. Car 2 has no BNO085 yet.'),
+            'bno', default_value='true',
+            description='Use the BNO085 (Jetson I2C). false = VESC IMU only.'),
         DeclareLaunchArgument(
             'racer_imu_root', default_value='~/imu-calibration',
             description='Where imu-calibration is cloned (car.yaml, calibration, '

@@ -64,10 +64,7 @@ On car 1, the 2.5 step rests on a map run's grip reading (`20261026-194514`). Th
 
 The team asked for a faster `gap_follow` with less weave, one that can win races. The shipped setup changed to the one that was fastest in the simulator with no wall contact. **Nothing has been driven on the car at these values yet.**
 
-> **On car 2** (ported from car 1 on 2026-10-29): the speeds, the speed ramp, `max_lateral_accel` 2.5 and corner setup off are the same as car 1's. Two things differ:
->
-> - **Steering damping is off** (`enable_steering_damping: false`, `steering_damping:=` defaults to `false`). Car 2 has no BNO085 or `~/imu-calibration` yet, and the IMU stack refuses to start without them. Turn it on together with the other IMU defaults once the BNO085 is mounted and calibrated: see [car1-vs-car2.md](car1-vs-car2.md#imu).
-> - **`max_steering_angle` is 0.349 rad**, car 2's limit from its 2026-10-16 circles.
+> **On car 2** (ported from car 1 on 2026-10-29): the speeds, the speed ramp, `max_lateral_accel` 2.5, corner setup off and, since 2026-10-31, steering damping on are the same as car 1's. One thing differs: **`max_steering_angle` is 0.349 rad**, car 2's limit from its 2026-10-16 circles.
 >
 > The table below was measured with car 1's values, so car 2's laps will differ.
 
@@ -106,7 +103,7 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 
 ### Going back
 
-- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off (on car 2 it is already off; `steering_damping:=true` turns it on).
+- **On the launch line, with no file edit:** `steering_damping:=false` turns the gyro term off.
 - **The IMU stack** stops only when all six IMU features are off: steering damping, adaptive grip, fused speed, understeer, traction and impact stop.
 - **`max_speed:=<m/s>`** lowers the top speed for one run, and also lowers `min_speed`, `corner_speed` and `corner_speed_wide` with it.
 - **In the file:** in `src/gap_follow/config/gap_follow.yaml`, set these back, then restart the launch:
@@ -117,7 +114,7 @@ The "before" row is the same protocol, with the old values passed to `eval_gap.p
 ### Other launches that read the same file
 
 - `map_course` and `auto_map_race` load this file too. Unless `mapping_max_speed:=` is given, their mapping laps now run at up to 5.0 m/s. On a course nobody has driven, pass `mapping_max_speed:=1.5`, as [operations](operations.md) already advises.
-- On car 1, `gap_follow_launch.py` now starts the IMU stack by default. `map_course` already does there, so do not run the two together. On car 2 neither starts it by default yet (`steering_damping:=false`, `imu:=false`).
+- `gap_follow_launch.py` now starts the IMU stack by default, on both cars. `map_course` does too, so do not run the two together.
 - The mapping launches (`map_course`, `auto_map_race` and `autonomous_mapping_launch.py`) start `gap_follow` from this same file, and turn the other-car layer off for their mapping laps. Decided 2026-10-28: mapping is always one car, so they pass `enable_opponent_awareness: false` after the YAML is read.
 - Each of those launches takes an `opponent_awareness` argument that defaults to `false`. `opponent_awareness:=true` turns the other-car layer on for that run.
 
@@ -224,7 +221,7 @@ Each feature has a switch in `src/gap_follow/config/gap_follow.yaml`:
 | `narrow_corridor_speed` | `3.571` (since 2026-10-27; was `2.5`) | Set it to `max_speed` or above to turn the narrow-corridor slowdown off. |
 | `ttc_path_margin` | `0.05` | Set to `0.18` (the old value, `safety_margin`) for the TTC corridor as it was on 2026-10-19. Never above `safety_margin`; the node refuses to start. |
 | `arc_guard_blocked_fallback` | `request` | `freest` brings back the arc guard's old all-blocked behaviour. |
-| `enable_steering_damping` | car 2: `false` until its BNO085 is set up ([car1-vs-car2.md](car1-vs-car2.md#imu)); car 1: `true` since 2026-10-27 | No gyro term: the steering is what it was before 2026-10-27. `steering_damping:=true` on the launch line turns it on and starts the IMU stack; `:=false` turns it off. The stack is skipped only when every IMU feature is off. See [Steering damping (gyro)](#steering-damping-gyro). |
+| `enable_steering_damping` | `true` (car 1 since 2026-10-27, car 2 since 2026-10-31) | No gyro term: the steering is what it was before 2026-10-27. `steering_damping:=false` on the launch line does the same for one run. See [Steering damping (gyro)](#steering-damping-gyro). |
 | `enable_adaptive_grip` | `false` | The corner speed caps use `max_lateral_accel` alone, as before 2026-10-27. Turn it on with `adaptive_grip:=true`, which also starts the IMU stack. See [Adaptive grip (IMU)](#adaptive-grip-imu). |
 | `enable_opponent_awareness` (launch: `opponent_awareness`) | `true` (since 2026-10-28; was `false`) | The other-car layer is off, and the node's commands are what they were before the layer existed (2026-10-22). Launch with `opponent_awareness:=false`. See [Several cars at once](#several-cars-at-once). |
 | `opponent_follow_memory_sec` | `1.0` s (since 2026-10-28; was none) | The follow cap is dropped the moment its car is lost, with the layer still on. Set it to `0.0` to get that. |
@@ -762,12 +759,12 @@ ros2 launch f1tenth_stack bringup_launch.py
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
-ros2 launch gap_follow gap_follow_launch.py steering_damping:=true
+ros2 launch gap_follow gap_follow_launch.py
 ```
 
 **Working when:** the decision lines name a `steering damping` value. In any sourced terminal, `ros2 topic echo /imu/status --once` prints `"state": "ok"`. Keep the car still for about 3 seconds after the launch starts, while the gyro settles.
 
-On car 2 the gyro term is off unless you add `steering_damping:=true`; on car 1, add `steering_damping:=false` to turn it off.
+Add `steering_damping:=false` to turn the gyro term off.
 The IMU stack starts when any of `steering_damping`, `adaptive_grip`, `fused_speed`,
 `imu_understeer`, `imu_traction` or `imu_impact_stop` is on.
 The stack is not started when all six are off.
