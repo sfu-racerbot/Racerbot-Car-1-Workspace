@@ -540,10 +540,15 @@ The full-stick angle goes into `joy_teleop.yaml`, on the one
 (`teleop_yaml.py`). The `default` profile is never touched. If the second
 file fails, the first is put back, so a write lands whole or not at all.
 
-The file is the one bringup
-loads, followed through the `--symlink-install` link back to `src/` (or
-`vesc_yaml_path` if set). If it resolves inside `install/` instead, the page
-warns that the next `colcon build` will overwrite the change.
+By default, accepted values go into the identified car's calibration overlays:
+`src/racerbot_car/cars/ID/calibration/vesc.yaml` and `joy_teleop.yaml`, where
+`ID` is the car ID, such as `rb1`. If the car cannot be identified or an
+overlay is missing, writing to that file is unavailable.
+
+To write elsewhere,
+set `vesc_yaml_path` or `joy_teleop_yaml_path` in the wizard configuration.
+The page shows the resolved path and warns if it is inside `install/`, where
+the next `colcon build` can overwrite it.
 
 **Undo the last change** puts back every file the latest write touched.
 **Undo everything from this session** (`everything: true`) puts each file
