@@ -165,7 +165,7 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'record', default_value='true',
         description='Record every run of an algorithm into '
-                    '~/.ros/racerbot_runs/<time>/ (race_diagnostics '
+                    'data/<car>/racerbot_runs/<time>/ (race_diagnostics '
                     'auto_record). false: do not.'))
     try:
         auto_record_launch = os.path.join(
