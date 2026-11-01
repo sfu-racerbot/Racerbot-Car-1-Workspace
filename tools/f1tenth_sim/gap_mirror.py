@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import sys
 
 import numpy as np
 import yaml
@@ -29,6 +30,8 @@ from gap_follow import opponent_tracking
 
 CONTROL_DT = 0.025
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'src' / 'racerbot_car'))
+from racerbot_car.layers import effective_config  # noqa: E402
 NODE_CONFIG = ROOT / "src" / "gap_follow" / "config" / "gap_follow.yaml"
 
 # Node parameters the mirror does not use (topics, deadman, intent, logging)
@@ -251,15 +254,22 @@ LEGACY_VALUES = {
 }
 
 
-def node_params(config_path: Path = NODE_CONFIG, fill_legacy: bool = False) -> dict:
-    """gap_follow_node's ros__parameters from the shipped YAML, minus the
-    ones the mirror has no use for.
+def node_params(config_path: Path = NODE_CONFIG, fill_legacy: bool = False,
+                car_id: str | None = None) -> dict:
+    """Effective current config, or an explicit snapshot exactly as recorded.
+
+    The shipped path uses the selected car's overlays. A separate config path
+    is a historical input and is never overlaid. Remove only parameters the
+    mirror has no use for.
 
     Refuses a config that enables something the mirror does not model, so a
     simulator run can never quietly measure a different controller.
     """
-    data = yaml.safe_load(Path(config_path).read_text())
-    params = dict(data["gap_follow_node"]["ros__parameters"])
+    if Path(config_path).resolve() == NODE_CONFIG.resolve():
+        params = effective_config('gap_follow.yaml', 'gap_follow_node', car_id)
+    else:
+        data = yaml.safe_load(Path(config_path).read_text())
+        params = dict(data["gap_follow_node"]["ros__parameters"])
     if fill_legacy:
         for name, value in LEGACY_VALUES.items():
             if name not in params:

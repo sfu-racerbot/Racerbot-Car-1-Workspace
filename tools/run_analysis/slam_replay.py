@@ -1,6 +1,6 @@
 """Replay a recorded run through slam_toolbox with the car parked, to tune SLAM without driving.
 
-    python3 tools/run_analysis/slam_replay.py ~/.ros/racerbot_runs/<ts> \
+    python3 tools/run_analysis/slam_replay.py ~/racerbot-ws/data/<car>/racerbot_runs/<time> \
         [--odom odom|odom_imu] [--profile FILE] [--rate R | --exact] [--label NAME]
 
 The run's bag is played into a slam_toolbox started from the run's own recorded settings, with
@@ -40,8 +40,10 @@ from typing import BinaryIO
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # for the commit recorded in replay.json
+sys.path.insert(0, str(REPO_ROOT / 'src/racerbot_car'))
+from racerbot_car.paths import data_dir  # noqa: E402
+
 RELAY = Path(__file__).resolve().with_name('odom_tf_relay.py')
-RUNS_ROOT = Path.home() / '.ros' / 'racerbot_runs'  # where replay folders are written
 PROC_ROOT = Path('/proc')  # the process table the interlock reads
 
 REPLAY_DOMAIN_ID = 77
@@ -627,7 +629,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Replay a recorded run through slam_toolbox with the car parked. '
                     'Refuses while any driver process runs.')
-    parser.add_argument('run_dir', type=Path, help='a recorded run folder, e.g. ~/.ros/racerbot_runs/<ts>')
+    parser.add_argument('run_dir', type=Path, help='a recorded run folder, e.g. data/<car>/racerbot_runs/<time>')
+    parser.add_argument('--car', default=os.environ.get('RACERBOT_CAR'),
+                        help='car id for default output parent (default: RACERBOT_CAR)')
     parser.add_argument('--odom', choices=sorted(ODOM_TOPICS), default='odom',
                         help='the odometry to localise on: odom (wheels) or odom_imu (wheels and gyro)')
     parser.add_argument('--profile', type=Path, default=None,
@@ -638,7 +642,8 @@ def _parser() -> argparse.ArgumentParser:
                       help='replay with synchronous SLAM and recorded pose checkpoints')
     parser.add_argument('--exact-mode', choices=('forced', 'all-scans'), default='forced',
                         help='exact admission: forced (default) or the all-scans timing experiment')
-    parser.add_argument('--out-root', type=Path, default=None, help='output parent (default ~/.ros/racerbot_runs)')
+    parser.add_argument('--out-root', type=Path, default=None,
+                        help='output parent (default data/<car>/racerbot_runs)')
     parser.add_argument('--label', default='default', help='names the output folder (default "default")')
     return parser
 
@@ -956,6 +961,15 @@ def _run(plan: ReplayPlan, rate: float | None, profile_path: Path | None, label:
     return 1
 
 
+def replay_output_root(out_root, car):
+    """Explicit output wins; selecting the default requires a car argument."""
+    if out_root is not None:
+        return Path(out_root).expanduser()
+    if not car:
+        raise ReplayRefused('default output parent requires --car or RACERBOT_CAR; alternatively give --out-root')
+    return data_dir('racerbot_runs', car)
+
+
 def main(argv=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -968,7 +982,7 @@ def main(argv=None) -> int:
         return 2
     try:
         plan = plan_replay(args.run_dir, args.odom, args.profile,
-                           args.out_root if args.out_root is not None else RUNS_ROOT, args.label)
+                           replay_output_root(args.out_root, args.car), args.label)
         if args.exact and plan.profile and any(
                 key in plan.profile for key in ('mode', 'sync', 'async', 'synchronous', 'slam_mode')):
             raise ReplayRefused('--exact does not allow profile overrides of sync/async mode')

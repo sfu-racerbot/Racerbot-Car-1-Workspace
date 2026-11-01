@@ -22,6 +22,7 @@ import re
 import shutil
 
 import yaml
+from racerbot_car import guards
 
 from odom_calibration.vesc_yaml import _atomic_write, _format
 
@@ -115,7 +116,7 @@ def verify(original_text, new_text, value):
         raise ValueError('The edit changed other values in joy_teleop.yaml.')
 
 
-def apply(path, value, backup_directory, label='calibration'):
+def apply(path, value, backup_directory, label='calibration', target_is_overlay=False):
     """Back up joy_teleop.yaml, write the scale, verify, report what happened."""
     path = Path(os.path.expanduser(str(path))).resolve()
     if not path.is_file():
@@ -130,6 +131,15 @@ def apply(path, value, backup_directory, label='calibration'):
     backup = backup_directory / f'joy_teleop.yaml.{stamp}.{safe_label}.bak'
     shutil.copy2(path, backup)
     _atomic_write(path, new_text)
+    if target_is_overlay:
+        try:
+            problems = guards.check_calibration_overlay(path, 'joy_teleop.yaml')
+            if problems:
+                raise ValueError('; '.join(problems))
+        except Exception:
+            from odom_calibration.vesc_yaml import restore
+            restore(path, backup)
+            raise
     return {
         'path': str(path),
         'backup': str(backup),

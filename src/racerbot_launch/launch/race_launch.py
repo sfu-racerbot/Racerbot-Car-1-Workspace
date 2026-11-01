@@ -12,6 +12,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from pure_pursuit import run_commands
+from racerbot_car.layers import effective_values, layered, launch_car_id
 
 # The car's Hokuyo UST-10LX publishes 1081 beams (0.25 deg over 270 deg) --
 # same constant racerbot_sim uses, see sim_bridge.py's LIDAR_BEAMS.
@@ -113,7 +114,7 @@ def generate_launch_description():
       facing the same way, before launching. This is what map_course prints.
 
           ros2 launch racerbot_launch race_launch.py \
-              run_dir:=$HOME/racerbot-ws/data/racerbot_auto/20261022-101500 steering_law:=stanley
+              run_dir:=$HOME/racerbot-ws/data/<car>/racerbot_auto/<time> steering_law:=stanley
 
     * Neither: the map named in particle_filter's localize.yaml and
       ``waypoints_file`` (default: pure_pursuit.yaml's), seeded by hand with
@@ -127,10 +128,11 @@ def generate_launch_description():
     # both already use) so that *not* passing waypoints_file here falls
     # through to whatever pure_pursuit's own config/pure_pursuit.yaml
     # says, instead of silently overriding it with an empty string.
+    car_id = launch_car_id()
     pp_config_path = os.path.join(
         get_package_share_directory('pure_pursuit'), 'config', 'pure_pursuit.yaml')
-    pp_config = yaml.safe_load(open(pp_config_path, 'r'))
-    pp_params = pp_config['pure_pursuit_node']['ros__parameters']
+    pp_layers = layered(pp_config_path, 'pure_pursuit.yaml', car_id)
+    pp_params = effective_values(pp_layers, 'pure_pursuit_node')
     default_waypoints_file = pp_params.get('waypoints_file', '')
     default_steering_law = pp_params.get('steering_law', 'pure_pursuit')
 
@@ -177,7 +179,7 @@ def generate_launch_description():
             if missing:
                 raise RuntimeError(
                     f"run_dir '{run_dir}' is missing {', '.join(missing)}. Pass "
-                    'the directory a mapping run printed (ls ~/racerbot-ws/data/racerbot_auto/).')
+                    'the directory a mapping run printed (data/<car>/racerbot_auto/<time>).')
             localize = [IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(
                     get_package_share_directory('racerbot_launch'),
@@ -213,7 +215,7 @@ def generate_launch_description():
             pure_pursuit = Node(
                 package='pure_pursuit', executable='pure_pursuit_node',
                 name='pure_pursuit_node', output='screen',
-                parameters=[pp_config_path, {
+                parameters=[*pp_layers, {
                     'waypoints_file': waypoints, 'steering_law': steering_law,
                     'opponent_detection_settle_sec': 0.0}])
         if seeder is None:

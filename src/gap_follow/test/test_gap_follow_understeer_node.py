@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 
 import pytest
+from conftest import car_config_args
 import rclpy
 from rclpy.duration import Duration
 from rclpy.parameter import Parameter
@@ -19,7 +20,7 @@ DT = 0.025
 
 
 def _make(enabled=True, extra=()):
-    rclpy.init(args=['--ros-args', '--params-file', CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(CONFIG),
                      # Mid-race scene, not a start: the launch boost (on since
                      # 2026-10-30) skips the ramp and traction hold under test.
                      '-p', 'enable_launch_boost:=false',
@@ -184,7 +185,7 @@ def test_bad_live_parameter_is_refused_without_changing_the_value(name, value):
 
 @pytest.mark.parametrize('name', list(UNDERSTEER_DEFAULTS))
 def test_bad_startup_parameter_is_refused(name):
-    rclpy.init(args=['--ros-args', '--params-file', CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(CONFIG),
                      # Mid-race scene, not a start: the launch boost (on since
                      # 2026-10-30) skips the ramp and traction hold under test.
                      '-p', 'enable_launch_boost:=false',

@@ -537,7 +537,7 @@ class AutoMapRaceNode(Node):
         # different part of that window.
         self.declare_parameter('map_save_retries', 3)
         self.declare_parameter('map_save_retry_delay_sec', 2.5)
-        self.declare_parameter('output_directory', '~/racerbot-ws/data/racerbot_auto')
+        self.declare_parameter('output_directory', '')
         self.declare_parameter('profile_max_speed', 4.0)
         self.declare_parameter('profile_min_speed', 0.5)
         self.declare_parameter('profile_max_lateral_accel', 2.5)
@@ -632,7 +632,9 @@ class AutoMapRaceNode(Node):
         self.map_save_timeout_sec = float(value('map_save_timeout_sec'))
         self.map_save_retries = max(0, int(value('map_save_retries')))
         self.map_save_retry_delay_sec = float(value('map_save_retry_delay_sec'))
-        self.output_directory = Path(os.path.expanduser(str(value('output_directory'))))
+        from racerbot_car.paths import data_dir
+        self.output_directory = (Path(str(value('output_directory'))).expanduser()
+                                 if value('output_directory') else data_dir('racerbot_auto'))
         self.profile_max_speed = float(value('profile_max_speed'))
         self.profile_min_speed = float(value('profile_min_speed'))
         self.profile_max_lateral_accel = float(value('profile_max_lateral_accel'))

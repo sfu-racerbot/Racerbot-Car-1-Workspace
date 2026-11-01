@@ -29,6 +29,8 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+# racerbot: car overlays (docs/car1-vs-car2.md)
+from racerbot_car.layers import car_params, launch_car_id
 
 
 def generate_launch_description():
@@ -51,6 +53,7 @@ def generate_launch_description():
     driving), gap_follow_launch.py, or pure_pursuit_launch.py. See
     docs/operations.md.
     """
+    car_id = launch_car_id()
     joy_teleop_config = os.path.join(
         get_package_share_directory('f1tenth_stack'),
         'config',
@@ -91,11 +94,14 @@ def generate_launch_description():
 
     ld = LaunchDescription([joy_la, vesc_la, sensors_la, mux_la])
 
+    joy_params = car_params('joy_config', joy_teleop_config, 'joy_teleop.yaml', car_id)
+    vesc_params = car_params('vesc_config', vesc_config, 'vesc.yaml', car_id)
+    sensors_params = car_params('sensors_config', sensors_config, 'sensors.yaml', car_id)
     joy_node = Node(
         package='joy',
         executable='joy_node',
         name='joy',
-        parameters=[LaunchConfiguration('joy_config')]
+        parameters=joy_params
     )
     # joy_teleop is its own control layer now -- see teleop_launch.py.
     # Deliberately not started here; only joy_node (raw input) is shared.
@@ -103,25 +109,25 @@ def generate_launch_description():
         package='vesc_ackermann',
         executable='ackermann_to_vesc_node',
         name='ackermann_to_vesc_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     vesc_to_odom_node = Node(
         package='vesc_ackermann',
         executable='vesc_to_odom_node',
         name='vesc_to_odom_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     vesc_driver_node = Node(
         package='vesc_driver',
         executable='vesc_driver_node',
         name='vesc_driver_node',
-        parameters=[LaunchConfiguration('vesc_config')]
+        parameters=vesc_params
     )
     urg_node = Node(
         package='urg_node',
         executable='urg_node_driver',
         name='urg_node',
-        parameters=[LaunchConfiguration('sensors_config')]
+        parameters=sensors_params
     )
     ackermann_mux_node = Node(
         package='ackermann_mux',
@@ -159,7 +165,7 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'record', default_value='true',
         description='Record every run of an algorithm into '
-                    '~/.ros/racerbot_runs/<time>/ (race_diagnostics '
+                    'data/<car>/racerbot_runs/<time>/ (race_diagnostics '
                     'auto_record). false: do not.'))
     try:
         auto_record_launch = os.path.join(

@@ -339,10 +339,11 @@ def test_mapping_speed_default_and_override(requested, expected):
 
 
 @pytest.mark.parametrize('requested', [None, '/x/y'])
-def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested):
+def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested, tmp_path, monkeypatch):
     # oracle: Task J1a R5: recorder arguments used to leak into the parent
     # context, sending maps to racerbot_runs. This fails without GroupAction.
     from launch.actions import GroupAction, SetLaunchConfiguration
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
 
     ld = ml.generate_launch_description(imu_probe=lambda: True)
     ctx = LaunchContext()
@@ -376,5 +377,5 @@ def test_recorder_include_cannot_overwrite_supervisor_output_directory(requested
                 entity.execute(ctx)
 
     visit(ld.entities)
-    assert recorded == ['~/racerbot-ws/data/racerbot_runs']
-    assert supervisors == [requested or '~/racerbot-ws/data/racerbot_auto']
+    assert recorded == [str(tmp_path / 'data/rb1/racerbot_runs')]
+    assert supervisors == [requested or str(tmp_path / 'data/rb1/racerbot_auto')]

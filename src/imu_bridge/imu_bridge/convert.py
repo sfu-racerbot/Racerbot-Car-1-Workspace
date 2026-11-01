@@ -155,11 +155,11 @@ def load_calibration(json_path, rpy_deg):
     )
 
 
-def load_mount(car_yaml, imu):
+def load_mount(car_yaml, imu, racer_imu_root=None):
     """(rpy_deg, absolute calib path or None) for one IMU in racer_imu's car.yaml.
 
-    The calib path in car.yaml is relative to the repo root, the parent of
-    config/ -- the same rule as racer_imu.frames.Config.resolve.
+    Relative paths prefer car.yaml's directory, then the racer_imu root.
+    Legacy config/car.yaml callers can omit the root (the parent of config/).
     Raises KeyError if the IMU is not listed.
     """
     car_yaml = Path(car_yaml).expanduser().resolve()
@@ -175,7 +175,11 @@ def load_mount(car_yaml, imu):
         return rpy_deg, None
     calib = Path(calib).expanduser()
     if not calib.is_absolute():
-        calib = car_yaml.parent.parent / calib
+        local = car_yaml.parent / calib
+        root = (Path(racer_imu_root).expanduser() if racer_imu_root is not None
+                else car_yaml.parent.parent if car_yaml.parent.name == 'config'
+                else Path(__file__).resolve().parents[3] / 'tools/imu_calibration')
+        calib = local if local.is_file() else root / calib
     return rpy_deg, calib
 
 

@@ -11,7 +11,7 @@ from .sim import SCENARIOS, SimServer
 
 
 def add_common_args(ap: argparse.ArgumentParser, sim_default: str | None = None):
-    ap.add_argument("--config", default=None, help="car.yaml (default: config/car.yaml)")
+    ap.add_argument("--config", default=None, help="car.yaml (default: the selected car's imu/car.yaml)")
     ap.add_argument("--vesc", default=None, help="VESC serial port (overrides car.yaml)")
     ap.add_argument("--bno", default=None, help="BNO085 MCU serial port (overrides car.yaml)")
     ap.add_argument("--sim", nargs="?", const=sim_default or "drift", default=None, choices=SCENARIOS,

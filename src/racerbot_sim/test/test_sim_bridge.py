@@ -144,10 +144,8 @@ def test_lidar_geometry_matches_the_real_sensor():
 
 def _car_params(package, node):
     """The vehicle geometry a real driving node is actually launched with."""
-    path = os.path.join(
-        os.path.dirname(__file__), '..', '..', package, 'config', f'{package}.yaml')
-    with open(path, encoding='utf-8') as handle:
-        return yaml.safe_load(handle)[node]['ros__parameters']
+    from racerbot_car.layers import effective_config
+    return effective_config(f'{package}.yaml', node, 'rb1')
 
 
 @pytest.mark.parametrize('package,node,fields', [

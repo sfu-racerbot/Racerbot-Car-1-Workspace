@@ -22,6 +22,7 @@ from sensor_msgs.msg import Joy, LaserScan
 
 from gap_follow import gap_logic
 from gap_follow.gap_follow_node import GapFollowNode
+from conftest import car_config_args
 
 # Same rule as test_gap_follow_node.py: last in every rclpy.init, never the
 # real /drive (enforced by test_no_test_here_builds_a_node_on_the_real_drive).
@@ -30,7 +31,7 @@ TEST_ONLY_DRIVE = ['-p', 'drive_topic:=/test_only/drive']
 # constructor's own declared defaults are not what the car runs.
 PACKAGED_CONFIG = os.path.join(
     os.path.dirname(__file__), '..', 'config', 'gap_follow.yaml')
-CAR = ['--params-file', PACKAGED_CONFIG]
+CAR = car_config_args(PACKAGED_CONFIG)
 N_BEAMS = 1081
 SPAN = math.radians(270.0)
 

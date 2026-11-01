@@ -126,9 +126,11 @@ def metadata_repos(workspace_root, racer_imu_root):
 
 
 def imu_calibration_files(racer_imu_root):
-    """car.yaml and every calibration JSON under racer_imu_root/calib."""
-    root = Path(racer_imu_root).expanduser()
-    return [root / 'config' / 'car.yaml', *sorted((root / 'calib').glob('*.json'))]
+    """The running car's mount and calibration, independent of the code root."""
+    from racerbot_car.identity import current_car_id
+    from racerbot_car.paths import cars_dir
+    root = cars_dir() / current_car_id() / 'imu'
+    return [root / 'car.yaml', *sorted((root / 'calib').glob('*.json'))]
 
 
 def write_run_metadata(run_dir, repos, files):
@@ -140,6 +142,12 @@ def write_run_metadata(run_dir, repos, files):
     copied = copy_files(files, meta / 'files')
     (meta / 'files' / 'MANIFEST.txt').write_text(
         ''.join(f'{src} -> {dst}\n' for src, dst in copied.items()))
+    from racerbot_car.identity import current_car_id
+    try:
+        car_id = current_car_id()
+    except (RuntimeError, OSError, ValueError) as exc:
+        car_id = f'unresolved: {exc}'
+    (meta / 'car_id.txt').write_text(car_id + '\n')
     return meta
 
 

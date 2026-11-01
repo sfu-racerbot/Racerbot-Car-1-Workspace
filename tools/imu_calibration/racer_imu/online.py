@@ -142,7 +142,7 @@ class HealthMonitor:
 
 # ---------------------------------------------------------------- persistence of the learned bias
 def online_bias_path(cfg) -> Path:
-    sync_file = cfg.resolve(cfg.section("sync").get("file", "calib/sync.json"))
+    sync_file = cfg.resolve(cfg.section("sync").get("file", "calib/sync.json"), for_write=True)
     return sync_file.parent / "online_gyro_bias.json"
 
 

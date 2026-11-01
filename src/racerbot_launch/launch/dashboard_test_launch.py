@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from racerbot_car.layers import layered, launch_car_id
 
 
 def generate_launch_description():
@@ -31,6 +32,7 @@ def generate_launch_description():
     Then open https://dashboard.sfuracerbot.ca and pick car 1 -- the car
     serves no pages itself any more.
     """
+    car_id = launch_car_id()
     sensors_config = os.path.join(
         get_package_share_directory('f1tenth_stack'), 'config', 'sensors.yaml')
 
@@ -38,7 +40,7 @@ def generate_launch_description():
         package='urg_node',
         executable='urg_node_driver',
         name='urg_node',
-        parameters=[sensors_config],
+        parameters=layered(sensors_config, 'sensors.yaml', car_id),
     )
     static_tf_node = Node(
         package='tf2_ros',

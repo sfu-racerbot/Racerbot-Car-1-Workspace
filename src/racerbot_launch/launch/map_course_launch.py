@@ -16,7 +16,7 @@ straight to /drive), the run recorder, and auto_map_race_node in
 finish_after_mapping mode. The supervisor forwards gap_follow's commands
 only while LB is held, counts laps from SLAM's pose, and after ``laps``
 (default 3) closed laps saves the map, pose graph and racing line to
-``~/racerbot-ws/data/racerbot_auto/<timestamp>/``, writes commands.txt there, stops the
+``~/racerbot-ws/data/<car>/racerbot_auto/<time>/``, writes commands.txt there, stops the
 car, and exits. Its exit shuts this whole launch down.
 
 Differences from auto_map_race_launch.py: no pure_pursuit, no particle
@@ -72,6 +72,8 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import effective_values, layered, launch_car_id
+from racerbot_car.paths import data_dir
 
 FUSED_ODOM = '/odom/fused'   # vehicle_state.yaml's fused_odom_topic
 IMU_ODOM_FRAME = 'odom_imu'  # vehicle_state.yaml's imu_odom_frame
@@ -161,6 +163,7 @@ def _wiring(context, imu_probe=None):
 
 
 def generate_launch_description(imu_probe=None):
+    car_id = launch_car_id()
     args = [
         DeclareLaunchArgument(
             'opponent_awareness', default_value='false',
@@ -185,7 +188,7 @@ def generate_launch_description(imu_probe=None):
             'mapping_min_speed', default_value='',
             description='Optional speed floor. Empty: gap_follow.yaml governs.'),
         DeclareLaunchArgument(
-            'output_directory', default_value='~/racerbot-ws/data/racerbot_auto',
+            'output_directory', default_value=str(data_dir('racerbot_auto', car_id)),
             description='Parent directory of the run directory.'),
         DeclareLaunchArgument(
             'diagnostics', default_value='true',
@@ -234,7 +237,7 @@ def generate_launch_description(imu_probe=None):
         # included files, and this launch's output_directory (the map run
         # folder) would otherwise become the recorder's too.
         launch_arguments={'record_bag': LaunchConfiguration('record_bag'),
-                          'output_directory': '~/racerbot-ws/data/racerbot_runs'}.items(),
+                          'output_directory': str(data_dir('racerbot_runs', car_id))}.items(),
         condition=IfCondition(LaunchConfiguration('diagnostics')),
     )
     diagnostics = GroupAction(actions=[diagnostics_include], scoped=True)
@@ -250,6 +253,7 @@ def generate_launch_description(imu_probe=None):
     )
     gap_config = os.path.join(
         get_package_share_directory('gap_follow'), 'config', 'gap_follow.yaml')
+    gap_layers = layered(gap_config, 'gap_follow.yaml', car_id)
 
     def nodes(context):
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
@@ -261,7 +265,8 @@ def generate_launch_description(imu_probe=None):
         speeds = mapping_speed_overrides(
             gap_config,
             LaunchConfiguration('mapping_max_speed').perform(context),
-            LaunchConfiguration('mapping_min_speed').perform(context))
+            LaunchConfiguration('mapping_min_speed').perform(context),
+            defaults=effective_values(gap_layers, 'gap_follow_node'))
         odom = odom_overrides(LaunchConfiguration('imu').perform(context),
                               LaunchConfiguration('fused_speed').perform(context))
         laps = int(LaunchConfiguration('laps').perform(context))
@@ -272,7 +277,7 @@ def generate_launch_description(imu_probe=None):
         gap_follow = Node(
             package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
             output='screen',
-            parameters=[gap_config, {'enable_opponent_awareness': enabled == 'true',
+            parameters=[*gap_layers, {'enable_opponent_awareness': enabled == 'true',
                          # one car, mapping: no race start (docs/gap-follow.md#launch-boost)
                          'enable_launch_boost': False},
                         dict({'drive_topic': '/auto_map/drive'}, **speeds, **odom)],

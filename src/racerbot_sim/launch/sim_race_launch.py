@@ -7,7 +7,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-import yaml
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, Shutdown
@@ -18,14 +17,11 @@ from launch_ros.actions import Node, PushRosNamespace, SetRemap
 from launch_ros.parameter_descriptions import ParameterValue
 
 from racerbot_sim import tracks
-
-
-def _params(path):
-    with open(path, encoding='utf-8') as handle:
-        return yaml.safe_load(handle)['gap_follow_node']['ros__parameters']
+from racerbot_car.layers import effective_values, layered, launch_car_id
 
 
 def _setup(context):
+    car_id = launch_car_id()
     opponent = LaunchConfiguration('opponent').perform(context)
     if opponent not in ('ours', 'team_a'):
         raise RuntimeError(f"unknown opponent:={opponent!r}; expected ours or team_a")
@@ -47,6 +43,7 @@ def _setup(context):
     gap_share = get_package_share_directory('gap_follow')
     default_yaml = os.path.join(gap_share, 'config', 'gap_follow.yaml')
     car1_yaml = LaunchConfiguration('car1_params').perform(context) or default_yaml
+    car1_layers = layered(car1_yaml, 'gap_follow.yaml', car_id)
     offsets = ('-3.0,0.0' if LaunchConfiguration('swap_starts').perform(context).lower() == 'true'
                else '0.0,-3.0')
     bringup = IncludeLaunchDescription(
@@ -63,11 +60,11 @@ def _setup(context):
             'drive_topic_prefix': LaunchConfiguration('drive_topic_prefix'),
         }.items())
     car1 = Node(package='gap_follow', executable='gap_follow_node', name='gap_follow_node',
-                parameters=[car1_yaml, {'drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/drive']}],
+                parameters=[*car1_layers, {'drive_topic': [LaunchConfiguration('drive_topic_prefix'), '/drive']}],
                 output='screen')
     if opponent == 'ours':
         car2_yaml = LaunchConfiguration('car2_params').perform(context) or default_yaml
-        car2 = _params(car2_yaml)
+        car2 = effective_values(layered(car2_yaml, 'gap_follow.yaml', car_id), 'gap_follow_node')
         car2.update(scan_topic='/car2/scan', odom_topic='/car2/odom',
                     drive_topic=LaunchConfiguration('drive_topic_prefix').perform(context) + '/car2/drive',
                     joy_topic='/car2/joy', intent_topic='/car2/drive_intent',
@@ -102,7 +99,7 @@ def _setup(context):
                                  'reverse': LaunchConfiguration('reverse'),
                                  'timeout_s': ParameterValue(LaunchConfiguration('timeout_s'), value_type=float),
                                  'control_parameters_json': ParameterValue(
-                                     json.dumps({'car1': _params(car1_yaml), 'car2': car2}), value_type=str),
+                                     json.dumps({'car1': effective_values(car1_layers, 'gap_follow_node'), 'car2': car2}), value_type=str),
                                  'output_dir': LaunchConfiguration('output_dir')}], output='screen')
     actions = [bringup, car1, car2_node, referee]
     if LaunchConfiguration('record').perform(context).lower() == 'true':

@@ -29,6 +29,7 @@ from eval_gap import (  # noqa: E402
     components_range_min, make_plant, parse_set)
 
 import numpy as np  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 
 COLUMNS = (
     "step", "t", "x", "y", "yaw_deg", "wheel_angle", "speed_meas", "cmd_speed", "steering",
@@ -50,17 +51,17 @@ def _fmt(value):
     return value
 
 
-def trace(track, params, seed, timeout_s):
-    plant = make_plant(track, seed)
+def trace(track, params, seed, timeout_s, car_id=None):
+    plant = make_plant(track, seed, car_id)
     line = plant.env.unwrapped.track.raceline
     obs, _ = plant.reset(np.array([[line.xs[0], line.ys[0], line.yaws[0]]]))
 
     class _Lidar:
         pass
     lid = _Lidar()
-    lid.angle_min = float(-components_half_fov())
-    lid.angle_increment = float(components_increment())
-    lid.range_min = float(components_range_min())
+    lid.angle_min = float(-components_half_fov(car_id))
+    lid.angle_increment = float(components_increment(car_id))
+    lid.range_min = float(components_range_min(car_id))
     ctrl = GapController(params, lid)
 
     rows = []
@@ -146,6 +147,7 @@ def plot(rows, track, out_path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("--track", default="indoor_tight")
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--timeout", type=float, default=120.0)
@@ -154,7 +156,8 @@ def main(argv=None):
     ap.add_argument("--out", help="write the per-tick CSV here")
     ap.add_argument("--plot", help="write a PNG of the driven path here")
     args = ap.parse_args(argv)
-    rows, laps = trace(args.track, parse_set(args.set), args.seed, args.timeout)
+    car_id = car_from_args(ap, args)
+    rows, laps = trace(args.track, parse_set(args.set, car_id), args.seed, args.timeout, car_id)
     if args.out:
         with open(args.out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(COLUMNS))

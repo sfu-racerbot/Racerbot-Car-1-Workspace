@@ -81,6 +81,11 @@ sys.path.insert(0, os.path.join(ROOT, 'tools', 'racerbot_sim'))
 import harness_procs  # noqa: E402
 from conftest import require_isolation  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def select_test_car(monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+
 SHIPPED_GAP_FOLLOW_YAML = os.path.join(ROOT, 'src', 'gap_follow', 'config', 'gap_follow.yaml')
 # Our own nodes only: a leftover gym bridge or referee on this domain would
 # publish a second /scan, /odom or /sim/status beside the race being run.

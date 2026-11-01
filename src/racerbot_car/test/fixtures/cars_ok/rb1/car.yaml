@@ -1,0 +1,10 @@
+name: car 1
+lidar:
+  kind: serial
+  port: /dev/sensors/hokuyo
+  usb_id: "15d1:0000"
+camera:
+  kind: uvc
+  device: /dev/video0
+dashboard_site: rb1
+distinctive_usb_ids: ["15d1:0000"]

@@ -67,7 +67,8 @@ from recognition import (  # noqa: E402
     recognition_counts,
     recognition_delays,
 )
-from sim_fidelity import CALIBRATION, PROFILES  # noqa: E402
+from sim_fidelity import calibration_for_car, PROFILES  # noqa: E402
+from sim_fidelity.calibration import add_car_argument, car_from_args  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
 CONTROL_DT = eval_gap.CONTROL_DT
@@ -82,8 +83,9 @@ _TRUE_WORDS = ("1", "true", "yes", "on")
 _FALSE_WORDS = ("0", "false", "no", "off")
 
 
-def make_plant(track: str, seed: int, cars: int) -> FidelityPlant:
-    components = env_components(PROFILES[DEFAULT_PROFILE], CALIBRATION)
+def make_plant(track: str, seed: int, cars: int, car_id=None) -> FidelityPlant:
+    calibration = calibration_for_car(car_id)
+    components = env_components(PROFILES[DEFAULT_PROFILE], calibration)
     config = EnvConfig(
         seed=seed, map_name=eval_gap.track_path(track), params=components["params"],
         num_agents=cars, control_config=components["control_config"],
@@ -95,7 +97,7 @@ def make_plant(track: str, seed: int, cars: int) -> FidelityPlant:
         render_enabled=False)
     env = gym.make("f1tenth_gym:f1tenth-v0", config=config, render_mode=None)
     # Every car is a car under test, so every car gets the real sensor error.
-    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], cars, seed, CONTROL_DT, CALIBRATION,
+    return FidelityPlant(env, PROFILES[DEFAULT_PROFILE], cars, seed, CONTROL_DT, calibration,
                          degrade_agents=frozenset(range(cars)))
 
 
@@ -254,7 +256,7 @@ def is_recognised(moving_body, leader_base, tolerance: float = RECOGNITION_TOLER
 
 def run_multi(track: str, params_list: list, seed: int, duration_s: float,
               spacing: float = 3.0, laps_required: float = 2.0, reverse: bool = False,
-              slots=None) -> dict:
+              slots=None, car_id=None) -> dict:
     """One run of every car. The result's ``cars`` entries carry each car's
     stats, ``progress_m`` (its position along the centreline every tick, see
     _Progress.position), ``speed_mps`` (ground-truth speed magnitude in m/s)
@@ -267,14 +269,14 @@ def run_multi(track: str, params_list: list, seed: int, duration_s: float,
     slots = tuple(range(cars)) if slots is None else tuple(slots)
     if sorted(slots) != list(range(cars)):
         raise ValueError(f"slots must be a line-up of 0..{cars - 1}, got {slots}")
-    plant = make_plant(track, seed, cars)
+    plant = make_plant(track, seed, cars, car_id)
     line = plant.env.unwrapped.track.raceline
     poses = start_poses(line, cars, spacing, reverse, slots)
     obs, _ = plant.reset(poses)
     lid = type("Lidar", (), {})()
-    lid.angle_min = float(-eval_gap.components_half_fov())
-    lid.angle_increment = float(eval_gap.components_increment())
-    lid.range_min = float(eval_gap.components_range_min())
+    lid.angle_min = float(-eval_gap.components_half_fov(car_id))
+    lid.angle_increment = float(eval_gap.components_increment(car_id))
+    lid.range_min = float(eval_gap.components_range_min(car_id))
     ctrls = [GapController(p, lid) for p in params_list]
     reference = np.column_stack((line.xs, line.ys))
     progress = line_up_progress(reference, poses, reverse)
@@ -613,10 +615,10 @@ def aggregate_head_to_head(outcomes: list) -> dict:
     return agg
 
 
-def _car_set_value(item: str, name: str, raw: str):
+def _car_set_value(item: str, name: str, raw: str, defaults):
     """One --car-set value, typed the way gap_follow's YAML types it. A boolean
     that is not spelled out is refused, not read as false."""
-    default = eval_gap.DEFAULTS[name]
+    default = defaults[name]
     text = raw.strip()
     if isinstance(default, bool):
         if text.lower() in _TRUE_WORDS:
@@ -637,7 +639,7 @@ def _car_set_value(item: str, name: str, raw: str):
     return type(default)(number)
 
 
-def parse_car_set(items, cars: int) -> dict:
+def parse_car_set(items, cars: int, car_id=None) -> dict:
     """``--car-set N:name=value`` items as ``{car index: {name: value}}``.
 
     A bad item raises SystemExit naming it: an index that is not a whole number
@@ -646,6 +648,7 @@ def parse_car_set(items, cars: int) -> dict:
     a value that does not parse for that parameter. A later item for the same
     car and parameter wins, as it does for ``--set``.
     """
+    defaults = eval_gap.node_params(car_id=car_id)
     overrides = {}
     for item in items or []:
         index_text, colon, assignment = item.partition(":")
@@ -659,9 +662,9 @@ def parse_car_set(items, cars: int) -> dict:
         if not 0 <= index < cars:
             raise SystemExit(f"--car-set {item!r}: car index {index} is outside 0..{cars - 1}")
         name = name.strip()
-        if name not in eval_gap.DEFAULTS:
+        if name not in defaults:
             raise SystemExit(f"--car-set {item!r}: unknown parameter {name!r}")
-        overrides.setdefault(index, {})[name] = _car_set_value(item, name, raw)
+        overrides.setdefault(index, {})[name] = _car_set_value(item, name, raw, defaults)
     return overrides
 
 
@@ -777,6 +780,7 @@ def _report_head_to_head(track: str, runs: list, params_list: list) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_car_argument(ap)
     ap.add_argument("--track", default="indoor_wide", help="as eval_gap: a name, group, or comma list")
     ap.add_argument("--cars", type=int, default=2)
     ap.add_argument("--speeds", help="top speed per car, comma-separated, car 0 first; default: each car's "
@@ -796,15 +800,16 @@ def main(argv=None) -> int:
     ap.add_argument("--swap-starts", action="store_true",
                     help="two cars only: run every seed twice, once with each car starting in front")
     args = ap.parse_args(argv)
+    car_id = car_from_args(ap, args)
     if args.swap_starts and args.cars != 2:
         raise SystemExit("--swap-starts needs --cars 2")
-    base = eval_gap.parse_set(args.set)
-    params_list = per_car_params(base, parse_car_set(args.car_set, args.cars), args.cars, args.speeds)
+    base = eval_gap.parse_set(args.set, car_id)
+    params_list = per_car_params(base, parse_car_set(args.car_set, args.cars, car_id), args.cars, args.speeds)
     tracks = eval_gap.select_tracks(args.track)
     for t in tracks:
         eval_gap.track_path(t)
     orders = [None, (1, 0)] if args.swap_starts else [None]
-    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order)
+    jobs = [(t, params_list, args.first_seed + k, args.duration, args.spacing, args.laps, args.reverse, order, car_id)
             for t in tracks for k in range(args.seeds) for order in orders]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(_job, jobs))

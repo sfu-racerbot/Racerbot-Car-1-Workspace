@@ -1,0 +1,17 @@
+# Car 1's hardware. Everything car-specific that isn't a ROS parameter.
+# Calibration overlays (servo map, erpm gains, steering limits) live next to this
+# file under calibration/ (added in a later task).
+name: car 1
+lidar:
+  kind: serial                # Hokuyo UST-30LX over USB
+  port: /dev/sensors/hokuyo   # /etc/udev/rules.d/99-hokuyo.rules
+  usb_id: "15d1:0000"
+camera:
+  kind: uvc                   # plain UVC webcam, streamed by usb_cam_stream
+  device: /dev/video0
+dashboard_site: rb1
+hostnames:
+  remote_desktop: rd-rb1
+  ssh: ssh-rb1
+# USB ids only this car has: a different car's profile refuses to start when one is present.
+distinctive_usb_ids: ["15d1:0000"]

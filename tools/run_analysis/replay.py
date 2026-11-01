@@ -58,9 +58,9 @@ class Tick:
 
 
 def replay(run, t0: float, t1: float, overrides: dict | None = None,
-           params: dict | None = None) -> list:
+           params: dict | None = None, car_id: str | None = None) -> list:
     """One Tick per scan received in (t0, t1); t0 should be an LB press."""
-    p = dict(params if params is not None else gap_mirror.node_params())
+    p = dict(params if params is not None else gap_mirror.node_params(car_id=car_id))
     p.update(overrides or {})
     ctrl = gap_mirror.GapController(p, _Lidar(run))
     idx = np.where((run.scan_t > t0) & (run.scan_t < t1))[0]
@@ -132,14 +132,15 @@ def stop_clusters(ticks: list, gap_s: float = 0.4) -> list:
     return clusters
 
 
-def explain_ttc(run, tick: Tick, steering_basis: float, params: dict | None = None) -> dict:
+def explain_ttc(run, tick: Tick, steering_basis: float, params: dict | None = None,
+                car_id: str | None = None) -> dict:
     """Geometry of the beam that set the minimum TTC on ``tick``, and whether
     the body's own swept path along the same arc was clear.
 
     ``steering_basis`` is the rack position the node used (the previous
     tick's commanded steering).
     """
-    p = params or gap_mirror.node_params()
+    p = params if params is not None else gap_mirror.node_params(car_id=car_id)
     clean, valid = gap_logic.sanitize_ranges(run.scan[tick.scan_index].astype(np.float64),
                                              p["max_range"], run.range_min)
     angles = run.beam_angles()

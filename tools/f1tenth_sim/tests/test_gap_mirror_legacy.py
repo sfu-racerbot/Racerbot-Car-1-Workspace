@@ -18,7 +18,7 @@ import gap_mirror  # noqa: E402
 
 
 def _old_yaml(tmp_path, keep=()):
-    data = yaml.safe_load(gap_mirror.NODE_CONFIG.read_text())
+    data = {'gap_follow_node': {'ros__parameters': gap_mirror.node_params()}}
     params = data['gap_follow_node']['ros__parameters']
     for name in gap_mirror.LEGACY_VALUES:
         if name not in keep:
@@ -42,7 +42,7 @@ def test_missing_parameters_take_their_pre_existence_values(tmp_path):
 
 def test_a_parameter_the_file_has_is_never_overwritten(tmp_path):
     p = gap_mirror.node_params(_old_yaml(tmp_path, keep=('ttc_path_margin',)), fill_legacy=True)
-    shipped = yaml.safe_load(gap_mirror.NODE_CONFIG.read_text())['gap_follow_node']['ros__parameters']
+    shipped = gap_mirror.node_params()
     assert p['ttc_path_margin'] == shipped['ttc_path_margin']
     assert p['ttc_path_margin'] != p['safety_margin'], 'precondition: distinguishable values'
 

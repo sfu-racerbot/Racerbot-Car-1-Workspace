@@ -48,9 +48,10 @@ def test_new_run_picks_the_newest_commands_written_since_start(tmp_path):
     assert mc.new_run(tmp_path / 'missing', now) is None
 
 
-def test_output_directory_argument_is_honoured():
+def test_output_directory_argument_is_honoured(tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     assert mc.output_directory(['laps:=4', 'output_directory:=/x/y']) == Path('/x/y')
-    assert mc.output_directory(['laps:=4']) == Path(os.path.expanduser('~/racerbot-ws/data/racerbot_auto'))
+    assert mc.output_directory(['laps:=4']) == tmp_path / 'data/rb1/racerbot_auto'
 
 
 def test_new_run_is_the_newest_whatever_order_the_directory_lists(tmp_path):
@@ -117,7 +118,7 @@ def test_the_launch_file_starts_no_drivers():
 
 def test_main_passes_arguments_through_and_prints_the_commands_last(
         tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(mc, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     out = tmp_path / 'runs'
     args_file = tmp_path / 'args'
     bin_dir = _fake_ros2(tmp_path, (
@@ -145,7 +146,7 @@ def test_main_passes_arguments_through_and_prints_the_commands_last(
 
 
 def test_main_reports_no_map_and_the_launch_exit_code(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(mc, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     out = tmp_path / 'runs'
     bin_dir = _fake_ros2(tmp_path, 'exit 3\n')
     monkeypatch.setenv('PATH', f'{bin_dir}{os.pathsep}{os.environ["PATH"]}')
@@ -165,7 +166,7 @@ def test_the_recorder_gets_its_own_folder_not_the_map_run_folder():
     # on the car, 2026-10-22).
     for name in ('map_course_launch.py', 'auto_map_race_launch.py'):
         text = (SCRIPT.parents[1] / 'launch' / name).read_text()
-        assert "'output_directory': '~/racerbot-ws/data/racerbot_runs'" in text, name
+        assert "'output_directory': str(data_dir('racerbot_runs', car_id))" in text, name
 
 
 def test_simulator_runs_get_imu_hardware_false_unless_imu_hardware_was_given():
@@ -181,7 +182,7 @@ def test_simulator_runs_get_imu_hardware_false_unless_imu_hardware_was_given():
 def test_main_in_the_simulator_launches_without_imu_hardware(tmp_path, monkeypatch, capsys):
     # oracle: spec -- map_course.launch_arguments docstring; approved 2026-10-29
     # (I1 part b): the real launch receives imu_hardware:=false, keeping the IMU.
-    monkeypatch.setattr(mc, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
+    monkeypatch.setenv('RACERBOT_WS', str(tmp_path))
     out = tmp_path / 'runs'
     args_file = tmp_path / 'args'
     bin_dir = _fake_ros2(tmp_path, f'echo "$@" > {args_file}\nexit 0\n')
@@ -221,7 +222,6 @@ def _analysis_fixture(tmp_path, monkeypatch, recorder=True, fail=False):
         'exit 3\n'))
     monkeypatch.setenv('PATH', f'{bin_dir}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setenv('RACERBOT_WS', str(root))
-    monkeypatch.setattr(mc, 'LOG_DIRECTORY', str(tmp_path / 'logs'))
     _drivers(monkeypatch, 'gym_bridge_node')
     return run, maps, events, args, root
 

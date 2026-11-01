@@ -18,6 +18,7 @@ import sys
 
 import numpy as np
 import pytest
+from conftest import car_config_args
 import rclpy
 import yaml
 from nav_msgs.msg import Odometry
@@ -49,7 +50,7 @@ def _make(*extra):
     # since 2026-10-30) ignores opponents for the first 3 s / 5 m after LB, so
     # it is off unless a caller turns it back on with '-p
     # enable_launch_boost:=true' in extra (test_launch_boost_node.py does).
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', f'command_slew_max_dt:={DT}',
                      '-p', 'enable_launch_boost:=false', *extra, *TEST_ONLY_DRIVE])
     node = GapFollowNode()
@@ -127,7 +128,7 @@ def test_off_builds_no_layer_and_reads_none_of_its_values():
 
 
 def test_on_with_a_bad_value_refuses_to_start():
-    rclpy.init(args=['--ros-args', '--params-file', PACKAGED_CONFIG,
+    rclpy.init(args=['--ros-args', *car_config_args(PACKAGED_CONFIG),
                      '-p', 'enable_opponent_awareness:=true',
                      '-p', 'opponent_alpha:=5.0', *TEST_ONLY_DRIVE])
     try:

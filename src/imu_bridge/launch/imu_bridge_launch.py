@@ -16,16 +16,19 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from racerbot_car.layers import launch_car_id
+from racerbot_car.paths import cars_dir
 
 OVERRIDES = ('bno_port', 'primary', 'racer_imu_root')
 
 
 def _node(context, *args, **kwargs):
+    car = launch_car_id()
     config = os.path.join(
         get_package_share_directory('imu_bridge'), 'config', 'imu_bridge.yaml')
     # Only arguments actually given override the YAML, and they come AFTER
     # the params file in the list -- later entries win, so they take effect.
-    overrides = {}
+    overrides = {'car_yaml': str(cars_dir() / car / 'imu/car.yaml')}
     for name in OVERRIDES:
         value = LaunchConfiguration(name).perform(context)
         if value:
@@ -51,6 +54,6 @@ def generate_launch_description():
                         "Empty = the YAML's value."),
         DeclareLaunchArgument(
             'racer_imu_root', default_value='',
-            description="Where the IMU calibration lives (default tools/imu_calibration/ in this workspace). Empty = the YAML's value."),
+            description="Where racer_imu code lives (default tools/imu_calibration/ in this workspace). Empty = the YAML's value."),
         OpaqueFunction(function=_node),
     ])

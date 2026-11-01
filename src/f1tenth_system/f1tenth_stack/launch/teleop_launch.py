@@ -5,6 +5,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+# racerbot: car overlays (docs/car1-vs-car2.md)
+from racerbot_car.layers import car_params, launch_car_id
 
 
 def generate_launch_description():
@@ -19,6 +21,7 @@ def generate_launch_description():
     node instead (gap_follow_launch.py, pure_pursuit_launch.py) if you want
     that to drive instead -- see docs/operations.md.
     """
+    car_id = launch_car_id()
     joy_teleop_config = os.path.join(
         get_package_share_directory('f1tenth_stack'),
         'config',
@@ -34,7 +37,7 @@ def generate_launch_description():
         package='joy_teleop',
         executable='joy_teleop',
         name='joy_teleop',
-        parameters=[LaunchConfiguration('joy_config')]
+        parameters=car_params('joy_config', joy_teleop_config, 'joy_teleop.yaml', car_id)
     )
 
     return LaunchDescription([joy_la, joy_teleop_node])

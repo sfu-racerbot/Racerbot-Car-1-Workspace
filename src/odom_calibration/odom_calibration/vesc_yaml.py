@@ -28,6 +28,7 @@ import shutil
 import tempfile
 
 import yaml
+from racerbot_car import guards
 
 
 TARGET_BLOCKS = {
@@ -100,7 +101,9 @@ def update_text(text, updates):
             lines[index] = (f"{match.group('indent')}{name}:{match.group('space') or ' '}"
                             f"{_format(value)}{match.group('rest')}{newline}")
             continue
-        sibling = INSERT_AFTER.get(name)
+        sibling = (INSERT_AFTER.get(name) if
+                   guards.CALIBRATION_KEYS['vesc.yaml'][block].get(name) == 'optional'
+                   else None)
         anchor = None
         if sibling:
             sibling_pattern = re.compile(rf'^(?P<indent>\s+){re.escape(sibling)}:')
@@ -170,7 +173,7 @@ def _atomic_write(path, text):
             pass
 
 
-def apply(path, updates, backup_directory, label='calibration'):
+def apply(path, updates, backup_directory, label='calibration', target_is_overlay=False):
     """Back up vesc.yaml, write ``updates``, verify, and return what happened.
 
     The backup goes to ``backup_directory`` (outside the git working tree by
@@ -189,6 +192,14 @@ def apply(path, updates, backup_directory, label='calibration'):
     backup = backup_directory / f'vesc.yaml.{stamp}.{safe_label}.bak'
     shutil.copy2(path, backup)
     _atomic_write(path, new_text)
+    if target_is_overlay:
+        try:
+            problems = guards.check_calibration_overlay(path, 'vesc.yaml')
+            if problems:
+                raise ValueError('; '.join(problems))
+        except Exception:
+            restore(path, backup)
+            raise
     return {
         'path': str(path),
         'backup': str(backup),

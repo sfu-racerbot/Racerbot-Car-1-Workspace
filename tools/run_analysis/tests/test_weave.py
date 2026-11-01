@@ -293,6 +293,28 @@ def test_recorded_params_reads_the_run_snapshot_and_its_key(tmp_path):
     assert gap_mirror.REQUIRED_PARAMS <= set(got)
 
 
+def test_recorded_params_preserves_snapshot_calibration(tmp_path, monkeypatch):
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    snapshot = dict(gap_mirror.node_params(car_id='rb1'))
+    assert snapshot['max_steering_angle'] != 0.123
+    snapshot['max_steering_angle'] = 0.123
+    overlay = tmp_path / 'cars/rb1/calibration/gap_follow.yaml'
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(yaml.safe_dump({'gap_follow_node': {'ros__parameters': {
+        'max_steering_angle': 0.222,
+        'arc_guard_max_correction': snapshot['arc_guard_max_correction']}}}))
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path / 'cars'))
+    assert gap_mirror.node_params(car_id='rb1')['max_steering_angle'] == 0.222
+    snap_dir = tmp_path / 'metadata' / 'params'
+    snap_dir.mkdir(parents=True)
+    (snap_dir / 'gap_follow_node.yaml').write_text(
+        yaml.safe_dump({'/gap_follow_node': {'ros__parameters': snapshot}}))
+    # Explicit selection must not override the recorded calibration, even
+    # without an environment selection.
+    monkeypatch.delenv('RACERBOT_CAR')
+    assert weave.recorded_params(tmp_path, car_id='rb1')['max_steering_angle'] == 0.123
+
+
 def test_recorded_params_falls_back_to_the_tree_with_a_warning(tmp_path):
     # oracle: a run with no snapshot replays with the tree's gap_follow.yaml, and
     # says so.

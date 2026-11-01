@@ -9,6 +9,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
 import pytest
+from conftest import car_config_args
 import rclpy
 from rclpy.duration import Duration
 from rclpy.time import Time
@@ -36,7 +37,7 @@ def _feed_odom(node, speed):
 
 @contextmanager
 def _node(extra):
-    rclpy.init(args=['--ros-args', '--params-file', CONFIG, *extra, *TEST_ONLY_DRIVE])
+    rclpy.init(args=['--ros-args', *car_config_args(CONFIG), *extra, *TEST_ONLY_DRIVE])
     n = GapFollowNode()
     _feed_imu(n, yaw_rate=0.0, state='ok')
     try:

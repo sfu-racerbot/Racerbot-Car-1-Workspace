@@ -30,6 +30,16 @@ def write_config(tmp_path, params):
     return str(path)
 
 
+def test_defaults_dict_replaces_file_read(tmp_path):
+    defaults = {'max_speed': 5.0, 'min_speed': 0.5,
+                'corner_speed': 2.6, 'corner_speed_wide': 3.0}
+    path = write_config(tmp_path, defaults)
+    # Oracle: the same values loaded from an actual parameter file.
+    expected = mapping_speed_overrides(path, '2.5', '')
+    assert expected != mapping_speed_overrides(PACKAGED_CONFIG, '2.5', '')
+    assert mapping_speed_overrides(PACKAGED_CONFIG, '2.5', '', defaults=defaults) == expected
+
+
 def assert_startup_relation_holds(config_path, overrides):
     """The exact relation the node checks before it agrees to run."""
     merged = dict(load_defaults(config_path))

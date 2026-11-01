@@ -19,6 +19,7 @@ import math
 import os
 
 import pytest
+from conftest import car_config_args
 
 from gap_follow.launch_speed import (
     CAPPED_WITH_MAX, MAX_SPEED_CEILING, speed_cap_overrides, yaml_parameters)
@@ -115,7 +116,7 @@ CAP = 1.0
 
 
 def _node(overrides):
-    args = ['--ros-args', '--params-file', PACKAGED_CONFIG]
+    args = ['--ros-args', *car_config_args(PACKAGED_CONFIG)]
     for key, value in overrides.items():
         args += ['-p', f'{key}:={value}']
     rclpy.init(args=[*args, *TEST_ONLY_DRIVE])

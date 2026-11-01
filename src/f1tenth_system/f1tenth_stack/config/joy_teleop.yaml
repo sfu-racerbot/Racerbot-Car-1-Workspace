@@ -34,7 +34,7 @@ joy_teleop:
           offset: 0.0
         drive-steering_angle:
           axis: 3
-          scale: 0.38
+          # per car: src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml
           offset: 0.0
 
     autonomous_control:

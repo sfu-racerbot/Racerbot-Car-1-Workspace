@@ -251,7 +251,7 @@ def classify(coherence_at_peak: float, peak_hz: float, model_hz: float,
     return "unclear"
 
 
-def recorded_params(run_dir) -> dict:
+def recorded_params(run_dir, car_id=None) -> dict:
     """The gap_follow parameters the run was driven with, for replaying it.
 
     race_diagnostics snapshots each node's parameters into metadata/params/. That
@@ -265,7 +265,7 @@ def recorded_params(run_dir) -> dict:
     if not snapshot.is_file():
         warnings.warn(f"{run_dir}: no gap_follow snapshot in metadata/params, "
                       "replaying with the tree's gap_follow.yaml", stacklevel=2)
-        return gap_mirror.node_params()
+        return gap_mirror.node_params(car_id=car_id)
     data = yaml.safe_load(snapshot.read_text()) or {}
     nodes = [value for key, value in data.items() if str(key).lstrip("/") == "gap_follow_node"]
     if not nodes:
@@ -326,7 +326,7 @@ def _loop_parameters(run, windows, gyro, params):
     return tau_s, curvature * params["steering_gain"] * scheduled, speed
 
 
-def diagnose(run_dir) -> dict:
+def diagnose(run_dir, car_id=None) -> dict:
     """Measure both weave causes on one recorded run, and say which one it is.
 
     Steering is the /drive command the car received, inside each LB window. The
@@ -343,7 +343,7 @@ def diagnose(run_dir) -> dict:
     gyro = _gyro(imu)
     peak_hz = coherence = phase_deg = tau_s = model_zeta = model_hz = share = math.nan
     if windows:
-        params = recorded_params(run_dir)
+        params = recorded_params(run_dir, car_id=car_id)
         drive_t, steer = run.drive[:, 0], run.drive[:, 2]
         swing_t, segments = [], []
         for a, b in windows:
