@@ -303,7 +303,10 @@ def test_recorded_params_preserves_snapshot_calibration(tmp_path, monkeypatch):
     snap_dir.mkdir(parents=True)
     (snap_dir / 'gap_follow_node.yaml').write_text(
         yaml.safe_dump({'/gap_follow_node': {'ros__parameters': snapshot}}))
-    assert weave.recorded_params(tmp_path)['max_steering_angle'] == 0.123
+    # Explicit selection must not override the recorded calibration, even
+    # without an environment selection.
+    monkeypatch.delenv('RACERBOT_CAR')
+    assert weave.recorded_params(tmp_path, car_id='rb1')['max_steering_angle'] == 0.123
 
 
 def test_recorded_params_falls_back_to_the_tree_with_a_warning(tmp_path, monkeypatch):

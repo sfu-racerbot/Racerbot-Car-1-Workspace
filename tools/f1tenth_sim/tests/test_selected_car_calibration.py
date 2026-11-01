@@ -13,7 +13,36 @@ sys.path.insert(0, str(ROOT / 'tools/f1tenth_sim'))
 sys.path.insert(0, str(ROOT / 'src/racerbot_car'))
 
 from racerbot_car.layers import effective_config  # noqa: E402
+from racerbot_car.identity import known_car_ids  # noqa: E402
+from racerbot_car.paths import cars_dir  # noqa: E402
 from sim_fidelity import calibration  # noqa: E402
+
+CARS = sorted(car for car in known_car_ids(cars_dir())
+              if (cars_dir() / car / 'calibration/vesc.yaml').is_file())
+
+
+@pytest.mark.parametrize('car', CARS)
+def test_calibration_matches_effective_vesc(car):
+    # Oracle: eRPM / abs(gain), and the affine servo map in
+    # docs/hardware-reference.md (car 1's tape/circle calibration, 2026-10-21).
+    vesc = effective_config('vesc.yaml', '/**', car)
+    throttle = effective_config('vesc.yaml', 'throttle_interpolator', car)
+    cal = calibration.calibration_for_car(car)
+    for key in ('speed_to_erpm_gain', 'steering_angle_to_servo_gain',
+                'steering_angle_to_servo_offset', 'servo_min', 'servo_max'):
+        assert getattr(cal, key) == vesc[key]
+    assert cal.speed_max == pytest.approx(vesc['speed_max'] / abs(vesc['speed_to_erpm_gain']), abs=1e-12)
+    assert cal.speed_min == -cal.speed_max
+    assert cal.steering_rate_max == throttle['max_servo_speed']
+
+
+def test_default_calibration_resolves_at_call_time(monkeypatch):
+    monkeypatch.delenv('RACERBOT_CAR', raising=False)
+    from racerbot_car.identity import UnknownCarError
+    with pytest.raises(UnknownCarError, match='RACERBOT_CAR'):
+        calibration.CarCalibration()
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    assert calibration.CarCalibration() == calibration.calibration_for_car('rb1')
 
 
 def test_selected_car_calibration_uses_overlay(tmp_path, monkeypatch):
