@@ -4,7 +4,9 @@
 > **Read first:** nothing. For a guided path into the docs, go to [docs/README.md](docs/README.md).
 > **What's in it:** what this repo is, what's in `src/`, and how to build and drive the car.
 
-ROS 2 Jazzy workspace for both SFU Racerbot roboracer/F1TENTH cars: car 1 is `rb1`, and car 2 is `rb2`. Each car knows its identity through the launch-time car profile; see [docs/car-profiles.md](docs/car-profiles.md). Each car's physical values live in `src/racerbot_car/cars/<id>/`, and its recorded runs live in `data/<id>/`.
+ROS 2 Jazzy workspace for both SFU Racerbot roboracer/F1TENTH cars: car 1 is `rb1`, and car 2 is `rb2`.
+
+Each car knows its identity through its launch-time profile; see [docs/car-profiles.md](docs/car-profiles.md). Each car's physical values live in `src/racerbot_car/cars/<id>/`, and its recorded runs live in `data/<id>/`.
 
 ## Hardware summary (see [docs/hardware-reference.md](docs/hardware-reference.md) for exact values)
 - **VESC** motor controller — USB serial, exposed as a stable `/dev/sensors/vesc` symlink (udev rule at `/etc/udev/rules.d/99-vesc.rules`).

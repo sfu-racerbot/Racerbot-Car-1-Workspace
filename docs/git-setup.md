@@ -87,13 +87,15 @@ Concretely: its `.git` gitlink and its `.gitmodules` / `.git/config` entries wer
 
 It carries local launch and shared-configuration changes that have to live in this repo's history. Car-specific settings are loaded from each car's calibration overlay.
 
-> **All five are guaranteed to be silently clobbered by a naive upstream overwrite.** Check every one of them after any sync.
+> **These local changes can be silently clobbered by a naive upstream overwrite.** Check each one after any sync.
 
 ### Fix 1 — the steering axis
 
 `src/f1tenth_system/f1tenth_stack/config/joy_teleop.yaml`
 
-The per-car `human_control` profile's `drive-steering_angle` axis and joystick scales are in `src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml`; the vendored file keeps shared settings and the `# per car:` pointer. Car 1 uses `axis: 3` for the right stick in XInput mode; see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
+The per-car `human_control` profile's `drive-steering_angle` axis and joystick scales are in `src/racerbot_car/cars/<id>/calibration/joy_teleop.yaml`. The vendored file keeps shared settings and the `# per car:` pointer.
+
+Car 1 uses `axis: 3` for the right stick in XInput mode; see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
 
 Upstream's axis 2 is this F710's *left trigger*. Axis 3 is the right stick, in XInput mode — see [hardware-reference.md](hardware-reference.md#joystick--logitech-f710).
 
@@ -163,15 +165,17 @@ ros2 param get /vesc_to_odom_node wheelbase        # must be 0.36
 ros2 run tf2_ros tf2_echo base_link laser          # translation x must be 0.260
 ```
 
-**Working when:** the parameter reads `0.36` and the transform's x translation reads `0.260`. Ctrl+C the `tf2_echo` once you've seen one message.
+**Working when:** the wheelbase matches the selected car's calibration and the transform's x translation reads `0.260`. Ctrl+C the `tf2_echo` once you've seen one message.
 
 ### Fix 5 — each car's LiDAR connection
 
 `src/f1tenth_system/f1tenth_stack/config/sensors.yaml`
 
-Each car's LiDAR connection is in `src/racerbot_car/cars/<id>/calibration/sensors.yaml`. Car 1 uses `/dev/sensors/hokuyo`; the vendored `sensors.yaml` keeps shared settings and its `# per car:` pointer.
+Each car's [LiDAR](glossary.md#lidar) connection is in `src/racerbot_car/cars/<id>/calibration/sensors.yaml`. Car 1 uses `/dev/sensors/hokuyo`.
 
-**How it fails if reverted:** the driver tries the wrong connection and `/scan` does not publish.
+The vendored `sensors.yaml` keeps shared settings and its `# per car:` pointer.
+
+**How it fails if reverted:** the driver tries the wrong connection and the scan topic has no data.
 
 ### Addition 7 — bringups load each car's calibration overlay
 
