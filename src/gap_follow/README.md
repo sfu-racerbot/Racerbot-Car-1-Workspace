@@ -18,7 +18,9 @@ Reactive "follow-the-gap" autonomy: no map, no localization, no memory of the tr
 
 ## New in October 2026: swept clearance, arc guard, corner setup
 
-Three additions change how this node drives through corridors: a speed limit from how far the *body* can drive along its arc, a check that the steered arc is clear, and a move to the outside wall before a turn. In the simulator they took the indoor layouts from 24 wall contacts in 60 runs to none, and lapped about 20% faster. Car 2 drove the initial rework on 2026-10-19; the subsequent changes require the validation order below.
+Three additions change how this node drives through corridors. They limit speed by how far the body can drive along its arc, check that the steered arc is clear, and move toward the outside wall before a turn.
+
+In the simulator they took the indoor layouts from 24 wall contacts in 60 runs to none, and lapped about 20% faster. Car 2 drove the initial rework on 2026-10-19; the subsequent changes require the validation order below.
 
 What each does, how to turn each off, the results, and the order to bring them up on the car (wheels off first): **[docs/gap-follow.md](../../docs/gap-follow.md)**. The step-by-step algorithm below describes the pipeline they sit in.
 
@@ -115,7 +117,9 @@ This exists so the car never steers toward a "gap" that's actually behind or bes
 
 ### 3. Check footprint clearance and instantaneous TTC
 
-The collision model is a rectangle around `base_link` (rear axle). Car 2 measured 0.30 m over the tyres and 0.36 m between the axles on 2026-08-24; car 1 assumes those dimensions ([hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)). The configured rectangle is padded to 0.31 m × 0.58 m. `vehicle_boundary_distances()` ray-casts from the LiDAR origin (+0.26 m forward, 0.10 m behind the front axle) to that rectangle. Subtracting this per-beam distance from the scan produces clearance from the body rather than from the sensor.
+The collision model is a rectangle around `base_link` (rear axle). Car 2 measured 0.30 m over the tyres and 0.36 m between the axles on 2026-08-24; car 1 assumes those dimensions ([hardware-reference.md](../../docs/hardware-reference.md#physical-dimensions-used-in-config)). The configured rectangle is padded to 0.31 m × 0.58 m.
+
+`vehicle_boundary_distances()` ray-casts from the LiDAR origin (+0.26 m forward, 0.10 m behind the front axle) to that rectangle. Subtracting this per-beam distance from the scan produces clearance from the body rather than from the sensor.
 
 Collision detection has three layers. The all-direction contact floor stops at `emergency_stop_clearance` (0.0m from the body, cut from 0.02m on 2026-08-25). A separate odometry-independent fallback covers `forward_stop_clearance` (0.20m, cut from 0.25m on 2026-08-25) within the narrow `forward_stop_fov_deg` cone (60°, or ±30°); close side walls outside that cone do not trigger it. The speed-aware layer then evaluates every approaching beam:
 
@@ -168,7 +172,7 @@ how close the walls are, so it is invisible on a wide track and dominant on a
 drifted to 0.22m from that wall. That is the brake being wrong, not cautious.
 
 A beam is therefore only counted if its obstacle lies within
-`car_width/2 + safety_margin` of the path — and the path is the *arc* implied
+`car_width/2 + ttc_path_margin` of the path — and the path is the *arc* implied
 by the current steering, not a straight line. A car at full lock curves around
 the outside of its own corner; judging it as though it were going straight
 made TTC brake for the very wall it was negotiating, which then fought the
@@ -219,7 +223,9 @@ $$\text{score} = \text{width} \times \overline{\text{depth}}$$
 
 **Why not just pick the widest gap?** A shallow dead end can subtend a wider angle than a genuinely open corridor. Scoring by `width × average_depth` rewards useful depth.
 
-The former implementation stopped whenever no run remained continuously deeper than 2.0m. A blind 90-degree corner can be physically wide enough while hiding everything beyond the turn, so that rule created `no_safe_gap` immediately before turn-in. The new second pass accepts `fallback_min_gap_distance` (0.8m) and caps speed at `corner_speed` (`1.1m/s`, raised from `0.8` -- see [Corner speed](#corner-speed) below). That cap governs a lot of a lap in a tight room -- a 2026-08-06 measured run spent roughly four of every five driving ticks in this fallback -- so it, not `max_speed`, is often the knob that sets the pace through corners. `corner_speed_wide` (default `1.4m/s`) raises that ceiling further when the sensed corridor is wide -- see [Adaptive corridor width](#adaptive-corridor-width) below. It still uses the inflated scan and `min_centerline_gap_width`, so a boxed-in scene still stops.
+The former implementation stopped whenever no run remained continuously deeper than 2.0 m. A blind 90-degree corner can be physically wide enough while hiding everything beyond the turn, so that rule created `no_safe_gap` immediately before turn-in. The second pass accepts `fallback_min_gap_distance` (0.8 m) and caps speed at `corner_speed` (2.143 m/s in the shipped YAML; see [Corner speed](#corner-speed) for its history).
+
+On car 2's 2026-08-06 run roughly four of every five driving ticks used this fallback. `corner_speed_wide` (2.714 m/s in the shipped YAML) raises that ceiling when the sensed corridor is wide. See [Adaptive corridor width](#adaptive-corridor-width). The fallback still uses the inflated scan and `min_centerline_gap_width`, so a boxed-in scene still stops.
 
 Candidate selection also carries hysteresis against the previous tick's aim (`gap_switch_margin`) -- see [Gap-selection hysteresis](#gap-selection-hysteresis-not-driving-drunk) below.
 
@@ -278,7 +284,7 @@ from `0.4189 rad` (~24°) to `0.26 rad` (~15°)**, matching `pure_pursuit`.
 Car 2's profile now uses `0.349 rad` after its 2026-10-16 calibration; car 1's
 uses `0.33 rad` after its 2026-10-21 circles (`docs/hardware-reference.md`).
 `0.4189` was never physically achievable symmetrically under car 2's old servo
-calibration reaches `+0.313 rad` one way and only `-0.263 rad` the other, so
+calibration, which reached `+0.313 rad` one way and only `-0.263 rad` the other, so
 anything past `0.26` was a command the servo saturated on one side and not
 the other — see
 [docs/racing-autonomy.md](../../docs/racing-autonomy.md#where-026-rad-comes-from).
@@ -315,7 +321,7 @@ speed = min(desired_speed, self.last_commanded_speed + self.max_acceleration * d
 
 `min_speed` floors only the curvature ceiling, never the clearance one — the
 car must always be allowed to brake below its cruising floor when something
-is close. With the default `max_lateral_accel: 1.0` and the `0.349 rad`
+is close. With the code default `max_lateral_accel: 1.0` and car 2's `0.349 rad`
 steering clamp, the curvature ceiling falls to about `0.99 m/s` at full lock
 (`sqrt(1.0 * 0.36 / tan(0.349))`; it was about `1.16 m/s` at 0.26 rad); the clearance ceiling starts biting below
 roughly `0.92m` of forward room.
@@ -327,7 +333,7 @@ Both final commands are rate-limited against the previous one
 change at the servo or the motor:
 
 - steering slews at most `max_steering_rate` (`2.0 rad/s` in the shipped
-  YAML since 2026-10-20, i.e. the full `±0.349` envelope in about 0.35 s;
+  YAML since 2026-10-20, i.e. car 2's full `±0.349` envelope in about 0.35 s (car 1's `±0.33` takes about 0.33 s);
   the node's own default is `1.0`);
 - speed may only *rise* at `max_acceleration`. Falling is never rate-limited
   — braking is always allowed to be immediate.

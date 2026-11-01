@@ -47,8 +47,13 @@ They were first driven on car 2 on 2026-10-19. That run had no contact, but car 
 
 - **No more false hard stops in corridors (2026-10-20).** On the 2026-10-19 run, all 97 stop ticks were the TTC brake reacting to the inside wall of a bend 0.12–0.18 m *beside* the car. Replayed through the final config, the same scans produce none.
 - **Other cars: on by default since 2026-10-28.** Two simulated cars on the shipped settings passed 32 of 32 runs, with no contact and no stalls. With the layer off, 24 of 32 passed, with 3 contacts and 5 stalls. It follows slower cars and rarely passes them. Off switch: `opponent_awareness:=false`. It has never run on the floor. See [Several cars at once](#several-cars-at-once).
-- **Launch boost: full speed off the start line (ported from car 1, 2026-10-30).** The first LB press goes straight to `max_speed` and ignores other cars until the straight ends. Simulated on car 2's room map it is about 0.25 m ahead after 1 s, and it costs 0.86 s over the solo lap there. With two cars on that map, 8 of 8 runs finish with it off and 5 to 6 of 8 with it on, with no contact. Never run on the floor. Off: `launch_boost:=false`, see [Launch boost](#launch-boost).
-- **Car 1's launch-boost simulation (2026-10-30).** On car 1's course the launch car was 0.91 m further along at 1.4 s (3.44 m against 2.53 m), and 0.95 m further at 2.0 s. Across eight indoor tracks and four seeds, the mean solo lap was 0.09 s faster. The changes were −0.27 s on `narrow_1p2`, −0.21 s on car 1's course, −0.14 s on `indoor_tight`, +0.09 s on `asb_sharp` and +0.07 s on `asb_10000`. Before holding straight, `asb_sharp` was +0.64 s and car 1's course +0.38 s. There was no contact in 32 solo and 12 two-car runs.
+- **Launch boost: full speed off the start line (ported from car 1, 2026-10-30).** The first LB press goes straight to `max_speed` and ignores other cars until the straight ends. Simulated on car 2's room map it is about 0.25 m ahead after 1 s, and it costs 0.86 s over the solo lap there.
+
+  With two cars on that map, 8 of 8 runs finish with it off and 5 to 6 of 8 with it on, with no contact. Never run on the floor. Off: `launch_boost:=false`, see [Launch boost](#launch-boost).
+
+  **Car 1's launch-boost simulation (2026-10-30).** On car 1's course the launch car was 0.91 m further along at 1.4 s (3.44 m against 2.53 m), and 0.95 m further at 2.0 s. Across eight indoor tracks and four seeds, the mean solo lap was 0.09 s faster.
+
+  The changes were −0.27 s on `narrow_1p2`, −0.21 s on car 1's course, −0.14 s on `indoor_tight`, +0.09 s on `asb_sharp` and +0.07 s on `asb_10000`. Before holding straight, `asb_sharp` was +0.64 s and car 1's course +0.38 s. There was no contact in 32 solo and 12 two-car runs.
 - **No more parking for pieces of wall (2026-10-30).** Replaying that day's single-car recordings, time with the follow limit near zero falls from 45.8 s to 2.1 s of 410 s. A new `time_trial:=true` runs one car on the course in about 19 s in the simulator. Never driven on the floor. See [Speed on the real course](#speed-on-the-real-course-2026-10-30).
 - **More of every track completes (2026-10-20).** Across 11 simulated tracks, 6 seeds each, both directions, 108 of 132 runs pass, against 96 for the 2026-10-19 config. The hall loop `levine_blocked` laps in 23.6 s instead of 34.7 s.
 
@@ -584,7 +589,9 @@ The body then sweeps a ring around that circle's centre:
 
 where w is the width plus `swept_clearance_margin` on each side.
 
-Every LiDAR point inside that ring is an obstacle on the path. For each one, the free distance is how far the body's front can travel along the arc before reaching it. The clearance is the minimum over all such points, and `inf` beyond `swept_clearance_max_length` (5.0 m in `config/gap_follow.yaml`). It was raised from 3.0 m because the model needs 5.4 m to stop from 5 m/s, and the shorter look-ahead caused simulated collisions at square corners after long straights.
+Every LiDAR point inside that ring is an obstacle on the path. For each one, the free distance is how far the body's front can travel along the arc before reaching it. The clearance is the minimum over all such points, and `inf` beyond `swept_clearance_max_length` (5.0 m in `config/gap_follow.yaml`).
+
+It was raised from 3.0 m because the model needs 5.4 m to stop from 5 m/s, and the shorter look-ahead caused simulated collisions at square corners after long straights.
 
 A straight path (δ = 0) is the limiting case: a band `w` wide straight ahead.
 
@@ -727,7 +734,7 @@ python3 -m pytest src/gap_follow/test/test_gap_mirror_parity.py -v
 > **You'll be able to:** turn it on, tell when it is working, and know what it falls back to.
 > **Time:** 10 minutes to read, plus the car checks.
 
-Steering damping is **on by default**: on car 1 since 2026-10-27 ([race defaults](#race-defaults-2026-10-27)), on car 2 since 2026-10-31 ([car1-vs-car2.md](car1-vs-car2.md#imu)). It has never been driven on car 2's floor. It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
+Steering damping is **on by default**: on car 1 since 2026-10-27 ([race defaults](#race-defaults-2026-10-27)), on car 2 since 2026-10-31. It has never been driven on car 2's floor. It uses the gyro, the sensor that measures how fast the car is turning (its *yaw rate*), to take a little of the wobble out of the steering.
 
 ### What it does, in plain words
 
@@ -758,7 +765,7 @@ ros2 launch f1tenth_stack bringup_launch.py
 
 **Working when:** the motor controller (VESC) and the LiDAR come up. This never moves the car by itself.
 
-**Terminal 2** — `gap_follow` with its IMU stack. On car 2, ask for it (car 1's bare launch already does this). It needs `~/imu-calibration`, so it works only after the [IMU setup](car1-vs-car2.md#imu):
+**Terminal 2** — `gap_follow` with its IMU stack. The bare launch starts it on either car:
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source ~/racerbot-ws/install/setup.bash
@@ -1494,8 +1501,9 @@ In the one run traced, the launch ends up with the nose inside the forward reser
 
 **So on car 2's room, or any course with a corner soon after the start, think about `launch_boost:=false`.** On every track, whichever car started in front finished first: at 1 m nose to tail the launch car never passed anyone.
 
-<details>
-<summary>The stopping limit at full speed (read this before step 3 of the car test)</summary>
+### The stopping limit at full speed
+
+Read this before step 3 of the car test.
 
 In the 2026-10-30 car 2 check, the braking limit looked only `swept_clearance_max_length` (3 m) ahead. Beyond that the path counted as clear. The shared setting is now 5 m.
 
@@ -1507,8 +1515,6 @@ A one-off check on a straight ending in a wall, with a 0.3 s lag on speeding up:
 - **If it really brakes at only 3 m/s²:** the launch runs past the padded front of the body by 0.15 m with a wall 5 m ahead, where the ramped start stops cleanly. From 6 m and more, both run past it by about 0.2 m.
 
 Car 2's real braking from 5 m/s has never been measured, which is why step 2 comes before step 3.
-
-</details>
 
 **Limits.** The simulator only lines cars up nose to tail, not side by side, so the grid start this exists for has not been simulated. Nothing here has run on car 2. The tyres in the simulator do not spin, so on the floor some of the first metre's gain may be lost to wheelspin.
 
@@ -1545,11 +1551,15 @@ This section describes car 2's course and car 2's runs on 2026-10-30, plus the d
 
 Pressing LB again did not fix it. Most stops ended by themselves after about 1 s, and the stop usually ended while the driver was reaching for the button.
 
-**The new rule:** something off the car's own steering arc can slow it to 0.5 m/s (`opponent_follow_floor`) but cannot stop it, and is not remembered once it is gone. A car really ahead is on the arc, so it still gets the full follow law, down to zero. Whatever the car would actually hit still stops it, through the braking limit, the time-to-collision brake and the clearance stops, because those read the laser scan directly.
+**The new rule:** something off the car's own steering arc can slow it to 0.5 m/s (`opponent_follow_floor`) but cannot stop it, and is not remembered once it is gone. A car really ahead is on the arc, so it still gets the full follow law, down to zero.
+
+Whatever the car would actually hit still stops it, through the braking limit, the time-to-collision brake and the clearance stops, because those read the laser scan directly.
 
 **The braking check looked too short a distance ahead.** It treated any path clear for 3 m as fully clear, at any speed. The model says the car needs about 5.6 m to stop from 5 m/s, and the real car took 3.4 m from 5.41 m/s (run `20261030-175124`). `swept_clearance_max_length` is now 5 m.
 
-**Fallback gaps aimed at the wall.** At a blind bend no gap is 2 m deep, so the car takes a wider, shallower fallback gap. Its midpoint can point at the outer wall, which wedged the simulated car against the wall at this course's bottom-right bend. The real car flickered between the two kinds of gap at the same bend. `aim_depth_bias_fallback: 1.0` aims a fallback gap at its deepest beam instead.
+**Fallback gaps aimed at the wall.** At a blind bend no gap is 2 m deep, so the car takes a wider, shallower fallback gap. Its midpoint can point at the outer wall, which wedged the simulated car against the wall at car 2's course's bottom-right bend.
+
+On 2026-10-30, car 2 flickered between the two kinds of gap at the same bend. `aim_depth_bias_fallback: 1.0` aims a fallback gap at its deepest beam instead.
 
 ### Results
 
