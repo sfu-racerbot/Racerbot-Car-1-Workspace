@@ -166,7 +166,7 @@ Options, added to the end of the command:
 | `imu_lap_turns:=true` | Count lap turning from gyro heading in `odom_imu`; positions relative to the map still determine the recorded path. Requires `gyro_odom:=true`. |
 | `imu_all:=true` | Enable `gyro_odom`, `fused_speed` and `imu_lap_turns`. An explicit `false` overrides the corresponding setting; if disabling `gyro_odom`, also disable `imu_lap_turns`. All require `imu:=true`. |
 | `analysis:=false` | Skip the reports after the launch exits. |
-| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/.ros/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
+| `record_bag:=false` | don't save a bag. It is saved by default (a few hundred MB per run, in `~/racerbot-ws/data/racerbot_runs/`), because it's what lets a run be replayed and analysed afterwards |
 | `imu:=false` | explicitly turn off the IMU stack, including the estimator |
 | `imu_hardware:=false` | use simulated IMU readings without starting real sensor readers; added for you when `map_course` detects the simulator |
 
@@ -204,7 +204,7 @@ ros2 launch imu_bridge vehicle_state_launch.py
 ros2 topic echo /imu/bno/data --field linear_acceleration
 ```
 
-**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/imu-calibration`. Then `Ctrl+C` terminals 2 and 3.
+**Working when:** `x` jumps **positive** on each push, while `y` stays within about ±0.3. If `y` jumps instead of `x`, the mount's yaw is wrong: stop and redo `calibrate_imu.py --imu bno --step mount` in `~/racerbot-ws/tools/imu_calibration`. Then `Ctrl+C` terminals 2 and 3.
 
 **2. Run A, today's odometry.** Car on the tape mark. **Terminal 2:**
 
@@ -212,7 +212,7 @@ ros2 topic echo /imu/bno/data --field linear_acceleration
 ros2 run racerbot_launch map_course
 ```
 
-Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/.ros/racerbot_runs/<time>` near the start. Write that folder down as run A.
+Keep the car still for the first 3 seconds, then hold LB as for any mapping run. **Working when:** it finishes as in [Map a course](#map-a-course-3-laps-then-stop), and prints `Recording run to: ~/racerbot-ws/data/racerbot_runs/<time>` near the start. Write that folder down as run A.
 
 **3. Run B, gyro odometry.** Put the car back on the tape mark, facing the same way. **Terminal 2:**
 
@@ -225,7 +225,7 @@ ros2 run racerbot_launch map_course gyro_odom:=true
 **4. Compare.** For each run's folder:
 
 ```bash
-python3 tools/run_analysis/imu_report.py ~/.ros/racerbot_runs/<time>
+python3 tools/run_analysis/imu_report.py ~/racerbot-ws/data/racerbot_runs/<time>
 ```
 
 **Working when:** it prints three sections: turn rate from each source, the steering lag and turning gain the gyro measured, and how much heading correction SLAM had to apply. Run B should need far less heading correction than run A.
@@ -242,13 +242,13 @@ Also compare the two saved maps on the dashboard (straight walls, no doubled cor
 
 ```bash
 # pure pursuit (the default racing controller)
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run>
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run>
 # Stanley
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=stanley
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=stanley
 # LQR
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=lqr
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=lqr
 # MPC
-ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<run> steering_law:=mpc
+ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/racerbot-ws/data/racerbot_auto/<run> steering_law:=mpc
 ```
 
 **Working when:** `Particle filter is at the start pose; racing can begin.` appears (the race controller only starts after it), then the car drives the racing line while you hold LB.
@@ -258,8 +258,8 @@ ros2 launch racerbot_launch race_launch.py run_dir:=$HOME/.ros/racerbot_auto/<ru
 **Forgot the run folder?**
 
 ```bash
-ls -t ~/.ros/racerbot_auto | head -3                    # newest first
-cat ~/.ros/racerbot_auto/<run>/commands.txt             # that run's commands again
+ls -t ~/racerbot-ws/data/racerbot_auto | head -3                    # newest first
+cat ~/racerbot-ws/data/racerbot_auto/<run>/commands.txt             # that run's commands again
 ```
 
 **In the simulator** (map, then race without moving the car): pure pursuit, LQR and MPC each raced 128–142 m with no contact. In one run Stanley swerved around something it wrongly took for another car, and brushed a wall. Start with pure pursuit.
@@ -290,15 +290,15 @@ ros2 launch racerbot_launch dashboard_launch.py
 
 ## Record a run and analyse it
 
-**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/.ros/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
+**Nothing to start: bringup records every algorithm run by itself** (since 2026-10-26). When an algorithm starts, the bringup terminal prints `recording ... -> ~/racerbot-ws/data/racerbot_runs/<ts>`; when it stops, `saved run ...`. Manual driving is not recorded. Turn it off with `record:=false` on bringup. Details: [run-diagnostics.md, automatic recording](run-diagnostics.md#automatic-recording).
 
 To record something else, such as a manual drive, start `ros2 launch race_diagnostics record_run.py` in its own terminal first. Bringup's recorder then stays out of the way.
 
 Afterwards, in **any terminal**:
 
 ```bash
-ros2 run race_diagnostics summarize_run ~/.ros/racerbot_runs/<ts>
-python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/.ros/racerbot_runs/<ts>
+ros2 run race_diagnostics summarize_run ~/racerbot-ws/data/racerbot_runs/<ts>
+python3 ~/racerbot-ws/tools/run_analysis/analyze_run.py ~/racerbot-ws/data/racerbot_runs/<ts>
 ```
 
 **Working when:** the second writes `analysis/report.md` in the run folder, explaining every stop. The mapping commands above record a run by themselves. Details: [gap-follow.md, recording a floor run](gap-follow.md#recording-a-floor-run) and [run-analysis.md](run-analysis.md).
@@ -332,8 +332,9 @@ Battery off **last**.
 
 | What | Where |
 |---|---|
-| Maps, racing lines, `commands.txt` from mapping runs | `~/.ros/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
-| The same from the simulator | `~/.ros/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
-| Run recordings (logs, events, optional bag) | `~/.ros/racerbot_runs/<ts>/` |
+| Maps, racing lines, `commands.txt` from mapping runs | `~/racerbot-ws/data/racerbot_auto/<YYYYMMDD-HHMMSS>/` |
+| The same from the simulator | `~/racerbot-ws/data/racerbot_sim/auto/<YYYYMMDD-HHMMSS>/` |
+| Run recordings (logs, events, optional bag) | `~/racerbot-ws/data/racerbot_runs/<ts>/` |
+| Saving those three to GitHub after a session | `tools/save_runs.sh` (see [data/README.md](../data/README.md)) |
 | Speeds and limits for `gap_follow` | `src/gap_follow/config/gap_follow.yaml` |
 | Racing-line limits for mapping runs | `src/pure_pursuit/config/auto_map_race.yaml` |

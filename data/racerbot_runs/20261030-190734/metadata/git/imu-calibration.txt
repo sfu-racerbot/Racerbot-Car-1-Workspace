@@ -1,0 +1,11 @@
+repository: /home/racerbotcar-1/imu-calibration
+HEAD: 0d99cd23028e3b784a47945e4900cc513bdea470
+branch: main
+
+# git status --porcelain (?? = untracked: NOT in the .diff)
+ M config/car.yaml
+?? calib/bno_calib.json
+?? calib/bno_calib_run1_dyncal_on.json
+?? tools/bno_i2c_bridge.py
+
+# git submodule status

@@ -1,0 +1,10 @@
+{
+  "created": "2026-10-23 19:55:06",
+  "clock": "host time.monotonic() [s]",
+  "units": "acc m/s^2 (raw, before calibration), gyro rad/s, quat w x y z",
+  "calib": "/home/racerbotcar-1/imu-calibration/calib/bno_calib.json",
+  "test": "turn",
+  "sim": false,
+  "turns": 2.0,
+  "poses": 6
+}

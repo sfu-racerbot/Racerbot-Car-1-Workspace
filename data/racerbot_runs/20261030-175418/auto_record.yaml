@@ -1,0 +1,32 @@
+started_by: auto_record (bringup); turn off with record:=false
+started: '2026-10-30T17:54:18-07:00'
+algorithms:
+  /drive:
+  - /gap_follow_node
+nodes:
+- /ackermann_mux
+- /ackermann_to_vesc_node
+- /auto_record
+- /foxglove_bridge
+- /gap_follow_node
+- /imu_bridge_node
+- /joy
+- /safety_node
+- /static_baselink_to_laser
+- /urg_node
+- /vehicle_state_node
+- /vesc_driver_node
+- /vesc_to_odom_node
+- /web_dashboard_node
+stopped: '2026-10-30T17:56:17-07:00'
+stop_reason: no algorithm publishing for 3.0 s
+duration_sec: 118.5
+recorder_exit_code: 0
+recorder_killed: false
+bag_bytes: 78945476
+activity:
+  first_odom_speed_mps: 2.65
+  max_speed_mps: 4.15
+  moved: true
+  started_late: true
+  lb_held_fraction: 0.594

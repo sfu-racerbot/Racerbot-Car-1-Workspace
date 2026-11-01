@@ -21,7 +21,7 @@ On top of that, it combines them with the wheel speed into three things the rest
 ## Highlights
 
 - **Converts the VESC's IMU to SI units and car axes.** The [VESC](../../docs/glossary.md#vesc) (the motor controller) reports g and deg/s, in whatever direction its board happens to face. On car 2 that's rotated about 85° from the car. This node outputs m/s² and rad/s, with x forward, y left and z up.
-- **Uses the club's existing calibration, unchanged.** It reads `car.yaml` and the calibration files from the [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo, and applies the same formula as that repo's `racer_imu`. A test checks the two give the same answer to 1e-12 on the car's real calibration file.
+- **Uses the club's existing calibration, unchanged.** It reads `car.yaml` and the calibration files from `tools/imu_calibration/` (the club's [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo, now kept in this workspace), and applies the same formula as its `racer_imu`. A test checks the two give the same answer to 1e-12 on the car's real calibration file.
 - **Removes leftover gyro bias at startup.** For the first 3 s it averages the gyro while the car sits still. It only counts samples where the wheels report under 0.03 m/s *and* every gyro axis is under 0.05 rad/s. Any motion throws the window away and starts again.
 - **Gives the wheel [odometry](../../docs/glossary.md#odometry--odom) an honest uncertainty.** `/odom` arrives claiming zero uncertainty, which an EKF would treat as perfect. This node republishes it with a speed uncertainty of 0.08 m/s, and marks everything else as untrusted.
 - **Ships a "shadow" EKF config.** It runs the EKF alongside everything else for comparison, without changing what any driving node uses.
@@ -81,11 +81,7 @@ An **EKF** (extended Kalman filter) combines two imperfect sensors into one bett
 
 - [ ] **The VESC's IMU must be switched on.** It was measured on 2026-08-19 sending all zeros because it was off in VESC Tool; it has been on, and working, since the October 2026 tests (see [docs/localization.md](../../docs/localization.md)). It was calibrated through the imu-calibration repo in September 2026, which means it works over that repo's own serial driver. This node prints a warning every 5 s if it still sees all zeros.
 - [ ] **Car 1: the BNO085 must answer on I2C.** It is wired to the Jetson's 40-pin header (pin 1 3.3 V, pin 3 SDA, pin 5 SCL, pin 6 GND), which is I2C bus 7. Working when `i2cdetect -y -r 7` shows `4a` in its grid. Only the `-r` form works on this Jetson. A `Remote I/O error` on every address means SDA and SCL are swapped. Your user must be in group `i2c` (`id` lists it).
-- [ ] **Clone the imu-calibration repo** where the config expects it:
-  ```bash
-  git clone git@github.com:sfu-racerbot/imu-calibration.git ~/imu-calibration
-  ```
-  Working when `ls ~/imu-calibration/config/car.yaml` prints the path. If it lives somewhere else, pass `racer_imu_root:=/that/path` when launching. The node **refuses to start** without its `config/car.yaml`. Without the mount rotation it would swap the x and y axes.
+- [ ] **Nothing to clone: the IMU calibration ships in this workspace** as `tools/imu_calibration/` (brought in from the [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo on 2026-10-31, history kept). Working when `ls ~/racerbot-ws/tools/imu_calibration/config/car.yaml` prints the path. To use a calibration somewhere else, pass `racer_imu_root:=/that/path` when launching. On car 1, `~/imu-calibration` is a symlink to the workspace copy, so older commands still work. The node **refuses to start** without its `config/car.yaml`. Without the mount rotation it would swap the x and y axes.
 - [ ] **For the EKF only**, install robot_localization once:
   ```bash
   sudo apt install ros-jazzy-robot-localization
@@ -391,7 +387,7 @@ gyro_car = R @ (gyro - (gyro_bias - radians(device_offsets.gyro_deg_s))) - start
 This must stay identical to `racer_imu.calibration.ImuCalibration.apply` followed by `racer_imu.frames` rotation. `test_matches_racer_imu_on_its_real_calibration_file` checks it against the real repo whenever it's present:
 
 ```bash
-RACER_IMU_ROOT=~/imu-calibration python3 -m pytest src/imu_bridge/test/ -v
+python3 -m pytest src/imu_bridge/test/ -v   # RACER_IMU_ROOT=/elsewhere to test another copy
 ```
 
 **Why the EKF fuses only forward speed and yaw rate:** SLAM and the particle filter already turn wheel odometry plus LiDAR into a pose. Fusing a pose, or anything else they already use, would count the same information twice, and the filter would become confident without good reason. The reasoning is in [`config/ekf_shadow.yaml`](config/ekf_shadow.yaml) and [docs/localization.md](../../docs/localization.md).
@@ -418,7 +414,7 @@ Source ROS first and give the tests their own domain (`export ROS_DOMAIN_ID=79 R
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Node exits with `car.yaml not found` | imu-calibration not cloned at `racer_imu_root` | Clone it there, or pass `racer_imu_root:=...` |
+| Node exits with `car.yaml not found` | `racer_imu_root` doesn't point at the calibration | Leave it at its default (`tools/imu_calibration/` in this workspace), or pass `racer_imu_root:=...` |
 | `startup gyro bias removed` never appears | car moving, or no `/odom` | Keep it still; check `ros2 topic hz /odom` |
 | Warning: all zeros | VESC IMU disabled | VESC Tool → App Settings → IMU, sample rate > 0 |
 | Turning left gives negative `z` | wrong `rpy_deg` for this IMU in `car.yaml` | Redo the mount step in imu-calibration (`tools/calibrate_imu.py --step mount`) |
@@ -437,4 +433,4 @@ Source ROS first and give the tests their own domain (`export ROS_DOMAIN_ID=79 R
 
 - [docs/localization.md](../../docs/localization.md): why heading drifts today, and the plan an EKF fits into
 - [docs/run-diagnostics.md](../../docs/run-diagnostics.md): recording runs, including these topics
-- [imu-calibration](https://github.com/sfu-racerbot/imu-calibration): where the calibration comes from, and how to redo it
+- [`tools/imu_calibration/`](../../tools/imu_calibration/README.md): where the calibration comes from, and how to redo it (formerly the [imu-calibration](https://github.com/sfu-racerbot/imu-calibration) repo)

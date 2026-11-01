@@ -1,0 +1,13 @@
+Maps from car 1, 2026-10-26. Each is the last /map that slam_toolbox published live
+during the run, taken from the run's bag (now data/racerbot_runs/<run>/bag; each map is in <run>/live_map/). It was not re-optimized.
+Every map has a .png (to view or edit), plus a .pgm and .yaml (a standard map_server pair,
+0.05 m/px).
+
+Best:  live_20261026-180228  (12.5 min run, clean single outer wall)
+       live_20261026-194514  (95 s, clean, a little rounder)
+OK:    174337, 194714, 194913: the walls in the loop section are doubled (drift)
+Skip:  194422 (30 s, only a fragment)
+
+The light rays outside the track are LiDAR beams that went through gaps in the barriers.
+Erase them when you clean up. The grey blob inside the loop is the infield, which the
+LiDAR could not see into.

@@ -1,0 +1,11 @@
+{"t": 1793069065.765909, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1793069066.0159156, "category": "first_message", "message": "first odom: linear.x=+0.00m/s", "topic": "odom"}
+{"t": 1793069066.7725148, "category": "status", "message": "scan=NEVER | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +0.00m/s | drive=NEVER cmd=0.00m/s | LB=released", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793069066.8120377, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1793069066.8210442, "category": "first_message", "message": "first drive: speed=0.00m/s", "topic": "drive"}
+{"t": 1793069066.8277576, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1793069068.993787, "category": "first_message", "message": "first map: 228x171 @ 0.050m/cell, 210 occupied cells", "topic": "map"}
+{"t": 1793069069.4307718, "category": "first_message", "message": "first pose: map-frame (+19.60, +40.70)", "topic": "pose"}
+{"t": 1793069069.7666378, "category": "tf_up", "message": "map->base_link available; SLAM is localizing"}
+{"t": 1793069087.7669463, "category": "status", "message": "scan=ok | map=228x171@0.050 7%known 210occ | map->base_link=OK | pose=ok lag=0.02s(max 0.12) | odom=ok +0.00m/s | drive=ok cmd=0.00m/s | LB=released", "pose_lag_sec": 0.021, "pose_lag_max_sec": 0.121, "tf_ok": true, "speed": 0.0, "cmd_speed": 0.0, "pose_frozen": false, "occupied_cells": 210}
+{"t": 1793069094.4205706, "category": "closing", "message": "worst pose lag this run: 0.12s"}
