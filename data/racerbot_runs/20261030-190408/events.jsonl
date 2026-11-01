@@ -1,0 +1,8 @@
+{"t": 1793412250.6486208, "category": "armed", "message": "probe armed (subscribe-only); waiting for the stack"}
+{"t": 1793412250.6517138, "category": "first_message", "message": "first drive: speed=2.29m/s", "topic": "drive"}
+{"t": 1793412250.7324858, "category": "first_message", "message": "first odom: linear.x=+2.29m/s", "topic": "odom"}
+{"t": 1793412250.8316085, "category": "deadman", "message": "LB held", "held": true}
+{"t": 1793412250.831781, "category": "first_message", "message": "first joy: 11 buttons", "topic": "joy"}
+{"t": 1793412251.519009, "category": "first_message", "message": "first scan: 1081 beams, frame_id=laser", "topic": "scan"}
+{"t": 1793412251.649251, "category": "status", "message": "scan=ok | map=NEVER | map->base_link=MISSING | pose=NEVER | odom=ok +2.01m/s | drive=ok cmd=2.34m/s | LB=held", "pose_lag_sec": null, "pose_lag_max_sec": 0.0, "tf_ok": false, "speed": 2.01, "cmd_speed": 2.34, "pose_frozen": false, "occupied_cells": null}
+{"t": 1793412258.5986817, "category": "closing", "message": "worst pose lag this run: 0.00s"}

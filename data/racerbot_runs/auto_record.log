@@ -1,0 +1,4 @@
+2026-10-31T17:42:43-07:00 WARN 20261030-175418 started late: the car was already at 2.65 m/s at its first /odom
+2026-10-31T17:42:50-07:00 WARN 20261030-180746 started late: the car was already at 1.83 m/s at its first /odom
+2026-10-31T17:42:51-07:00 WARN 20261030-190408 started late: the car was already at 2.21 m/s at its first /odom
+2026-10-31T17:42:52-07:00 WARN 20261030-190519 started late: the car was already at 2.9 m/s at its first /odom
