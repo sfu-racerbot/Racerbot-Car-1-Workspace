@@ -699,11 +699,10 @@ class OdomCalibrationNode(Node):
     def _is_calibration_overlay(self, path):
         if self.calibration_paths_are_overlays:
             return True
-        try:
-            relative = Path(path).resolve().relative_to(paths.cars_dir().resolve())
-        except ValueError:
-            return False
-        return len(relative.parts) == 3 and relative.parts[1] == 'calibration'
+        directory = paths.cars_dir()
+        target = Path(path).resolve()
+        return any(target.is_relative_to((directory / car / 'calibration').resolve())
+                   for car in identity.known_car_ids(directory))
 
     def _file_stick_scale(self):
         if self.joy_teleop_yaml_path is None:

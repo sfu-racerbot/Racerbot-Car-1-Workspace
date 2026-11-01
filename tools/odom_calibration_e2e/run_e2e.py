@@ -470,7 +470,9 @@ def run(check, wizard, car, stack, vesc_yaml, teleop_yaml, original_vesc, shared
     check('the removed range-check capture is refused', status >= 400, str(status))
 
     print('\n[steering 1] the 2026-10-10 settings: the clamp is found from settings alone')
-    # Reproduce the historical scenario after checking the selected car's live values.
+    # Synthetic starting values for this harness scenario, based on car 2's
+    # October 2026 calibration that the simulated car was designed against.
+    # These edits affect only the temporary copy, never a car's overlay.
     gain, offset = -0.78, 0.5904
     set_yaml_value(vesc_yaml, 'steering_angle_to_servo_gain', str(gain))
     set_yaml_value(vesc_yaml, 'steering_angle_to_servo_offset', str(offset))
