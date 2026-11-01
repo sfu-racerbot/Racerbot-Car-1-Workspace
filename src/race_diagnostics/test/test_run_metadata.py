@@ -9,6 +9,7 @@ compared byte for byte, and the `ros2 param dump` nesting (dotted names
 become nested mappings).
 """
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -20,6 +21,37 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from race_diagnostics import run_metadata as rm  # noqa: E402
 
 LAUNCH = Path(__file__).resolve().parents[1] / 'launch' / 'record_run.py'
+
+
+def test_run_metadata_records_car_and_overlay_hashes(tmp_path, monkeypatch):
+    from racerbot_car import identity
+    root = Path(__file__).resolve().parents[3]
+    cars = root / 'src/racerbot_car/cars'
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    expected_files = sorted(p for kind in ('calibration', 'tuning')
+                            for p in (cars / 'rb1' / kind).glob('*.yaml') if p.is_file())
+    assert expected_files
+    meta = rm.write_run_metadata(tmp_path / 'run', {}, [])
+    assert yaml.safe_load((meta / 'car.yaml').read_text()) == {
+        'car_id': 'rb1', 'overlays': [
+            {'path': str(p.relative_to(root)), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
+            for p in expected_files]}
+
+
+def test_run_metadata_records_no_car_without_failing(tmp_path, monkeypatch):
+    from racerbot_car import identity
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(root / 'src/racerbot_car/cars'))
+    monkeypatch.delenv('RACERBOT_CAR', raising=False)
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'missing'))
+    source = tmp_path / 'source.txt'
+    source.write_text('recorded')
+    meta = rm.write_run_metadata(tmp_path / 'run', {}, [source])
+    assert yaml.safe_load((meta / 'car.yaml').read_text()) == {'car_id': None, 'overlays': []}
+    assert 'unresolved: no Jetson serial was found' in (meta / 'car_id.txt').read_text()
+    assert (meta / 'files/source.txt').read_text() == 'recorded'
 
 
 def test_metadata_copies_car_imu_calibration(tmp_path, monkeypatch):

@@ -21,6 +21,16 @@ def block(**params):
     return {'ros__parameters': params}
 
 
+def test_car_overlays_lists_calibration_and_tuning(tmp_path, monkeypatch):
+    from racerbot_car.layers import car_overlays
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(tmp_path))
+    cal = Path(write(tmp_path / 'rb1/calibration/z.yaml', {}))
+    tuning = Path(write(tmp_path / 'rb1/tuning/a.yaml', {}))
+    write(tmp_path / 'rb2/calibration/other.yaml', {})
+    write(tmp_path / 'rb1/imu/other.yaml', {})
+    assert car_overlays('rb1') == sorted([cal, tuning])
+
+
 def test_repo_root_source_tree(monkeypatch):
     monkeypatch.delenv('RACERBOT_WS', raising=False)
     root = Path(__file__).resolve().parents[3]
