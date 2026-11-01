@@ -182,6 +182,23 @@ def test_normalize_replaces_ws_home_tmp():
         'x': ['<WS>/a', '<HOME>/b', '<TMP>/two']}
 
 
+def test_normalize_matrix_dir_beats_ws():
+    # oracle: longest path prefix is replaced first.
+    assert normalize(['/a/tools/dev/x', '/a/src/y'], '/a', matrix_dir='/a/tools/dev') == [
+        '<MATRIX>/x', '<WS>/src/y']
+
+
+def test_capture_one_normalizes_matrix_dir(tmp_path):
+    # oracle: CLI passes its matrix directory into the capture normalizer.
+    matrix_dir = tmp_path / 'matrix'
+    matrix_dir.mkdir()
+    command = [sys.executable, str(ROOT / 'tools/dev/launch_params.py'), 'capture-one',
+               '--file', str(FIXTURES / 'demo_launch.py'), '--matrix-dir', str(matrix_dir),
+               '--', f'marker:={matrix_dir}/marker']
+    process = subprocess.run(command, capture_output=True, text=True, check=True)
+    assert json.loads(process.stdout)['processes'][0]['cmd'] == ['touch', '<MATRIX>/marker']
+
+
 def record(name, params, files=None):
     return {'namespace': '/', 'name': name, 'package': 'p', 'executable': name,
             'params': params, 'param_files': files or [], 'remaps': [], 'deferred': False}

@@ -80,17 +80,20 @@ def flatten_params(entries, node_fqn):
     return result
 
 
-def normalize(obj, ws_root, sandbox=None):
+def normalize(obj, ws_root, sandbox=None, *, matrix_dir=None):
     if isinstance(obj, dict):
-        return {normalize(k, ws_root, sandbox): normalize(v, ws_root, sandbox) for k, v in obj.items()}
+        return {normalize(k, ws_root, sandbox, matrix_dir=matrix_dir):
+                normalize(v, ws_root, sandbox, matrix_dir=matrix_dir) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [normalize(v, ws_root, sandbox) for v in obj]
+        return [normalize(v, ws_root, sandbox, matrix_dir=matrix_dir) for v in obj]
     if not isinstance(obj, str):
         return obj
     replacements = [(os.path.realpath(ws_root), '<WS>'), (str(ws_root), '<WS>'),
                     (os.path.expanduser('~'), '<HOME>')]
     if sandbox:
         replacements.append((os.path.realpath(sandbox), '<SANDBOX>'))
+    if matrix_dir:
+        replacements.append((os.path.realpath(matrix_dir), '<MATRIX>'))
     for path, replacement in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
         obj = obj.replace(path, replacement)
     tmp = re.escape(tempfile.gettempdir().rstrip('/'))
@@ -321,7 +324,7 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
             raise CaptureError('\n'.join(result['errors']) or f'launch returned {rc}')
     result['nodes'].sort(key=lambda n: (n['namespace'] or '', n['name'] or '', n['package'], n['executable']))
     result['missing_includes'].sort(key=lambda entry: (entry['package'], entry['deferred']))
-    return normalize(result, ws_root, sandbox)
+    return normalize(result, ws_root, sandbox, matrix_dir=matrix_dir)
 
 
 def diff_captures(a, b):
