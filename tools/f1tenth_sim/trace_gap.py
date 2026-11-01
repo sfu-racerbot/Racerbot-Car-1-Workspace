@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sim_fidelity import CALIBRATION, with_friction  # noqa: E402
+from sim_fidelity import CALIBRATION, FLOORS, with_floor, with_friction  # noqa: E402
 from eval_gap import (  # noqa: E402
     CONTROL_DT, GapController, components_half_fov, components_increment,
     components_range_min, make_plant, parse_set)
@@ -32,7 +32,8 @@ from eval_gap import (  # noqa: E402
 import numpy as np  # noqa: E402
 
 COLUMNS = (
-    "step", "t", "x", "y", "yaw_deg", "wheel_angle", "speed_meas", "cmd_speed", "steering",
+    "step", "t", "x", "y", "yaw_deg", "wheel_angle", "speed_meas", "speed_true", "yaw_rate_true",
+    "cmd_speed", "steering",
     "desired_steering", "target_deg", "target_distance", "gap_width_deg",
     "fallback", "creeping", "centering_bias", "corner_setup_bias",
     "binding", "stop_reason", "curve_cap", "clearance_cap", "corner_cap",
@@ -80,7 +81,7 @@ def trace(track, params, seed, timeout_s, calibration=CALIBRATION):
             # std_state is [x, y, delta, v, yaw, yaw_rate, beta]: index 2 is the
             # road-wheel angle, not yaw.
             yaw_deg=math.degrees(float(truth[4])), wheel_angle=float(truth[2]),
-            speed_meas=speed_meas,
+            speed_meas=speed_meas, speed_true=float(truth[3]), yaw_rate_true=float(truth[5]),
             cmd_speed=cmd_speed, steering=steering,
             desired_steering=tel.get("desired_steering", ""),
             target_deg=(math.degrees(tel["target_angle"])
@@ -156,9 +157,11 @@ def main(argv=None):
     ap.add_argument("--plot", help="write a PNG of the driven path here")
     ap.add_argument("--friction", type=float,
                     help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     args = ap.parse_args(argv)
     rows, laps = trace(args.track, parse_set(args.set), args.seed, args.timeout,
-                       with_friction(args.friction))
+                       with_friction(args.friction, with_floor(args.floor)))
     if args.out:
         with open(args.out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(COLUMNS))

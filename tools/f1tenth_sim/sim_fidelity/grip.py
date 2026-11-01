@@ -28,6 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+import numpy as np
+
 # Below this speed the single-track model falls back to a kinematic bicycle
 # (single_track.py: `if V < 0.5`), where slip angles and hence grip limits are
 # not modelled at all. Clamping there would be meaningless.
@@ -132,6 +134,64 @@ class GripEnvelope:
                 if math.isfinite(self.min_lateral_budget)
                 else None
             ),
+        }
+
+
+@dataclass
+class ProgressiveGrip:
+    """Tyres that roll off gradually, as the real car's do, instead of a sharp limit.
+
+    ``curve`` is ((asked, delivered), ...) in m/s^2: the lateral acceleration the rack
+    asks for at this speed, and what the tyres deliver for it. Measured on 2026-10-30,
+    the car follows the request, then keeps gaining ever more slowly: there is no one
+    friction number. Measured too: braking and accelerating cost it almost nothing
+    (2.7 m/s^2 achieved from 3 m/s^2 of braking through 1.5 of acceleration), so unlike
+    GripEnvelope this takes no share for longitudinal force.
+
+    Same interface as GripEnvelope, so the plant and its report need not care which.
+    """
+
+    curve: tuple
+    wheelbase: float
+    limited_steps: int = 0
+    total_steps: int = 0
+    max_demanded_lateral: float = 0.0
+    max_allowed_lateral: float = 0.0
+
+    def __post_init__(self):
+        asked = [row[0] for row in self.curve]
+        delivered = [row[1] for row in self.curve]
+        if len(asked) < 2 or asked != sorted(asked) or delivered != sorted(delivered):
+            raise ValueError(f"grip curve must be ascending in both columns, got {self.curve!r}")
+        self._asked, self._delivered = asked, delivered
+
+    def deliver(self, asked: float) -> float:
+        """What the tyres deliver for ``asked``; past the table it stays at the last value."""
+        return float(np.interp(asked, self._asked, self._delivered))
+
+    def apply(self, steering: float, speed: float, longitudinal_accel: float = 0.0) -> float:
+        """The wheel angle that turns the car as hard as the tyres actually will."""
+        self.total_steps += 1
+        if speed < KINEMATIC_SPEED:
+            return steering
+        demanded = abs(math.tan(steering)) * speed * speed / self.wheelbase
+        allowed = self.deliver(demanded)
+        self.max_demanded_lateral = max(self.max_demanded_lateral, demanded)
+        self.max_allowed_lateral = max(self.max_allowed_lateral, allowed)
+        if allowed < demanded:
+            self.limited_steps += 1
+        return math.copysign(math.atan(self.wheelbase * allowed / (speed * speed)), steering)
+
+    def report(self) -> dict:
+        return {
+            "grip_limit_mps2": round(self._delivered[-1], 3),
+            "grip_limit_g": round(self._delivered[-1] / 9.81, 3),
+            "grip_limited_steps": self.limited_steps,
+            "grip_limited_fraction": (round(self.limited_steps / self.total_steps, 4)
+                                      if self.total_steps else 0.0),
+            "max_demanded_lateral_mps2": round(self.max_demanded_lateral, 3),
+            "max_allowed_lateral_mps2": round(self.max_allowed_lateral, 3),
+            "min_lateral_budget_mps2": None,
         }
 
 

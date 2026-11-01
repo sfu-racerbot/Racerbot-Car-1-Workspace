@@ -1553,7 +1553,9 @@ Pressing LB again did not fix it. Most stops ended by themselves after about 1 s
 
 ### Results
 
-Solo: 10 tracks, 12 seeds, both directions, at two grip levels, so 480 runs per row. Friction 0.42 is the pessimistic grip level.
+Solo: 10 tracks, 12 seeds, both directions, at two grip levels, so 480 runs per row. These ran on the plain calibration, before the simulator was fitted to the floor. Of its two friction levels, 0.42 matched the real grip curve best and 0.55 flattered the car.
+
+On the measured floor profile of 2026-10-31 ([sim-calibration.md](sim-calibration.md#speed-on-the-calibrated-floor)) the new default laps this course in 20.71 s and `time_trial:=true` in 18.10 s, from a standing start, 60 laps each.
 
 | Setup | Finish | Runs with wall contact | This course: finish, lap |
 |---|---|---|---|
@@ -1586,8 +1588,9 @@ Replaying the six single-car `gap_follow` recordings of that day (410 s), where 
 - **It has never been driven.** Follow the [Validation](#validation) order.
 - **The false "cars" are reduced, not gone.** They still slow the car, about 39 s of those 410 s. That is why one car against the clock should use `time_trial:=true`.
 - **No recording has two cars in it**, so recognising a real car has only been measured in the simulator.
-- **The simulator is not the floor.** It gives 5.4 m/s² of grip at its normal setting. The real car follows the request up to about 2.5 m/s², then rolls off: asking 3 gets 2.6, asking 5.5 gets 3.4, asking 10 gets about 4.2.
-- **Team A's speed costs wall margin.** Its `disparity_extender` at max 3.0 m/s spent 9.2 of 85 s within 5 cm of a mapped wall. Its best pace was about 17.6 s per lap.
+- **The simulator is not the floor.** Its plain calibration gives 5.4 m/s² of grip. The real car follows the request up to about 2.5 m/s², then rolls off: asking 3 gets 2.6, asking 5.5 gets 3.4, asking 10 gets about 4.2.
+- **Team A's runs did not touch a wall.** An earlier version of this page said its `disparity_extender` spent 9.2 of 85 s within 5 cm of a mapped wall. That measure used a padded body box against map walls that stand about 6 cm proud of the real ones, and the people watching saw no contact. Its best pace was about 17.6 s per lap.
+- **The simulator was not fitted to this floor** when these results were made. [sim-calibration.md](sim-calibration.md) has the fitted version, and the speed sweep on it.
 
 <details>
 <summary>How the real numbers were measured, and what was tried and rejected (safe to skip)</summary>

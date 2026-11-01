@@ -70,7 +70,7 @@ from imu_bridge.vehicle_state import steering_from_yaw_rate  # noqa: E402
 from recognition import false_movers, moving_track_ids  # noqa: E402
 from racerbot_sim import tracks as sim_tracks  # noqa: E402
 from run_analysis import weave  # noqa: E402
-from sim_fidelity import CALIBRATION, PROFILES, with_friction  # noqa: E402
+from sim_fidelity import CALIBRATION, FLOORS, PROFILES, with_floor, with_friction  # noqa: E402
 from sim_fidelity.plant import DEFAULT_PROFILE, FidelityPlant, env_components  # noqa: E402
 
 CONTROL_DT = 0.025
@@ -463,13 +463,15 @@ def main(argv=None) -> int:
                         help="drive each track the other way round")
     parser.add_argument("--friction", type=float,
                         help="floor friction for this run (default: the calibration's)")
+    parser.add_argument("--floor", choices=sorted(FLOORS),
+                        help="a measured floor profile (default: the plain calibration)")
     args = parser.parse_args(argv)
 
     selected = select_tracks(args.track)
     params = parse_set(args.set)
     for track in selected:
         track_path(track)  # build the layouts before any worker process forks
-    calibration = with_friction(args.friction)
+    calibration = with_friction(args.friction, with_floor(args.floor))
     jobs = [(track, args.seed + k, params, args.timeout, args.reverse, calibration)
             for track in selected for k in range(args.seeds)]
     if args.workers > 1:

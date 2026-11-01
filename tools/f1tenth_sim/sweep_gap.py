@@ -40,10 +40,12 @@ def main(argv=None) -> int:
                     help="drive each track the other way round (right turns)")
     ap.add_argument("--friction", type=float,
                     help="floor friction for this run (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(eval_gap.FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     args = ap.parse_args(argv)
     tracks = eval_gap.select_tracks(args.track)
     params = eval_gap.parse_set(args.set)
-    calibration = eval_gap.with_friction(args.friction)
+    calibration = eval_gap.with_friction(args.friction, eval_gap.with_floor(args.floor))
     jobs = [(t, args.first_seed + k, params, args.timeout, args.reverse, calibration)
             for t in tracks for k in range(args.seeds)]
     for track in tracks:

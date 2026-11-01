@@ -59,6 +59,8 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", type=float, default=150.0, help="simulated seconds per lap")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--friction", default="", help="comma list (default: the calibration's)")
+    ap.add_argument("--floor", choices=sorted(eval_gap.FLOORS),
+                    help="a measured floor profile (default: the plain calibration)")
     ap.add_argument("--forward-only", action="store_true", help="skip the reverse direction")
     ap.add_argument("--set", action="append", default=[], help="a parameter for every candidate")
     args = ap.parse_args(argv)
@@ -71,7 +73,7 @@ def main(argv=None) -> int:
     for name, values in candidates:
         params = eval_gap.parse_set(args.set + values)
         for friction in frictions:
-            calibration = eval_gap.with_friction(friction)
+            calibration = eval_gap.with_friction(friction, eval_gap.with_floor(args.floor))
             jobs = [(t, args.first_seed + k, params, args.timeout, rev, calibration)
                     for t in tracks for k in range(args.seeds) for rev in directions]
             started = time.time()

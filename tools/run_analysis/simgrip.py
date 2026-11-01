@@ -45,8 +45,8 @@ def main(argv=None) -> int:
             rows, _laps = trace_gap.trace(args.track, params, args.seed, args.timeout,
                                           eval_gap.with_friction(friction))
             t = np.array([r["t"] for r in rows], dtype=float)
-            v = np.array([r["speed_meas"] for r in rows], dtype=float)
-            ask, got = asked_achieved(t, v, yaw_rate(t, [r["yaw_deg"] for r in rows]),
+            v = np.array([r["speed_true"] for r in rows], dtype=float)
+            ask, got = asked_achieved(t, v, [r["yaw_rate_true"] for r in rows],
                                       [r["steering"] for r in rows])
             asked.append(ask[v > 1.0])
             achieved.append(got[v > 1.0])

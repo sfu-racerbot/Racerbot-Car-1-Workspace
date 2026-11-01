@@ -17,7 +17,7 @@
 
 ### Why it exists
 
-The wheels over-read true speed by about 4%, and more when they slip. `/odom`'s yaw comes from the steering command rather than from what the car did. So comparing algorithms from [odometry](glossary.md#odometry) (the car's own estimate of its motion) flatters some of them. Measuring against a fixed map removes that.
+The wheels over-read true speed by about 4%, and more when they slip. `/odom`'s yaw comes from the steering command rather than from what the car did. So comparing algorithms from [odometry](glossary.md#odometry--odom) (the car's own estimate of its motion) flatters some of them. Measuring against a fixed map removes that.
 
 ## The tools
 
@@ -35,6 +35,8 @@ All of them need ROS sourced, because they read the bag (the recording of a run'
 | `tools/run_analysis/oa_replay.py` | What would the opponent tracker make of this run? |
 | `tools/run_analysis/simgrip.py` | The simulator's grip curve, to compare with `gripcurve.py` |
 | `tools/f1tenth_sim/sweep2.py`, `summ2.py` | Compare settings over tracks, seeds, directions and floor frictions, then print the table |
+| `tools/run_analysis/car_measure.py` | Steering, speed loop, stops, odometry and LiDAR numbers for calibrating the simulator; see [sim-calibration.md](sim-calibration.md) |
+| `tools/run_analysis/scan_map.py` | Rebuilds a map's walls from where real scans landed |
 
 ## Worked example: run 20261030-185036
 
@@ -106,6 +108,8 @@ python3 tools/f1tenth_sim/summ2.py /tmp/sweep.jsonl
 Use at least six seeds. On 2026-10-30 a three-seed sweep made one setting look like a clear winner, and six seeds overturned it.
 
 `--friction` also works on `eval_gap.py`, `eval_gap_multi.py`, `sweep_gap.py` and `trace_gap.py`.
+
+For this course, use the measured floor instead of a friction number: `--track course_2026_10_30_scans --floor sfu_course_2026_10_30`. It reproduces the real grip curve, steering and braking ([sim-calibration.md](sim-calibration.md)).
 
 <details>
 <summary>How the localizer works (safe to skip)</summary>
