@@ -1,0 +1,11 @@
+pure_pursuit_node:
+  ros__parameters:
+    # Solving both ends: +0.381 rad at servo=0.05, -0.463 rad at servo=0.75
+    # (gain measured from floor circles 2026-10-21, docs/hardware-reference.md).
+    # 0.33 rad = 19 deg (was 0.26). Car 1's check circles reached 0.388 rad
+    # right and 0.401 rad left at full stick (0.38), so 0.33 leaves ~3 deg for
+    # gain error. The planner (auto_map_race.yaml profile_max_steering_angle)
+    # plans to 0.30 so this controller keeps ~2 deg to correct with on the
+    # tightest planned corner. NOT yet validated on car 1: wheels up first.
+    # Re-derive both if vesc.yaml's gain/offset/servo_min/servo_max ever change.
+    max_steering_angle: 0.33
