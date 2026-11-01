@@ -1,0 +1,16 @@
+- ROS simulator and f1tenth_sim: car 1's full lock is now car 1's (left +0.401 measured, right -0.463 computed) instead of car 2's (+0.509 / -0.448); autonomy is capped at 0.33 rad on car 1, so no controller reaches it.
+- Task 12e, step 3: all 45 rb1 launch captures succeeded. Against `merge-t11/cap-rb1`, only `/gym_bridge_node car="rb1"` was added in `sim-bringup`, `sim-auto-map`, `sim-auto-map-dashboard` and `sim-race`.
+- Task 12e, step 4 (2026-11-01): each deliberate break below was applied alone, tested and reverted. Each targeted test passed again after its break was reverted; all 34 new or changed test cases passed together on the final code.
+- Break (a): replacing rb1's full lock with rb2's values made `test_profile_full_lock_is_cited_per_car[rb1]` fail (1 failed, 1 passed); after revert, 2 passed.
+- Break (b): making `calibration_for_car` use rb2's constants made its rb1 full-lock case fail under both environment selections (2 failed, 2 passed); after revert, 4 passed.
+- Break (c): making `gym_bridge_node` always resolve rb2 made the rb1 bridge full-lock case fail against the actual physics parameters (1 failed, 1 passed); after revert, 2 passed.
+- Break (d): omitting the bridge's `car` launch parameter made the launch-capture test fail with `KeyError: 'car'`; after revert, 1 passed.
+- Break (e): accepting nonpositive left full-lock angles made the zero and negative refusal cases fail (2 failed, 17 passed); after revert, 19 passed.
+- Additional break: setting rb2 left full lock to 0.3 rad gave 7 failures; after revert, all 11 targeted cases passed.
+- Additional break: defaulting an unidentified bridge to rb2 gave 1 failure; after revert, 1 passed.
+- Additional break: returning zero eRPM gain instead of the overlay gave 2 failures; after revert, 2 passed.
+- Additional break: replacing invalid steering input with valid defaults made all 19 refusal cases fail; after revert, all 19 passed.
+- Final verification: the combined four-suite command stopped with 2 collection errors because tests imported the wrong suite's `conftest`. The pre-task commit `a205f29` reproduced both errors in a temporary text checkout using the existing simulator dependencies.
+- Separate sourced runs on ROS domain 74: car/profile and ROS simulator suites, 383 passed and 1 failed; tool suites, 576 passed and 2 failed. The 3 failures also reproduced at `a205f29`: the direct-calibration-read guard flags `test_car2_hardware_config.py`, and both traction-parity cases import the wrong `conftest`.
+- Unsourced checks: car/profile suite, 163 passed, 4 skipped and the same 1 guard failure; f1tenth_sim suite, 542 passed and the same 2 import failures. No tests were weakened or newly skipped.
+- Repeated launch comparison: 45 captures succeeded, 0 failed; the only differences remained the four `car="rb1"` additions recorded in step 3.

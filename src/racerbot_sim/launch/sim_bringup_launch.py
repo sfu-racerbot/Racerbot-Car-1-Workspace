@@ -32,6 +32,7 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, SetRemap
 from launch_ros.parameter_descriptions import ParameterValue
+from racerbot_car.layers import launch_car_id
 
 
 def _validate_controlled_cars(context):
@@ -39,6 +40,10 @@ def _validate_controlled_cars(context):
     if value not in ('1', '2'):
         raise RuntimeError('controlled_cars must be 1 or 2 in sim_bringup_launch.py')
     return []
+
+
+def _declare_car(context):
+    return [DeclareLaunchArgument('car', default_value=launch_car_id())]
 
 
 def _mux(mux_config, namespace='', condition=None):
@@ -111,6 +116,7 @@ def generate_launch_description():
         name='gym_bridge_node',
         output='screen',
         parameters=[{
+            'car': ParameterValue(LaunchConfiguration('car'), value_type=str),
             'publish_imu': ParameterValue(LaunchConfiguration('publish_imu'), value_type=bool),
             'imu_fault': ParameterValue(LaunchConfiguration('imu_fault'), value_type=str),
             'car2_imu_fault': ParameterValue(LaunchConfiguration('car2_imu_fault'), value_type=str),
@@ -165,5 +171,6 @@ def generate_launch_description():
                    arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0',
                               'car2/base_link', 'car2/laser'])
 
-    return LaunchDescription(arguments + [OpaqueFunction(function=_validate_controlled_cars),
+    return LaunchDescription(arguments + [OpaqueFunction(function=_declare_car),
+        OpaqueFunction(function=_validate_controlled_cars),
         gym_bridge, sim_joy, ackermann_mux, static_tf, car2_joy, car2_mux, car2_tf])

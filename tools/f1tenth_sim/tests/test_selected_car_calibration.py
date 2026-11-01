@@ -22,6 +22,10 @@ CARS = sorted(car for car in known_car_ids(cars_dir())
               if (cars_dir() / car / 'calibration/vesc.yaml').is_file())
 
 
+def _profile_text():
+    return (ROOT / 'src/racerbot_car/cars/rb1/car.yaml').read_text()
+
+
 @pytest.mark.parametrize('car', CARS)
 def test_calibration_matches_effective_vesc(car):
     # Oracle: eRPM / abs(gain), and the affine servo map in
@@ -52,7 +56,7 @@ def test_selected_car_calibration_uses_overlay(tmp_path, monkeypatch):
     cars = tmp_path / 'cars'
     overlay = cars / 'rb1/calibration/vesc.yaml'
     overlay.parent.mkdir(parents=True)
-    (cars / 'rb1/car.yaml').write_text('{}\n')
+    (cars / 'rb1/car.yaml').write_text(_profile_text())
     overlay.write_text(yaml.safe_dump({'/**': {'ros__parameters': {
         'speed_to_erpm_gain': 2000.0, 'steering_angle_to_servo_gain': -0.5,
         'steering_angle_to_servo_offset': 0.4, 'servo_min': 0.1, 'servo_max': 0.9}},

@@ -17,7 +17,7 @@ Filling in a measurement means editing one line here. See
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import InitVar, dataclass, fields, replace
 from enum import Enum
 import math
 import os
@@ -29,6 +29,7 @@ from racerbot_car import identity  # noqa: E402
 from racerbot_car.identity import UnknownCarError, known_car_ids  # noqa: E402
 from racerbot_car.layers import effective_config  # noqa: E402
 from racerbot_car.paths import cars_dir  # noqa: E402
+from racerbot_car.profile import load_profile  # noqa: E402
 
 # Standard gravity, matching the figure used throughout the fidelity audit.
 G = 9.81
@@ -68,7 +69,8 @@ STOCK_LF = 0.15875
 STOCK_LR = 0.17145
 
 
-# Full-lock wheel angles, MEASURED 2026-10-16 with tape-measured half circles
+# Car 2's full-lock wheel angles, retained for the car-2 floor linkage checks.
+# MEASURED 2026-10-16 with tape-measured half circles
 # (docs/hardware-reference.md): angle = atan(wheelbase / rear-axle radius).
 # Not derived from the servo map above: the linkage is not linear, and
 # inverting the affine servo map can claim angles past anything driven.
@@ -125,8 +127,9 @@ class CarCalibration:
     longitudinal_grip_coupling: float = 1.0
 
     # --- Actuation ------------------------------------------------------
-    steering_max_left: float = STEERING_MAX_LEFT_MEASURED
-    steering_max_right: float = STEERING_MAX_RIGHT_MEASURED
+    steering_max_left: float = None
+    steering_max_right: float = None
+    car_id: InitVar[str | None] = None
     steering_rate_max: float = None
     speed_to_erpm_gain: float = None
     steering_angle_to_servo_gain: float = None
@@ -183,14 +186,18 @@ class CarCalibration:
     # The floor profile these values came from; empty for the plain calibration.
     floor: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self, car_id):
+        # Identity is provenance metadata, not a physical calibration/hash field.
+        object.__setattr__(self, 'car_id', car_id)
         # Preserve CarCalibration(**overrides) for library users, resolving
-        # omitted VESC fields at construction rather than module import. Only
+        # omitted car fields at construction rather than module import. Only
         # these: the floor models' None means "off" (FLOORS), and resolving it
         # through calibration_for_car would recurse.
-        missing = [name for name in VESC_FIELDS if getattr(self, name) is None]
+        missing = [name for name in (*VESC_FIELDS, 'steering_max_left',
+                                    'steering_max_right', 'car_id')
+                   if getattr(self, name) is None]
         if missing:
-            selected = calibration_for_car()
+            selected = calibration_for_car(car_id)
             for name in missing:
                 object.__setattr__(self, name, getattr(selected, name))
 
@@ -329,11 +336,14 @@ PROVENANCE: dict[str, tuple[Provenance, str]] = {
     ),
     "steering_max_left": (
         Provenance.MEASURED,
-        "full-lock circle 2026-10-16, servo 0.178 (servo_min 0.15 never driven)",
+        "rb2: tape-measured full-lock half circles 2026-10-16, atan(0.36 / 0.645), "
+        "servo 0.178 (servo_min 0.15 never driven); cars/rb2/car.yaml; "
+        "racerbot_sim/sim_bridge.py and sim_fidelity/calibration.py",
     ),
     "steering_max_right": (
         Provenance.MEASURED,
-        "full-lock circle 2026-10-16, at vesc.yaml servo_max 0.95",
+        "rb2: tape-measured full-lock half circles 2026-10-16, -atan(0.36 / 0.750), "
+        "servo_max 0.95; cars/rb2/car.yaml; racerbot_sim/sim_bridge.py and sim_fidelity/calibration.py",
     ),
     "steering_rate_max": (
         Provenance.DERIVED,
@@ -457,8 +467,11 @@ def calibration_for_car(car_id: str | None = None) -> CarCalibration:
     car_id = selected_car(car_id, note=False)
     vesc = effective_config('vesc.yaml', '/**', car_id)
     throttle = effective_config('vesc.yaml', 'throttle_interpolator', car_id)
+    profile = load_profile(car_id)
     speed_max = vesc['speed_max'] / abs(vesc['speed_to_erpm_gain'])
     return CarCalibration(
+        car_id=car_id, steering_max_left=profile.full_lock_left_rad,
+        steering_max_right=profile.full_lock_right_rad,
         **{key: vesc[key] for key in ('speed_to_erpm_gain',
            'steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',
            'servo_min', 'servo_max')},
@@ -608,6 +621,16 @@ def describe(calibration: CarCalibration | None = None) -> list[tuple]:
     rows = []
     for field in fields(calibration):
         provenance, source = PROVENANCE[field.name]
+        if calibration.car_id == 'rb1':
+            if field.name == 'steering_max_left':
+                provenance, source = (Provenance.MEASURED,
+                    'rb1: 0.401 rad left, measured 2026-10-21 check circles; '
+                    'docs/hardware-reference.md "Steering limits, 2026-10-22"; '
+                    'full stick reaches servo_min (0.051 vs 0.05); cars/rb1/car.yaml')
+            elif field.name == 'steering_max_right':
+                provenance, source = (Provenance.DERIVED,
+                    'rb1: -(0.75 - 0.366) / 0.83 rad, computed from the servo map, not measured; '
+                    'cars/rb1/calibration/vesc.yaml at servo_max 0.75; cars/rb1/car.yaml')
         rows.append(
             (provenance, field.name, getattr(calibration, field.name), source)
         )

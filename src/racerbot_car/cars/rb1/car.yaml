@@ -2,6 +2,10 @@
 # Calibration overlays (servo map, erpm gains, steering limits) live next to this
 # file under calibration/ (added in a later task).
 name: car 1
+steering:
+  full_lock_rad:
+    left: 0.401  # Measured 2026-10-21 check circles; docs/hardware-reference.md "Steering limits, 2026-10-22": full stick servo 0.051 vs servo_min 0.05.
+    right: -0.46265060240963857  # -(0.75 - 0.366) / 0.83; computed from the servo map, not measured: cars/rb1/calibration/vesc.yaml at servo_max 0.75 (full-stick circle 0.388 rad reached only servo 0.681).
 lidar:
   kind: serial                # Hokuyo UST-30LX over USB
   port: /dev/sensors/hokuyo   # /etc/udev/rules.d/99-hokuyo.rules

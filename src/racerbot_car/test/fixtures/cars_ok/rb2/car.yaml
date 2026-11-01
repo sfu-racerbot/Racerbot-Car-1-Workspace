@@ -1,4 +1,6 @@
 name: car 2
+steering:
+  full_lock_rad: {left: 0.5090708884223831, right: -0.44751997515716985}
 lidar:
   kind: ethernet
   ip: 192.168.0.10

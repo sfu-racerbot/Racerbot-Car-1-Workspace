@@ -49,6 +49,7 @@ def _setup(context):
     bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(sim_share, 'launch', 'sim_bringup_launch.py')),
         launch_arguments={
+            'car': car_id,
             'track': track, 'track_directory': track_directory,
             'publish_imu': LaunchConfiguration('publish_imu'),
             'imu_fault': LaunchConfiguration('imu_fault'),
