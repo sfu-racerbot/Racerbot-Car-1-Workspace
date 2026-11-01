@@ -168,6 +168,13 @@
     - **No synthetic base (59 files):** these are mostly `package.xml`/`setup.py`, docs and tests. They're merged by hand from both ledgers.
     - **`ffbfac0` is never used** as the base for a file that has a synthetic base.
     - **Gate:** `~/racerbot-merge/presence_check.py <merged tree>` must report 0 missing keep-hunks and 0 `review` hunks.
+- **Phase 2 changes car 1's side of the merge (found 2026-11-01).** The ledgers and `merge_plan.tsv` were made against car 1's `ae7ceeb`. Phase 2 (Tasks 3–8) then rewrote many of the same files: car plumbing through `tools/f1tenth_sim` and `tools/run_analysis`, calibration out of the shared YAMLs, overlays layered into every launch, per-car data paths.
+  - **The danger:** several of those files are classed "superseded: keep car 2's version" (`run_validation.py`, `eval_gap*.py`, `plant.py`, `runlog.py`, `fit_sim.py`, `analyze_run.py`, `replay.py`, `auto_map_race_node.py`, …). Taking car 2's file whole would silently drop Phase 2's work.
+  - **The fix:**
+    - A fourth ledger, `ledger_p2.tsv` (`ae7ceeb` → the end of Phase 2), whose hunks are all class `feature-p2` (keep). `presence_check.py` checks it like the others.
+    - "Superseded" means car 2's newer logic replaces car 1's OLD port-time code. It never removes Phase 2's car plumbing, overlays or per-car paths.
+    - Where car 2's newer code reads calibration directly or hard-codes a data path, Phase 2's guards (`test_no_direct_calibration_reads.py`, `test_shared_configs_hold_no_calibration.py`, `test_no_bare_data_paths.py`) fail after the merge. Resolve each by porting car 2's logic onto Phase 2's interfaces, never by relaxing a guard.
+  - **Car 2's shared YAML values are `hw-rb2`:** they go into `cars/rb2/calibration/`, never back into a shared file.
 
 ## Review Focus
 
