@@ -34,6 +34,7 @@ After that, follow whichever branch below matches what you're doing.
 |---|---|
 | [glossary.md](glossary.md) | Short definitions of every term the docs use. For anyone who hits an unfamiliar word. |
 | [concepts.md](concepts.md) | ROS2, colcon, sourcing, and what each top-level folder is for. For anyone new to ROS2. |
+| [car-profiles.md](car-profiles.md) | How the workspace identifies rb1 or rb2, where calibration lives and how tuning layers combine. Read before changing a car's values or adding another car. |
 | [architecture.md](architecture.md) | The node/topic graph, the two-layer launch pattern, and the safety model. For anyone about to write or run driving code. |
 
 ## Do a thing
@@ -47,7 +48,7 @@ After that, follow whichever branch below matches what you're doing.
 | [run-analysis.md](run-analysis.md) | Turning a recorded run into a report: why every stop happened, how the car really responded to its commands, a replay through the simulator, fitting the simulator to the car, and adding a SLAM map as a simulator track. For anyone who has just recorded a run. |
 | [wiimote.md](wiimote.md) | Drive the car with a Nintendo Wiimote: one-time Bluetooth pairing, auto-reconnect, the controls, and building the Jetson kernel driver. For anyone who wants a second manual controller. |
 | [odom-calibration.md](odom-calibration.md) | A browser wizard for tape-measure calibration of wheel odometry and steering. For anyone whose distances read wrong or whose car pulls to one side. |
-| [car1-vs-car2.md](car1-vs-car2.md) | Every way car 1 differs from car 2 (USB LiDAR, webcam, calibration, dashboard id), and the check to run after porting anything from the car 2 repo. **Read before porting from car 2.** |
+| [car1-vs-car2.md](car1-vs-car2.md) | A hardware comparison linked to each car's profile, plus IMU calibration caveats and the course settings now shared by both cars. |
 | [git-setup.md](git-setup.md) | Which `src/` packages are real submodules vs. vendored code, and how to update them safely. Read before pulling upstream changes into `f1tenth_system`. |
 
 ## Write code
@@ -78,7 +79,7 @@ After that, follow whichever branch below matches what you're doing.
 
 | Doc | What's in it, and who it's for |
 |---|---|
-| [hardware-reference.md](hardware-reference.md) | VESC, LiDAR, joystick: exact addresses, ports, config values, and gotchas for this specific car. |
+| [hardware-reference.md](hardware-reference.md) | Shared geometry followed by each car's VESC, LiDAR, camera, joystick and network values, with profile sources. |
 | [troubleshooting.md](troubleshooting.md) | Real problems hit during bring-up and how they were diagnosed. Check here when something doesn't work. |
 | [known-issues.md](known-issues.md) | Discrepancies, stale docs and loose ends found but not yet fixed, each with its evidence and a suggested fix. For anyone with time to fix things. |
 
