@@ -82,16 +82,27 @@ def test_no_direct_calibration_reads():
                 continue
             keys = {key for config in configs for block in CALIBRATION_KEYS[config].values()
                     for key in block}
+            # ROS flattens nested mappings to dotted keys; raw YAML readers
+            # can instead index the final component, e.g. ['scale'].
+            keys.update(key.rsplit('.', 1)[-1] for key in tuple(keys))
             tree = ast.parse(source, filename=name)
             if not _raw_read_and_index(tree, keys):
                 continue
             if not _has_effective_read(tree):
                 findings.append(name)
                 continue
-            # A migrated module can contain an independent legacy raw reader.
+            module_scope = ast.Module(
+                body=[node for node in tree.body if not isinstance(
+                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))],
+                type_ignores=[])
+            if _raw_read_and_index(module_scope, keys):
+                findings.append(f'{name} (module scope)')
+            # A migrated module (or function) can also contain a raw reader.
             for scope in ast.walk(tree):
                 if (isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and _raw_read_and_index(scope, keys) and not _has_effective_read(scope)):
+                        and _raw_read_and_index(scope, keys)):
                     findings.append(f'{name}:{scope.lineno} ({scope.name})')
     assert checked > 0, 'the source guard scanned no Python files'
-    assert not findings, 'Direct calibration reads; use effective_config/effective_values:\n' + '\n'.join(findings)
+    assert not findings, (
+        'Direct calibration reads; use effective_config/effective_values:\n'
+        + '\n'.join(findings))
