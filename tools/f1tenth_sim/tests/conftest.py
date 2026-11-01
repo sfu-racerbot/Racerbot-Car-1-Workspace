@@ -74,8 +74,13 @@ def car_profiles(tmp_path, monkeypatch):
                 'speed_to_erpm_gain': -abs(data['vesc']['speed_to_erpm_gain'])}}}))
         (profile / 'calibration/pure_pursuit.yaml').write_text(yaml.safe_dump({
             'pure_pursuit_node': {'ros__parameters': data['pure']}}))
-        (profile / 'tuning/pure_pursuit.yaml').write_text(yaml.safe_dump({
-            'pure_pursuit_node': {'ros__parameters': data['tuning']}}))
+        # A tuning overlay needs a '# why:' line above each key (racerbot_car.guards,
+        # Task 14), which yaml.safe_dump cannot write.
+        lines = ['pure_pursuit_node:', '  ros__parameters:']
+        for key, value in data['tuning'].items():
+            lines += ['    # why: test fixture: tuning the two cars can be told apart by',
+                      f'    {key}: {yaml.safe_dump(value).splitlines()[0]}']
+        (profile / 'tuning/pure_pursuit.yaml').write_text('\n'.join(lines) + '\n')
 
     def set_calibration(car, **changes):
         values[car]['vesc'].update(changes)

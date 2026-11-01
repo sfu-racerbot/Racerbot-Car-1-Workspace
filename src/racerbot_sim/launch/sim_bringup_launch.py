@@ -27,7 +27,7 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, SetLaunchConfiguration
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, SetRemap
@@ -42,8 +42,11 @@ def _validate_controlled_cars(context):
     return []
 
 
-def _declare_car(context):
-    return [DeclareLaunchArgument('car', default_value=launch_car_id())]
+def _resolve_car(context):
+    # car:= empty (the default) means the car this machine resolves to; an explicit car:= wins.
+    if LaunchConfiguration('car').perform(context):
+        return []
+    return [SetLaunchConfiguration('car', launch_car_id())]
 
 
 def _mux(mux_config, namespace='', condition=None):
@@ -67,6 +70,9 @@ def generate_launch_description():
         car2_mux_config = yaml.safe_load(handle)['ackermann_mux']['ros__parameters']
 
     arguments = [
+        DeclareLaunchArgument(
+            'car', default_value='',
+            description='Car whose physics the simulator models (rb1, rb2); empty = this machine\'s car.'),
         DeclareLaunchArgument('publish_imu', default_value='true'),
         DeclareLaunchArgument('imu_fault', default_value='none'),
         DeclareLaunchArgument('car2_imu_fault', default_value='none'),
@@ -171,6 +177,6 @@ def generate_launch_description():
                    arguments=['0.26', '0.0', '0.11', '0.0', '0.0', '0.0',
                               'car2/base_link', 'car2/laser'])
 
-    return LaunchDescription(arguments + [OpaqueFunction(function=_declare_car),
+    return LaunchDescription(arguments + [OpaqueFunction(function=_resolve_car),
         OpaqueFunction(function=_validate_controlled_cars),
         gym_bridge, sim_joy, ackermann_mux, static_tf, car2_joy, car2_mux, car2_tf])
