@@ -161,3 +161,32 @@ The wheelbase and LiDAR offset are inputs to things that were recorded *before* 
 - **The minimum turning radius grew**, from 1.22 m to **1.35 m** (`0.36 / tan(0.26)`).
 - Since 2026-10-22 car 1's limits are 0.33 rad for the controllers and 0.30 rad for the race planner: **1.05 m** and **1.16 m** (see the steering limits above). A longer wheelbase turns *wider* for the same rack angle, so a course the optimizer previously accepted may now be refused — that refusal is correct, and the old acceptance was not.
 - **Saved maps** are still usable; the map itself does not change. What changed is where `base_link` sits relative to the scan that built it.
+
+## Car 2 (rb2)
+
+These are car 2's hardware facts, copied verbatim from its reference at `9c2c2ed`; the docs task will merge the two cars' references.
+
+| | |
+|---|---|
+| Sensor's IP:port | `192.168.0.10:10940` (factory default, unchanged) |
+| NetworkManager profile | `hokuyo`, static IPv4 `192.168.0.15/24` |
+
+**Config** (`src/f1tenth_system/f1tenth_stack/config/vesc.yaml`):
+```yaml
+speed_to_erpm_gain: 4614.0
+speed_to_erpm_offset: 0.0
+steering_angle_to_servo_gain: -0.78    # MEASURED 2026-10-16, see below
+steering_angle_to_servo_offset: 0.5904
+servo_min: 0.15
+servo_max: 0.95
+wheelbase: 0.36   # meters, MEASURED on this car 2026-08-24
+```
+
+- Full stick (`joy_teleop.yaml` scale) is **0.436 rad = 25°**, which both sides reach. Check: both full-lock circles came out equal, 1.33 m inner = 24.2°.
+- Autonomy is held below that: `max_steering_angle` **0.349 rad = 20°** in `gap_follow.yaml` and `pure_pursuit.yaml` (0.99 m minimum turning radius). The race planner's `profile_max_steering_angle` is **0.30 rad = 17°** in `auto_map_race.yaml` (1.16 m), so the controller has steering left on the tightest planned corner.
+
+The odometry verification line comes from car 2's `docs/git-setup.md` at `9c2c2ed`:
+
+```text
+ros2 param get /vesc_to_odom_node speed_to_erpm_gain      # must be NEGATIVE (currently -4447.983786)
+```
