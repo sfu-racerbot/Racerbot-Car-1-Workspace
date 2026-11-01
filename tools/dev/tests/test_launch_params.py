@@ -72,21 +72,23 @@ def test_inline_dict_param(demo):
 
 
 def test_inline_parameter_captures_back_to_back(tmp_path):
+    params = tmp_path / 'params.yaml'
+    params.write_text('/**:\n  ros__parameters:\n    base: 7\n')
     launch_file = tmp_path / 'inline_launch.py'
     launch_file.write_text(
         'import gc\n'
         'from launch import LaunchDescription\n'
         'from launch_ros.actions import Node\n'
+        'from launch_ros.parameter_descriptions import ParameterFile\n'
         'def generate_launch_description():\n'
         '    gc.collect()\n'
         '    node = Node(\n'
         '        package="demo", executable="not_started", name="inline",\n'
-        '        parameters=[{"gain": 3}])\n'
+        f'        parameters=[ParameterFile({str(params)!r}, allow_substs=True), {{"gain": 3}}])\n'
         '    node.cycle = node\n'
         '    return LaunchDescription([node])\n')
-    # Exercise collection during launch loading as well as inline parameters.
-    # Removing capture's pre-collection did not reproduce the original cleanup
-    # failure here; the production comment records why that safeguard stays.
+    # ParameterFile owns a rendered temporary YAML. Keep the launch in a cycle
+    # until collection during the next capture, reproducing cross-sandbox cleanup.
     enabled = gc.isenabled()
     gc.disable()
     try:
@@ -94,6 +96,7 @@ def test_inline_parameter_captures_back_to_back(tmp_path):
         second = capture(str(launch_file), [])
         assert first['nodes'][0]['params']['gain'] == 3
         assert second['nodes'][0]['params']['gain'] == 3
+        assert second['nodes'][0]['params']['base'] == 7
         assert second['errors'] == []
     finally:
         if enabled:
