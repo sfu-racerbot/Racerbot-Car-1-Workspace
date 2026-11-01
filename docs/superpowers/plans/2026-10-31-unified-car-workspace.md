@@ -30,6 +30,18 @@
 10. **Neither car runs or pushes over the weekend of 2026-10-31,** so both `main`s stay put while the work is under way. Task 20 still re-checks.
 11. **Execution:** as in "Execution" at the end. Implementers may be opencode `openai/gpt-6.1-terra` (OpenAI subscription) or one Claude Haiku at max effort.
 12. **When:** both repos were declared final on 2026-10-31. Car 2's SSH key access was granted the same day.
+13. **What is per car and what is shared (team lead, 2026-11-01).**
+    - **Physical characteristics are per car:** VESC and servo calibration, sensors, and anything else measured on the car itself.
+    - **Algorithm tuning is shared by both cars.** A dashboard live-tuning save goes to the file that already holds the key: calibration to the car's overlay, algorithm parameters to the shared config (Task 15).
+    - **A `cars/<id>/tuning/` entry has to be physically motivated** and say why in a `# why:` comment. An example is car 2 keeping IMU features off until its own IMU calibration is done.
+14. **All of car 2's newer code goes on both cars, including SLAM** (team lead, 2026-11-01):
+    - `slam_gyro.yaml` from `ca79651`;
+    - the flag that turns on `gyro_odom`;
+    - the gap_follow improvements.
+
+    Car 1 is checked in the simulator with car 1's settings (Task 13), not kept on its old settings meanwhile.
+15. **The dashboard's run-delete panel is allowed, own car only** (team lead, 2026-11-01). Each car's dashboard config lists only its own `data/<id>/` roots (`map_roots`). The demo maps stay refused by name, as `web-dashboards` `f5b711d` already does.
+16. **`dashboard_test_launch.py` takes car 2's behaviour on both cars** (team lead, 2026-11-01): it starts no second dashboard unless `dashboard:=true`, because the dashboard already runs at boot on both cars.
 
 ## Remaining questions
 
