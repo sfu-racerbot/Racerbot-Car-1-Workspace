@@ -38,9 +38,11 @@ from pathlib import Path
 from typing import BinaryIO
 
 import yaml
-from racerbot_car.paths import data_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # for the commit recorded in replay.json
+sys.path.insert(0, str(REPO_ROOT / 'src/racerbot_car'))
+from racerbot_car.paths import data_dir  # noqa: E402
+
 RELAY = Path(__file__).resolve().with_name('odom_tf_relay.py')
 PROC_ROOT = Path('/proc')  # the process table the interlock reads
 

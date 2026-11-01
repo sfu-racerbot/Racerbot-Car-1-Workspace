@@ -1,5 +1,6 @@
 """Run with: RB_WS=$PWD rb python3 -m pytest tools/dev/tests/test_launch_params.py."""
 import copy
+import gc
 import importlib.util
 import json
 import os
@@ -68,6 +69,36 @@ def test_flatten_nested_dict_dotted(demo):
 
 def test_inline_dict_param(demo):
     assert node(demo, '/demo_node')['params']['inline'] == 3
+
+
+def test_inline_parameter_captures_back_to_back(tmp_path):
+    launch_file = tmp_path / 'inline_launch.py'
+    launch_file.write_text(
+        'import gc\n'
+        'from launch import LaunchDescription\n'
+        'from launch_ros.actions import Node\n'
+        'def generate_launch_description():\n'
+        '    gc.collect()\n'
+        '    node = Node(\n'
+        '        package="demo", executable="not_started", name="inline",\n'
+        '        parameters=[{"gain": 3}])\n'
+        '    node.cycle = node\n'
+        '    return LaunchDescription([node])\n')
+    # Exercise collection during launch loading as well as inline parameters.
+    # Removing capture's pre-collection did not reproduce the original cleanup
+    # failure here; the production comment records why that safeguard stays.
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        first = capture(str(launch_file), [])
+        second = capture(str(launch_file), [])
+        assert first['nodes'][0]['params']['gain'] == 3
+        assert second['nodes'][0]['params']['gain'] == 3
+        assert second['errors'] == []
+    finally:
+        if enabled:
+            gc.enable()
+        gc.collect()
 
 
 def test_rule_param_parsed():

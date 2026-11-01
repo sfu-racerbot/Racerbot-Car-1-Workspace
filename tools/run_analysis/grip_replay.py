@@ -42,9 +42,11 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from racerbot_car.paths import data_dir
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'src/racerbot_car'))
+from racerbot_car.paths import data_dir  # noqa: E402
+
 GAP_FOLLOW_SRC = ROOT / 'src' / 'gap_follow'
 if str(GAP_FOLLOW_SRC) not in sys.path:
     sys.path.insert(0, str(GAP_FOLLOW_SRC))

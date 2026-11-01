@@ -39,6 +39,9 @@ def repo(tmp_path):
     root = tmp_path / 'repo'
     (root / 'tools').mkdir(parents=True)
     shutil.copy(SCRIPT, root / 'tools' / 'save_runs.sh')
+    # save_runs always resolves identity from the checkout, including unsourced.
+    shutil.copytree(SCRIPT.parents[1] / 'src/racerbot_car', root / 'src/racerbot_car',
+                    ignore=shutil.ignore_patterns('__pycache__'))
     git(root, 'init', '-q')
     git(root, 'config', 'user.email', 'test@example.invalid')
     git(root, 'config', 'user.name', 'test')

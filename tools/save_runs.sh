@@ -32,18 +32,21 @@ done
 ws="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ws"
 
-if [[ -d src/racerbot_car/racerbot_car ]]; then
-    car="$(python3 -c 'import sys; sys.path.insert(0, "src/racerbot_car"); from racerbot_car.identity import current_car_id; print(current_car_id())')" || {
-        echo "Cannot resolve this car. Set RACERBOT_CAR to a known car id." >&2
-        exit 1
-    }
-else
-    car="${RACERBOT_CAR:-}"
-fi
-if [[ ! "$car" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo "Cannot resolve this car. Set RACERBOT_CAR to a known car id." >&2
-    exit 1
-fi
+car="$(python3 - "$ws" <<'PY'
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(sys.argv[1]) / 'src/racerbot_car'))
+try:
+    from racerbot_car.identity import current_car_id
+    print(current_car_id())
+except Exception as error:
+    print(f"Cannot resolve car identity for RACERBOT_CAR={os.environ.get('RACERBOT_CAR', '')!r}: "
+          f"{error}", file=sys.stderr)
+    sys.exit(1)
+PY
+)" || exit 1
 car_data="data/$car"
 # Include tracked deletions even if the entire car folder has been removed.
 paths=()
