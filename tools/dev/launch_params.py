@@ -64,18 +64,28 @@ def _blocks(path):
             for key, value in data.items() if isinstance(value, dict)}
 
 
+def _merged_blocks(entries):
+    # rcl keeps exact block keys in first-appearance order across all files.
+    blocks = {}
+    for value, is_file in entries:
+        if is_file:
+            for key, params in _blocks(value).items():
+                blocks.setdefault(key, {}).update(params)
+    return blocks
+
+
 def flatten_params(entries, node_fqn):
     result = {}
     basename = node_fqn.rsplit('/', 1)[-1] if node_fqn else None
     keys = {'/**'}
     if basename:
         keys.update((node_fqn, basename, '/**/' + basename))
+    for block, params in _merged_blocks(entries).items():
+        if block in keys:
+            result.update(params)
+    # Command-line -p overrides apply after every file, in their own order.
     for value, is_file in entries:
-        if is_file:
-            for block, params in _blocks(value).items():
-                if block in keys:
-                    result.update(params)
-        else:
+        if not is_file:
             key, value = value.split(':=', 1)
             result[key] = yaml.safe_load(value)
     return result
@@ -137,11 +147,10 @@ def capture(launch_file, launch_args, ws_root=None, *, sandbox=None, matrix_dir=
                   'param_files': [value for value, is_file in entries if is_file],
                   'remaps': self.expanded_remapping_rules or [], 'deferred': id(self) in deferred}
         if name is None:
-            record['blocks'] = {}
-            for value, is_file in entries:
-                if is_file:
-                    for key, params in _blocks(value).items():
-                        record['blocks'].setdefault(key, {}).update(params)
+            # A list keeps precedence visible even with JSON sort_keys=True.
+            record['blocks'] = [
+                {'key': key, 'params': params}
+                for key, params in _merged_blocks(entries).items()]
         result['nodes'].append(record)
 
     def process_execute(self, context):
