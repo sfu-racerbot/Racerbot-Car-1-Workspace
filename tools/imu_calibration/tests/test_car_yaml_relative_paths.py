@@ -5,10 +5,12 @@ import sys
 
 import numpy as np
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from racer_imu import frames
 from racer_imu.calibration import ImuCalibration
+from racerbot_car import identity
 
 CAR = Path(__file__).resolve().parents[3] / 'src/racerbot_car/cars/rb1/imu/car.yaml'
 
@@ -58,6 +60,31 @@ def test_default_config_refuses_unknown_car(monkeypatch):
     monkeypatch.setenv('RACERBOT_CAR', 'rbX')
     with pytest.raises(FileNotFoundError, match='RACERBOT_CAR'):
         frames.default_config_path()
+
+
+def test_default_config_refuses_conflicting_identity(monkeypatch, tmp_path):
+    machines = yaml.safe_load((CAR.parents[2] / 'machines.yaml').read_text())
+    serial = tmp_path / 'serial'
+    serial.write_text(next(key for key, car in machines.items() if car == 'rb2'))
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(serial))
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(CAR.parents[2]))
+    monkeypatch.setenv('RACERBOT_CAR', 'rb1')
+    with pytest.raises(FileNotFoundError, match='identifies rb2, but RACERBOT_CAR is rb1') as exc:
+        frames.default_config_path()
+    assert isinstance(exc.value.__cause__, identity.CarMismatchError)
+    assert '--config' in str(exc.value)
+
+
+@pytest.mark.parametrize('car_id', ['../rb1', 'rb9'])
+def test_default_config_refuses_invalid_car_id(monkeypatch, tmp_path, car_id):
+    monkeypatch.setattr(identity, 'SERIAL_PATH', str(tmp_path / 'no-serial'))
+    monkeypatch.setenv('RACERBOT_CARS_DIR', str(CAR.parents[2]))
+    monkeypatch.setenv('RACERBOT_CAR', car_id)
+    with pytest.raises(FileNotFoundError, match='unknown RACERBOT_CAR') as exc:
+        frames.default_config_path()
+    # Identity must reject the value before a calibration path is constructed.
+    assert isinstance(exc.value.__cause__, identity.UnknownCarError)
+    assert '--config' in str(exc.value)
 
 
 def test_calibration_output_stays_with_config(tmp_path, monkeypatch):
