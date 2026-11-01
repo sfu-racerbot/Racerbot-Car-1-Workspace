@@ -93,6 +93,14 @@ def test_tuning_accepts_a_why_above_a_nested_leaf(tmp_path):
     assert guards.check_tuning_overlay(overlay, shared, 'gap_follow.yaml') == []
 
 
+@pytest.mark.parametrize('content', ['', '# no overrides\n', '{}\n',
+                                   'node:\n  ros__parameters: {}\n'])
+def test_empty_tuning_does_not_read_shared_file(tmp_path, content):
+    overlay = tmp_path / 'overlay.yaml'
+    overlay.write_text(content)
+    assert guards.check_tuning_overlay(overlay, tmp_path / 'missing.yaml', 'gap_follow.yaml') == []
+
+
 @pytest.mark.parametrize('path', OVERLAYS if OVERLAYS else [None])
 def test_every_car_tuning_overlay_passes_guards(path):
     assert OVERLAYS == sorted(CARS.glob('*/tuning/*.yaml'))

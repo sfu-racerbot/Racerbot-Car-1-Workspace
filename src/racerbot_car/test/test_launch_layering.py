@@ -74,7 +74,7 @@ def test_gap_follow_launch_speed_reads_effective_values(car, monkeypatch, tmp_pa
     shutil.copytree(CARS, cars)
     tuning = cars / 'rb1/tuning/gap_follow.yaml'
     tuning.parent.mkdir(exist_ok=True)
-    tuning.write_text('gap_follow_node:\n  ros__parameters:\n    corner_speed: 2.6\n')
+    tuning.write_text('gap_follow_node:\n  ros__parameters:\n    # why: fixture: car-specific corner speed\n    corner_speed: 2.6\n')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
     shared = yaml_parameters(SHARED)
     effective = {**shared, 'corner_speed': 2.6}
@@ -123,7 +123,7 @@ def test_map_course_speed_overrides_read_effective_values(car, monkeypatch, tmp_
     shutil.copytree(CARS, cars)
     tuning = cars / 'rb1/tuning/gap_follow.yaml'
     tuning.parent.mkdir(exist_ok=True)
-    tuning.write_text('gap_follow_node:\n  ros__parameters:\n    corner_speed: 2.6\n')
+    tuning.write_text('gap_follow_node:\n  ros__parameters:\n    # why: fixture: car-specific corner speed\n    corner_speed: 2.6\n')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
     defaults = {**yaml_parameters(SHARED), 'corner_speed': 2.6}
     expected = mapping_speed_overrides(SHARED, '4.0', '', defaults=defaults)
@@ -139,7 +139,7 @@ def test_pure_pursuit_launch_defaults_read_effective_values(car, monkeypatch, tm
     shutil.copytree(CARS, cars)
     tuning = cars / 'rb1/tuning/pure_pursuit.yaml'
     tuning.parent.mkdir(exist_ok=True)
-    tuning.write_text('pure_pursuit_node:\n  ros__parameters:\n    steering_law: stanley\n')
+    tuning.write_text('pure_pursuit_node:\n  ros__parameters:\n    # why: fixture: car-specific steering\n    steering_law: stanley\n')
     monkeypatch.setenv('RACERBOT_CARS_DIR', str(cars))
     params = node(capture('pure_pursuit', 'pure_pursuit_launch.py'), '/pure_pursuit_node')['params']
     assert params['steering_law'] == 'stanley'

@@ -1,4 +1,4 @@
-"""Validate per-car hardware calibration overlays."""
+"""Validate per-car calibration and tuning overlays."""
 
 import math
 from pathlib import Path
@@ -101,12 +101,16 @@ def check_calibration_overlay(path: Path, config_name: str) -> list[str]:
 def check_tuning_overlay(path: Path, shared_path: Path, config_name: str) -> list[str]:
     """Check each tuning leaf against its shared value and its source comment."""
     try:
-        blocks = overlay_blocks(path)
-        shared = overlay_blocks(shared_path)
         text = path.read_text(encoding='utf-8')
         document = yaml.compose(text, Loader=yaml.SafeLoader)
+        if document is None:
+            return []
+        blocks = overlay_blocks(path)
+        if not any(blocks.values()):
+            return []
+        shared = overlay_blocks(shared_path)
     except (CalibrationOverlayError, yaml.YAMLError) as exc:
-        raise TuningOverlayError(str(exc)) from exc
+        raise TuningOverlayError(f'{path}: {exc}') from exc
 
     # YAML's parsed nodes retain source line numbers, including nested keys.
     lines = text.splitlines()
