@@ -129,3 +129,20 @@ def test_a_live_pose_that_never_overlaps_the_truth_is_refused():
         ss.pose_errors(truth, truth)
     with pytest.raises(ValueError, match='no truth'):
         ss.pose_errors(truth[:1], truth)
+
+
+def test_agreement_counts_points_strictly_within_ten_centimetres():
+    # oracle: closed form. One wall column; points one, two and three cells from it are 0.05, 0.10 and 0.15 m away.
+    grid = np.zeros((10, 10), dtype=np.int8)
+    grid[:, 0] = 100
+    field = ss.field_of(grid, RES, 0.0, 0.0)
+    xy = np.array([[(1 + 0.5) * RES, 0.2], [(2 + 0.5) * RES, 0.2], [(3 + 0.5) * RES, 0.2]])
+    share, _ = ss.agreement(field, xy)
+    assert share == pytest.approx(1 / 3, abs=1e-9)  # only the 0.05 m one: 0.10 is not within
+
+
+def test_recall_lines_the_reference_up_with_the_map_first():
+    # The same course saved with its origin 2 m away: every reference wall is on a map wall once lined up.
+    result, _ = ss.score_map(REFERENCE, COURSE, RES, 2.0, -1.5)
+    assert result['walls'] > 0.98
+    assert result['recall'] > 0.98

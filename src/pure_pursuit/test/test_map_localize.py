@@ -242,6 +242,16 @@ def test_find_start_with_no_beams_reports_no_fit():
     assert ml.find_start(_field(), np.array([]), np.array([]))[1] == 0.0
 
 
+def test_find_start_trusts_no_place_from_fewer_than_min_beams():
+    # oracle: spec, MIN_BEAMS's comment: fewer usable beams say too little. A handful of true beams fit perfectly
+    # at the truth and at many places besides, so a full fit from them would be a guess dressed as a match.
+    bx, by = _beams(_ray_cast((15.0, 11.6, math.pi)))
+    few = slice(0, ml.MIN_BEAMS - 1)
+    assert ml.find_start(_field(), bx[few], by[few]) == ((0.0, 0.0, 0.0), 0.0)
+    _, fit = ml.find_start(_field(), bx[:ml.MIN_BEAMS], by[:ml.MIN_BEAMS])
+    assert fit > 0.0  # exactly enough is searched
+
+
 # --- track_scans ---------------------------------------------------------------------------------
 
 def test_tracking_follows_the_true_path(driven):

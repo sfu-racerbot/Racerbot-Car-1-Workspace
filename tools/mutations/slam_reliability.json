@@ -1012,6 +1012,158 @@
    "tests": [
     "tools/run_analysis/tests/test_replay_map_course.py"
    ]
+  },
+  {
+   "file": "tools/run_analysis/lap_replay.py",
+   "old": "index = int(np.searchsorted(odom[:, 0], t, side='right')) - 1",
+   "new": "index = int(np.searchsorted(odom[:, 0], t, side='left')) - 1",
+   "tests": [
+    "tools/run_analysis/tests/test_lap_replay.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/lap_replay.py",
+   "old": "return any(start <= t <= end for start, end in windows)",
+   "new": "return any(start <= t < end for start, end in windows)",
+   "tests": [
+    "tools/run_analysis/tests/test_lap_replay.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/lap_replay.py",
+   "old": "        if not held(windows, t):\n            continue\n",
+   "new": "",
+   "tests": [
+    "tools/run_analysis/tests/test_lap_replay.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/lap_replay.py",
+   "old": "min_turn_rad=math.radians(float(value['minimum_lap_turn_deg']))",
+   "new": "min_turn_rad=math.radians(float(value['minimum_lap_turn_deg'])) * 1.1",
+   "tests": [
+    "tools/run_analysis/tests/test_lap_replay.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/lap_replay.py",
+   "old": "            corrections += recorder.reanchor_count\n",
+   "new": "",
+   "tests": [
+    "tools/run_analysis/tests/test_lap_replay.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "return float((d < WITHIN_M).mean()), float(np.percentile(d, 95))",
+   "new": "return float((d <= 2 * WITHIN_M).mean()), float(np.percentile(d, 95))",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "return (-(c * pose[0] + s * pose[1]), s * pose[0] - c * pose[1], -pose[2])",
+   "new": "return (-pose[0], -pose[1], -pose[2])",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "START_OFFSETS_M = [(0.0, 0.0)] + [",
+   "new": "START_OFFSETS_M = [(0.0, 0.0)] + 0 * [",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "keep = (live[:, 0] >= truth[0, 0] + settle_s) & (live[:, 0] <= truth[-1, 0])",
+   "new": "keep = (live[:, 0] >= truth[0, 0]) & (live[:, 0] <= truth[-1, 0])",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "heading = np.degrees(np.abs(np.angle(np.exp(1j * (live[keep, 3] - tyaw)))))",
+   "new": "heading = np.degrees(np.abs(live[keep, 3] - tyaw))",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "recall, _ = agreement(field_of(grid, resolution, origin_x, origin_y), transform(inverse(pose), ref_xy))",
+   "new": "recall, _ = agreement(field_of(grid, resolution, origin_x, origin_y), ref_xy)",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/slam_score.py",
+   "old": "    return np.c_[origin_x + (cols + 0.5) * resolution, origin_y + (rows + 0.5) * resolution]",
+   "new": "    return np.c_[origin_x + cols * resolution, origin_y + rows * resolution]",
+   "tests": [
+    "tools/run_analysis/tests/test_slam_score.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "return sorted(set(DRIVERS.findall(processes_text)))",
+   "new": "return DRIVERS.findall(processes_text)",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "metres = float(np.sum(np.abs(rows[1:, 1]) * np.diff(rows[:, 0])))",
+   "new": "metres = float(np.sum(rows[1:, 1] * np.diff(rows[:, 0])))",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "both = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)",
+   "new": "both = np.isfinite(a) & np.isfinite(b)",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "flags.append(wheels_still and scan_change(scans[before], scans[after]) > moved_m)",
+   "new": "flags.append(scan_change(scans[before], scans[after]) > moved_m)",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "if not holds or sum(h[1] for h in holds) < SHORT_S:",
+   "new": "if not holds or sum(h[1] for h in holds) <= 4.0:",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "last = max(i for i, c in enumerate(carried) if c) + 1",
+   "new": "last = min(i for i, c in enumerate(carried) if c) + 1",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
+  },
+  {
+   "file": "tools/run_analysis/run_triage.py",
+   "old": "wheels_still = len(between) == 0 or bool(np.all(np.abs(between[:, 1]) < still_mps))",
+   "new": "wheels_still = True",
+   "tests": [
+    "tools/run_analysis/tests/test_run_triage.py"
+   ]
   }
  ]
 }

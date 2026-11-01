@@ -208,12 +208,12 @@ The rest is in [the plan](../plans/2026-10-30-slam-reliability.md): the lap coun
 | `184826` (`gap_follow`, run without the IMU) | 0, ran out | **3 of 3, GO** |
 | `185036` (`gap_follow`) | 0, NO-GO | **3 of 3, GO** |
 | `180355` (`disparity_extender`, from its long hold) | 1 of 3, NO-GO | 3 of 3, map good, no line it would race |
-| `175728` (`gap_follow`, carried 12 m between holds) | 1 of 3, NO-GO | 0, NO-GO |
+| `175728` (`gap_follow` alone, up to 5.4 m/s) | 1 of 3, NO-GO | 0, NO-GO |
 | `174911` (26 Oct, another course) | 5 laps for 3, GO | 3 of 3, GO |
 
 **Found on the way: the lap counter has to use SLAM's odometry.** It compares SLAM's pose with odometry to tell a correction from driving. With SLAM on `odom_imu` and the counter on `odom`, a hard turn made the steering model's yaw differ from the gyro's by more than the 0.1 rad that counts as a correction, and each false correction swung the start point. `180355` passed its start 4 times within 0.41 m, the start was moved 75 m in all, and no lap closed. So `imu_lap_turns` now follows `gyro_odom`. The fixture `pure_pursuit/test/data/lap_poses_20261030-180355-replay.npz` pins both halves: 4 laps on `odom_imu`, 0 on `odom`.
 
-**`175728` cannot pass from any start that includes the carry:** nothing the car senses says it was carried, so SLAM cannot follow it. `180355`'s line was refused by the rebuild's fit and steering check, not by SLAM; its map is good.
+**`175728` is the fastest recording, up to 5.4 m/s.** It was plain `gap_follow`, not `map_course`, whose cap is 3.5 m/s, and the gyro profile was replayed only to about 3.3 m/s. That is the likely reason, not yet shown. An earlier note here said the car was carried 12 m between holds: wrong. That came from placing two single scans on the reference, and one placement was a false match (fit 0.86). `run_triage.py` finds the wheels turning and the scans continuous throughout. `180355`'s line was refused by the rebuild's fit and steering check, not by SLAM; its map is good.
 
 **The BNO, with the real sensor, parked:**
 
