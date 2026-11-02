@@ -18,7 +18,11 @@ def test_entry_point_imports_without_car_then_refuses(module, args):
     env.pop('RACERBOT_CAR', None)
     code = (f'from run_analysis import {module} as m; '
             f'print("imported", flush=True); m.main({args!r})')
-    env['PYTHONPATH'] = str(ROOT / 'tools')
+    # Prepend, never replace: the inherited PYTHONPATH carries the workspace conftest's
+    # serial-hiding sitecustomize, without which this subprocess resolves the car from a real
+    # Jetson's serial and never reaches the "no car" refusal under test.
+    env['PYTHONPATH'] = os.pathsep.join(
+        p for p in (str(ROOT / 'tools'), os.environ.get('PYTHONPATH')) if p)
     result = subprocess.run([sys.executable, '-c', code], cwd=ROOT, env=env,
                             capture_output=True, text=True, check=False)
     assert 'imported' in result.stdout

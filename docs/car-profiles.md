@@ -50,6 +50,16 @@ The following message templates come from [`identity.resolve_car_id`](../src/rac
 | `UnknownCarError` | `unknown RACERBOT_CAR 'OTHER'; known ids: [...]` | Correct the override to an ID in the printed list, or unset it on a registered car. |
 | `UnknownCarError` | `no Jetson serial was found; set RACERBOT_CAR for a dev box or the simulator` | On a development machine, set a known ID as above. On a Jetson, investigate the missing serial rather than guessing the car. |
 
+### Tests on a car
+
+Every pytest run in this workspace hides the Jetson serial, so a test suite gives the same results on a car as on a development machine. Without this, a test that selects the other car, or no car, is refused on the car it runs on; car 1 failed about 100 tests this way on 2026-11-01.
+
+- The workspace [`conftest.py`](../conftest.py) points `racerbot_car.identity.SERIAL_PATH` at a file that does not exist, for each test.
+- The workspace [`pytest.ini`](../pytest.ini) makes the workspace root pytest's root directory for every suite, including under `colcon test`. Without it, a package with its own `setup.py` becomes its own root directory and pytest never loads that `conftest.py`.
+- A subprocess started by a test gets the same treatment from a test-only [`sitecustomize.py`](../tools/dev/test_support/hide_jetson_serial/sitecustomize.py), which the fixture puts on `PYTHONPATH`. A test that sets `PYTHONPATH` for a subprocess must add to the inherited value, not replace it, or the subprocess reads the real serial.
+
+Production code has no switch to ignore the serial; the override exists only inside a test run. Tests of `identity` itself set their own serial path, which still takes precedence.
+
 ## Where each car's values live
 
 Replace `ID` with `rb1` or `rb2` in the paths below. Device fields are validated by [`profile.load_profile`](../src/racerbot_car/racerbot_car/profile.py); calibration keys are listed by node block in [`guards.CALIBRATION_KEYS`](../src/racerbot_car/racerbot_car/guards.py).
