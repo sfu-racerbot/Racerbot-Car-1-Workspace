@@ -48,6 +48,7 @@ After that, follow whichever branch below matches what you're doing.
 | [run-analysis.md](run-analysis.md) | Turning a recorded run into a report: why every stop happened, how the car really responded to its commands, a replay through the simulator, fitting the simulator to the car, and adding a SLAM map as a simulator track. For anyone who has just recorded a run. |
 | [wiimote.md](wiimote.md) | Drive the car with a Nintendo Wiimote: one-time Bluetooth pairing, auto-reconnect, the controls, and building the Jetson kernel driver. For anyone who wants a second manual controller. |
 | [odom-calibration.md](odom-calibration.md) | A browser wizard for tape-measure calibration of wheel odometry and steering. For anyone whose distances read wrong or whose car pulls to one side. |
+| [rb1-lap-gap-2026-10-30.md](rb1-lap-gap-2026-10-30.md) | Why car 1 lapped slower than car 2 on 2026-10-30, measured against car 2's map: a motor command gain that delivered 0.79 of every commanded speed. Also the procedure for car 1's first run after the fix. For anyone driving car 1 after 2026-11-02. |
 | [car1-vs-car2.md](car1-vs-car2.md) | A hardware comparison linked to each car's profile, plus IMU calibration caveats and the course settings now shared by both cars. |
 | [git-setup.md](git-setup.md) | Which `src/` packages are real submodules vs. vendored code, and how to update them safely. Read before pulling upstream changes into `f1tenth_system`. |
 
