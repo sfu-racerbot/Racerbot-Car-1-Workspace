@@ -415,7 +415,9 @@ def test_rb1_calibration_matches_car1_repo():
 
 
 def test_rb2_calibration_matches_car2_repo():
-    assert_historical_calibration('rb2', 'refs/car2/main')
+    # 9c2c2ed is car 2's main before the merge: the merge commit a205f29's second
+    # parent, so every clone has it (refs/car2/main existed only on the dev box).
+    assert_historical_calibration('rb2', '9c2c2ed')
 
 
 def test_bno_is_read_through_the_jetson_i2c_bridge():

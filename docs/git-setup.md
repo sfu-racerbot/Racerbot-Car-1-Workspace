@@ -48,7 +48,7 @@ This workspace vendors exactly one package, for exactly that reason.
 
 ## How car 2's history came in
 
-Car 2's history entered as a merge on branch `unify/merge-car2`. Commit `a205f29`, “Merge car 2's workspace (Racerbot-Car-2-Workspace 9c2c2ed), keeping the best of both”, has parents `560da2c` (car 1's line) and `9c2c2ed` (car 2's main). As a result, `git log` shows the full history from both cars. Car 2's main is also kept at `refs/car2/main`.
+Car 2's history entered as a merge on branch `unify/merge-car2`. Commit `a205f29`, “Merge car 2's workspace (Racerbot-Car-2-Workspace 9c2c2ed), keeping the best of both”, has parents `560da2c` (car 1's line) and `9c2c2ed` (car 2's main). As a result, `git log` shows the full history from both cars, and car 2's last main before the merge is always reachable as `9c2c2ed` (for example `git show 9c2c2ed:<path>`).
 
 Every change from that merge to what either car runs is listed in [unify-behaviour-changes.md](superpowers/plans/unify-behaviour-changes.md).
 
