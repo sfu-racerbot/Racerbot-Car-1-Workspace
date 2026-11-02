@@ -33,6 +33,9 @@ ALLOW_LIST = {
         'Raw/frozen editor input: verify exact document edits and restoration (Task 6).',
     'tools/odom_calibration_e2e/run_e2e.py':
         'Writer integration harness: inspect mutable temporary apply/restart/undo documents.',
+    'tools/run_analysis/speed_gain.py':
+        "Reads a recorded run's metadata/params snapshot: the gain that run was driven with, "
+        "which the current calibration is not for any run older than the last recalibration.",
 }
 
 
