@@ -1,0 +1,2 @@
+# These scripts execute inside Linux/WSL, including from Windows checkouts.
+tools/perception/*.sh text eol=lf
