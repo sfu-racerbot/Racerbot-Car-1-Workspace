@@ -52,13 +52,17 @@ The following message templates come from [`identity.resolve_car_id`](../src/rac
 
 ### Tests on a car
 
-Every pytest run in this workspace hides the Jetson serial, so a test suite gives the same results on a car as on a development machine. Without this, a test that selects the other car, or no car, is refused on the car it runs on; car 1 failed about 100 tests this way on 2026-11-01.
+Every pytest run in this workspace hides the car's Jetson serial and its USB devices, so a test suite gives the same results on a car as on a development machine.
 
-- The workspace [`conftest.py`](../conftest.py) points `racerbot_car.identity.SERIAL_PATH` at a file that does not exist, for each test.
+`racerbot_car` uses both host facts to refuse a contradicting car. `identity` checks the serial. `layers.launch_car_id` scans USB and refuses a launch when a device distinctive to another car is plugged in.
+
+Without hiding them, a test that selects the other car, or no car, is refused on the car it runs on. On 2026-11-01 the serial refused about 100 tests on car 1 and 628 on car 2, and car 2's RealSense then refused 309 launch tests.
+
+- The workspace [`conftest.py`](../conftest.py) points `racerbot_car.identity.SERIAL_PATH` and `racerbot_car.hardware.USB_DEVICES_ROOT` at paths that do not exist, for each test.
 - The workspace [`pytest.ini`](../pytest.ini) makes the workspace root pytest's root directory for every suite, including under `colcon test`. Without it, a package with its own `setup.py` becomes its own root directory and pytest never loads that `conftest.py`.
-- A subprocess started by a test gets the same treatment from a test-only [`sitecustomize.py`](../tools/dev/test_support/hide_jetson_serial/sitecustomize.py), which the fixture puts on `PYTHONPATH`. A test that sets `PYTHONPATH` for a subprocess must add to the inherited value, not replace it, or the subprocess reads the real serial.
+- A subprocess started by a test, such as a `ros2 launch` or a script run with `python3`, gets the same treatment from a test-only [`sitecustomize.py`](../tools/dev/test_support/hide_car_hardware/sitecustomize.py), which the fixture puts on `PYTHONPATH`. A test that sets `PYTHONPATH` for a subprocess must add to the inherited value, not replace it, or the subprocess sees the real hardware.
 
-Production code has no switch to ignore the serial; the override exists only inside a test run. Tests of `identity` itself set their own serial path, which still takes precedence.
+Production code has no switch to ignore the serial or the USB check; the override exists only inside a test run. Tests of `identity` or of the USB check set their own serial path or devices, which still take precedence.
 
 ## Where each car's values live
 
