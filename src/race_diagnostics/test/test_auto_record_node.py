@@ -9,7 +9,10 @@ sourced and the workspace built:
     python3 -m pytest src/race_diagnostics/test/test_auto_record_node.py -v
 
 Never on the car's graph: if ROS_DOMAIN_ID is unset or 0 this file moves
-itself to domain 79, localhost only, before any node starts. The fake
+itself to domain 79, localhost only, before any node starts. The one
+exception is the bag-start timing test, which needs bringup's own subnet
+discovery: it runs on a domain from 90 to 101 that it first finds empty
+(subnet_domain), never 0 or 79. The fake
 algorithm publishes on /test_only/drive, never /drive (CLAUDE.md, "Build,
 test, run"), and the node under test is told to trigger on that topic.
 
@@ -19,6 +22,7 @@ messages the fake algorithm published). A few minutes on the Jetson.
 """
 import os
 from pathlib import Path
+import random
 import signal
 import subprocess
 import sys
@@ -182,6 +186,65 @@ def watcher(tmp_path):
 @pytest.fixture
 def shipped_watcher(tmp_path):
     """The delays bringup really uses (config/auto_record.yaml)."""
+    proc = _run_watcher(tmp_path)
+    yield proc
+    _stop_watcher(proc)
+
+
+# Domains for the one test that needs the cars' own discovery: never 0 (the cars' graph)
+# or 79 (every other test), and each is checked to be empty before it is used.
+SUBNET_TEST_DOMAINS = range(90, 102)
+PROBE = 'auto_record_test_domain_probe'
+
+
+def _domain_is_empty(domain):
+    """No ROS node on `domain`, seen with subnet discovery for 3.5 s: longer than the
+    3 s periodic discovery announcement, so a quiet participant still shows up."""
+    context = rclpy.Context()
+    rclpy.init(context=context, domain_id=domain)
+    try:
+        node = Node(PROBE, context=context)
+        executor = SingleThreadedExecutor(context=context)
+        executor.add_node(node)
+        end = time.monotonic() + 3.5
+        while time.monotonic() < end:
+            executor.spin_once(timeout_sec=0.1)
+        others = [name for name, _ns in node.get_node_names_and_namespaces() if name != PROBE]
+        executor.remove_node(node)
+        node.destroy_node()
+        return not others
+    finally:
+        rclpy.shutdown(context=context)
+
+
+@pytest.fixture
+def subnet_domain(monkeypatch):
+    """Bringup's discovery, on a domain nothing else uses.
+
+    Bringup runs with Jazzy's default ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET. With the
+    LOCALHOST setting every other test uses, a new recorder is often not discovered until
+    the next periodic announcement, about 3 s later, which no car ever sees (car 1,
+    2026-11-02, 10 attempts each: LOCALHOST missed 3.65 to 6.65 s, 6 over 5.0 s; SUBNET
+    2.6 to 3.65 s). The fake algorithm still publishes only TOPIC."""
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'SUBNET')
+    for domain in random.sample(list(SUBNET_TEST_DOMAINS), len(SUBNET_TEST_DOMAINS)):
+        if _domain_is_empty(domain):
+            monkeypatch.setenv('ROS_DOMAIN_ID', str(domain))
+            return domain
+    pytest.fail(f'every ROS domain in {SUBNET_TEST_DOMAINS.start}-{SUBNET_TEST_DOMAINS.stop - 1} '
+                'already has nodes on this network; this test needs an empty one')
+
+
+@pytest.fixture
+def subnet_graph(subnet_domain):
+    g = Graph()
+    yield g
+    g.close()
+
+
+@pytest.fixture
+def subnet_shipped_watcher(subnet_domain, tmp_path):
+    """shipped_watcher, on subnet_domain."""
     proc = _run_watcher(tmp_path)
     yield proc
     _stop_watcher(proc)
@@ -385,7 +448,19 @@ def test_a_killed_watcher_does_not_leave_its_recorder_running(graph, watcher):
     assert (run / 'bag' / 'metadata.yaml').exists(), 'bag was not closed cleanly'
 
 
-def test_the_bag_holds_the_run_from_soon_after_the_algorithm_appears(graph, shipped_watcher):
+def test_the_domain_probe_refuses_a_domain_with_a_node_on_it(subnet_domain):
+    # The subnet test's isolation rests on this check (A8: the refusal is the half that
+    # matters): a node already on the domain, seen over subnet discovery, makes it not empty.
+    g = Graph()
+    try:
+        g.add_recorder('someone_else_on_this_domain')
+        assert not _domain_is_empty(subnet_domain)
+    finally:
+        g.close()
+
+
+def test_the_bag_holds_the_run_from_soon_after_the_algorithm_appears(subnet_graph,
+                                                                    subnet_shipped_watcher):
     # recorded measurement, 2026-10-31 on the Jetson, this same method: the old
     # path through record_run.py missed 5.45 to 7.0 s (4 runs); this one 2.95 to
     # 6.9 s (8 runs, median 4). ROS discovery only ever adds time and can add up
@@ -393,6 +468,10 @@ def test_the_bag_holds_the_run_from_soon_after_the_algorithm_appears(graph, ship
     # our own pipeline costs, and 5.0 s is under anything the old path ever did.
     # Judged on the bag's own first message against when the algorithm really
     # published its first, not on what the node reports.
+    # Since 2026-11-02 with bringup's discovery (subnet_domain): those numbers were taken
+    # with the tests' LOCALHOST discovery, whose ~3 s announcement wait put car 1's
+    # attempts at 3.65 or 6.65 s and failed this test unless a retry was fast.
+    graph, shipped_watcher = subnet_graph, subnet_shipped_watcher
     misses = []
     for attempt in range(4):
         algo = graph.add_algorithm()

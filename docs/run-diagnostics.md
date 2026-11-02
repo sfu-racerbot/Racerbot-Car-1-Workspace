@@ -74,8 +74,11 @@ ros2 launch gap_follow gap_follow_launch.py
 
 **Then wait for the second line before you press LB:**
 `recording live: /drive /joy /odom /scan are in the bag, <n> s after the algorithm appeared`.
-From that line on, what the car does is in the recording. Expect it about 3 to 7 seconds
-after the algorithm appears (measured on car 2, 2026-10-31).
+From that line on, what the car does is in the recording.
+
+Expect it about 2.5 to 4 seconds after the algorithm appears (car 1, 2026-11-02, with
+bringup's own discovery settings). The measurements are under "How it decides, and every
+setting" below.
 
 The recorder never holds the car back: LB works before that line appears. The
 beginning of the run is just not recorded. If that happens the run says so
@@ -195,6 +198,19 @@ message to the bag's first message, measured on a Jetson on 2026-10-31 with two 
 The typical run improved by about 2.5 s, **but the worst case barely moved**. The cost is the
 1.5 s delay, about 1 s of `ros2 bag` startup, and 0.3 to 2.7 s for ROS discovery to
 find the topics. So **wait for the `recording live` line if the start matters**.
+
+**Most of that discovery time came from the tests' own settings (measured 2026-11-02).** The table above was measured with the test suite, which uses localhost-only discovery (`ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`). Bringup on the cars uses Jazzy's default, `SUBNET`. Car 1, 10 attempts with each setting:
+
+| Discovery setting | Missed | Over 5.0 s |
+|---|---|---|
+| `LOCALHOST`, as every test uses | 3.65 to 6.65 s, in two groups about 3 s apart | 6 of 10 |
+| `SUBNET`, as bringup uses | 2.6 to 3.65 s | 0 of 10 |
+
+With `LOCALHOST`, a newly started recorder is often not found until the next periodic discovery announcement, about 3 s later, so an attempt lands near 3.65 s or near 6.65 s. With `SUBNET`, the recorder subscribed about 0.1 s after it started in 9 of the 10 attempts.
+
+The same split shows on a development machine (2.3 to 3.1 s against 8 of 10 over 5.0 s). It made car 1's timing test fail unless a retry happened to be fast.
+
+So `test_the_bag_holds_the_run_from_soon_after_the_algorithm_appears` runs with `SUBNET` discovery. It first checks that a domain from 90 to 101 has no nodes on it, and uses that one; every other test stays on domain 79 with `LOCALHOST`. Its bound is unchanged: the fastest of four attempts must miss at most 5.0 s.
 
 Only an always-running recorder could remove that discovery wait. It was left out on purpose: it
 would keep a process subscribed to every topic all the time, including during manual driving.
