@@ -6,7 +6,21 @@ changes and new/removed parameters called out explicitly. Upstream
 submodule bumps don't go here (see `docs/git-setup.md`) — this file is
 for changes the team made.
 
-## 2026-11-01 (latest): one workspace for both cars
+## 2026-11-02 (latest): car 1's motor command gain, from the 2026-10-30 lap gap
+
+### racerbot_car (rb1 calibration)
+
+- **Behavior change, car 1 only: `/**` `speed_to_erpm_gain` 3650 -> 4600** in `cars/rb1/calibration/vesc.yaml`. At 3650 car 1 delivered 0.79 of every commanded speed (map-located runs of 2026-10-30), so **every commanded speed is now about 26% faster in reality**, manual teleop included. The odometry gain stays -4040. First run after it: wheels off the ground, then the floor at low speed ([procedure](docs/rb1-lap-gap-2026-10-30.md#first-run-after-the-gain-change)). Why: [docs/rb1-lap-gap-2026-10-30.md](docs/rb1-lap-gap-2026-10-30.md).
+
+### Tools and tests
+
+- **New `tools/run_analysis/speed_gain.py`**: per LB hold, map distance against commanded, odometry and wheel distance, and the command gain that would have delivered the command. Tests in `tools/run_analysis/tests/test_speed_gain.py`.
+- **New `src/racerbot_launch/test/test_speed_limits_fit_vesc.py`**: every shipped top speed times each car's command gain stays inside the VESC's `speed_max`.
+- `test_car_profiles.py`: `test_rb1_command_gain_matches_hardware_doc`, and a `RECALIBRATED` table so the frozen car 1 oracle keeps checking every other key exactly. `test_no_direct_calibration_reads.py` allow-lists `speed_gain.py` (it reads a recorded run's parameter snapshot).
+- `tools/neural_racer` car 1 top speed: 23250 / 4600 = 5.05 m/s (was 23250 / 3650 = 6.37).
+- The study's scripts: `tools/run_analysis/studies/rb1_lap_gap_2026_10_30/`.
+
+## 2026-11-01: one workspace for both cars
 
 ### racerbot_car (new)
 

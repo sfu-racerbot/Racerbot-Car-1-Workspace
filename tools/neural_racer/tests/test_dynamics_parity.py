@@ -153,8 +153,8 @@ def test_delay_line_matches_transport_delay():
 
 
 def test_car1_overrides_applied():
-    """Oracle: vesc.yaml speed_max 23250 eRPM at car 1's 3650 gain, and car 1's
+    """Oracle: vesc.yaml speed_max 23250 eRPM at car 1's 4600 gain (2026-11-02), and car 1's
     2026-10-21 circles (docs/hardware-reference.md)."""
     p = CarParams()
-    assert p.speed_max == pytest.approx(23250 / 3650, abs=1e-12)
+    assert p.speed_max == pytest.approx(23250 / 4600, abs=1e-12)   # m/s
     assert (p.steering_max_left, p.steering_max_right) == (0.401, -0.388)

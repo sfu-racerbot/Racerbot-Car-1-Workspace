@@ -230,7 +230,7 @@ That negates the eRPM the VESC reports. Upstream assumes a VESC that reports eRP
 
 The negative override cancels that hardcoded negation, for odometry only. [TF](glossary.md#tf--transform--frame) — ROS2's record of where things sit relative to each other — is built from that odometry, which is why a sign error there propagates into everything positional.
 
-`ackermann_to_vesc_node` — which sets the actual motor command — **must keep `+3650.0`**. Flip that one and a forward command drives the car backwards.
+`ackermann_to_vesc_node` — which sets the actual motor command — **must keep a positive gain** (`+4600.0` on car 1 since 2026-11-02, `+4614.0` on car 2). Flip that one and a forward command drives the car backwards.
 
 So: same parameter name, two nodes, opposite signs, both correct.
 

@@ -19,8 +19,8 @@ INTEGRATOR_DT = 0.005      # run_validation.INTEGRATOR_DT, RK4
 
 # Car 1 measurements that differ from calibration.py (car 2's numbers).
 CAR1_OVERRIDES = {
-    'speed_max': 23250.0 / 3650.0,     # vesc.yaml speed_max / car 1's command gain = 6.37 m/s
-    'speed_min': -23250.0 / 3650.0,
+    'speed_max': 23250.0 / 4600.0,     # vesc.yaml speed_max / car 1's command gain (4600 since 2026-11-02) = 5.05 m/s
+    'speed_min': -23250.0 / 4600.0,
     'steering_max_left': 0.401,        # car 1 circles at full stick, 2026-10-21 (hardware-reference.md)
     'steering_max_right': -0.388,
 }
