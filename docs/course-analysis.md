@@ -27,6 +27,7 @@ All of them need ROS sourced, because they read the bag (the recording of a run'
 |---|---|
 | `tools/run_analysis/loc.py` | Where was the car, scan by scan? **Run this first:** the next four read its results |
 | `tools/run_analysis/laps.py` | What were the true lap times and best pace? |
+| `tools/run_analysis/speed_gain.py` | How much of each commanded speed did the car really deliver, and which motor command gain would have delivered all of it? Car 1's 2026-11-02 recalibration rests on it ([report](rb1-lap-gap-2026-10-30.md)) |
 | `tools/run_analysis/sectors.py` | How fast at each point on the course, run against run? |
 | `tools/run_analysis/gripcurve.py` | How much lateral acceleration did the car achieve for what it was asked? |
 | `tools/run_analysis/lap_theory.py` | What would a perfect speed profile lap in? |

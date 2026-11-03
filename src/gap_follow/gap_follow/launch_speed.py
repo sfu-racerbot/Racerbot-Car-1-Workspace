@@ -5,8 +5,8 @@ No ROS imports, so it is testable on its own (test/test_launch_speed.py).
 The argument may set the top speed anywhere up to MAX_SPEED_CEILING (5.0 m/s,
 raised from "gap_follow.yaml's max_speed" on 2026-10-26 on request); asking
 for more is refused rather than clamped, so a typo never quietly runs the car
-at a speed nobody asked for. 5.0 m/s is 18250 erpm at vesc.yaml's 3650 gain,
-inside its 23250 speed_max.
+at a speed nobody asked for. 5.0 m/s is 23000 erpm at car 1's 4600 gain (23070 at
+car 2's 4614), inside the shared 23250 speed_max (test_speed_limits_fit_vesc.py).
 
 Lowering: the node refuses to start unless ``min_speed <= max_speed`` and
 ``corner_speed <= corner_speed_wide <= max_speed`` (gap_follow_node.py), so

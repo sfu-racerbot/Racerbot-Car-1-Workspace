@@ -367,6 +367,14 @@ def test_rb2_odometry_gain_matches_hardware_doc():
     assert gain < 0
 
 
+def test_rb1_command_gain_matches_hardware_doc():
+    # The motor-command gain is measured calibration (2026-11-02, docs/hardware-reference.md,
+    # car 1's VESC section); the doc's excerpt and the overlay must say the same number.
+    gain = effective_config('vesc.yaml', '/**', car_id='rb1')['speed_to_erpm_gain']
+    assert gain == doc_number('rb1', r'(?m)^speed_to_erpm_gain: ([0-9.]+)\s+# /\*\* block: sets the motor command')
+    assert gain > 0
+
+
 def historical_params(ref, config, node):
     # Independent frozen oracle, not a read of live shared calibration files.
     text = subprocess.check_output(['git', 'show', f'{ref}:{SHARED_CONFIGS[config]}'],
@@ -388,6 +396,16 @@ def historical_params(ref, config, node):
     return flatten(params)
 
 
+# Values deliberately recalibrated after the merge: (value at the frozen ref, value now, where the
+# measurement is written down). Both are exact: the ref must still say the old value, and the car
+# must carry exactly the new one, so this cannot hide a drift in either. Any other key still has to
+# match the ref.
+RECALIBRATED = {
+    ('rb1', 'vesc.yaml', '/**', 'speed_to_erpm_gain'): (
+        3650.0, 4600.0, "docs/hardware-reference.md, car 1's VESC section, 2026-11-02"),
+}
+
+
 def assert_historical_calibration(car, ref):
     checks = [
         ('vesc.yaml', '/**', ('speed_to_erpm_gain', 'speed_to_erpm_offset',
@@ -406,6 +424,11 @@ def assert_historical_calibration(car, ref):
         actual = effective_config(config, node, car_id=car)
         for key in keys:
             assert (key in actual) == (key in expected), (car, config, node, key)
+            if (car, config, node, key) in RECALIBRATED:
+                old, new, _source = RECALIBRATED[(car, config, node, key)]
+                assert expected[key] == old, (car, config, node, key, 'frozen ref changed')
+                assert actual[key] == new, (car, config, node, key)
+                continue
             if key in expected:
                 assert actual[key] == expected[key], (car, config, node, key)
 

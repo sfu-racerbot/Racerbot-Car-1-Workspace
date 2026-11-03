@@ -1,7 +1,14 @@
 /**:
   ros__parameters:
     # erpm (electrical rpm) = speed_to_erpm_gain * speed (meters / second) + speed_to_erpm_offset
-    speed_to_erpm_gain: 3650.0
+    # 4600 (was 3650), measured 2026-11-02 from car 1's 2026-10-30 gap_follow runs located
+    # on car 2's map of the same course: at 3650 the car covered 0.793 of the commanded
+    # distance on its solo race-pace runs (20261030-180531, -190734; 232 m), so
+    # 3650 / 0.793 = 4604 delivers the command (tools/run_analysis/speed_gain.py). Every
+    # commanded speed is ~26% faster in reality than at 3650. 5.0 m/s * 4600 = 23000, inside
+    # speed_max 23250 (test_speed_limits_fit_vesc.py). docs/hardware-reference.md, car 1's
+    # VESC section; docs/rb1-lap-gap-2026-10-30.md.
+    speed_to_erpm_gain: 4600.0
     # servo value (0 to 1) =  steering_angle_to_servo_gain * steering angle (radians) + steering_angle_to_servo_offset
     steering_angle_to_servo_gain: -0.83
     steering_angle_to_servo_offset: 0.366
@@ -17,7 +24,7 @@ vesc_to_odom_node:
     # that negation makes /odom report NEGATIVE linear.x while the car drives
     # FORWARD, and integrates the odom->base_link TF backwards with it.
     # Negating the gain here -- and only here; the shared /** block keeps
-    # +3650.0 for ackermann_to_vesc_node, which sets the motor command --
+    # +4600.0 for ackermann_to_vesc_node, which sets the motor command --
     # cancels it, so forward is positive again.
     # Car 1 used to carry this fix as an edit to vesc_to_odom.cpp itself
     # (speed = -(...) / gain); it moved here to match Car 2, with Car 1's

@@ -215,7 +215,7 @@ def test_plant_judges_contact_on_the_contact_walls(eval_gap):
 
 def test_plant_top_speed_is_the_vesc_clamp(eval_gap):
     # Closed form: the selected car's vesc.yaml speed_max / speed_to_erpm_gain commanded (car 2:
-    # 23250 / 4614 = 5.039 m/s; car 1: 23250 / 3650 = 6.370 m/s), times the floor's command
+    # 23250 / 4614 = 5.039 m/s; car 1: 23250 / 4600 = 5.054 m/s), times the floor's command
     # scale; /odom reads that times 1.033.
     from racerbot_car.layers import effective_config
     from run_analysis.fit_sim import simulate_commands

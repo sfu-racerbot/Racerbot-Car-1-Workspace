@@ -86,7 +86,7 @@ The full-stick scale is in [`calibration/joy_teleop.yaml`](../src/racerbot_car/c
 
 **Config:** car 1's `calibration/vesc.yaml` over the shared `src/f1tenth_system/f1tenth_stack/config/vesc.yaml` (flattened excerpt, not a standalone ROS parameter file):
 ```yaml
-speed_to_erpm_gain: 3650.0       # /** block: sets the motor command
+speed_to_erpm_gain: 4600.0       # /** block: sets the motor command
 speed_to_erpm_offset: 0.0
 steering_angle_to_servo_gain: -0.83
 steering_angle_to_servo_offset: 0.366
@@ -98,7 +98,19 @@ wheelbase: 0.36   # meters -- car 2's measurement, assumed for car 1 (see Physic
 ```
 The servo formula: `servo_position = -0.83 × steering_angle + 0.366` (gain fitted 2026-10-21 from five floor half circles; the old -1.1135 under-predicted real steering by about 30%). Steering angle `0.0` → servo position `0.366` (center on this car, set 2026-10-21 from a drive-straight run: 16 cm left over 2.83 m at 0.35). This is what you'll see repeatedly if you inspect `/commands/servo/position` — `0.366` is neutral, not a bug. (Car 2's neutral is a different value; each car's servo is calibrated separately.)
 
-**The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-4040.0` to cancel that (magnitude calibrated 2026-10-21 from five short tape runs, median of implied gains: 3959, 3936, 4044, 4088, 4179); the shared `/**` block keeps `+3650.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
+**The odometry gain is negative on purpose.** `vesc_to_odom.cpp` hardcodes a negation of the eRPM the VESC reports, and this car's VESC already reports eRPM with the commanded sign, so with a positive gain `/odom` would read *negative* speed while the car drives forward. The `vesc_to_odom_node` block overrides the gain to `-4040.0` to cancel that (magnitude calibrated 2026-10-21 from five short tape runs, median of implied gains: 3959, 3936, 4044, 4088, 4179); the shared `/**` block keeps the positive `+4600.0` for the motor command. Until October 2026 car 1 carried this fix as an edit inside `vesc_to_odom.cpp` instead; it moved to the YAML to match car 2. **Never apply both** — they cancel, and `/odom` runs backwards.
+
+**Motor command gain, 2026-11-02: `4600.0`, was `3650.0`.** The command gain sets how many eRPM `ackermann_to_vesc_node` asks for per m/s of `/drive` speed, so it decides how fast the car really goes for a given command. At 3650 car 1 delivered 0.79 of every commanded speed at racing pace, because it needs about 4600 eRPM per true m/s there. That cost about 4.4 s on a standing-start lap of the 2026-10-30 course (simulated 24.1 s against 19.7 s); the full attribution is in [the lap-gap report](rb1-lap-gap-2026-10-30.md).
+
+- **Measured by:** `tools/run_analysis/loc.py` locating car 1's 2026-10-30 gap_follow runs on car 2's map of the same course (0.95 to 0.98 of beams within 10 cm), then `tools/run_analysis/speed_gain.py` comparing map distance with the integral of the `/drive` speed over each LB hold.
+- **Result:** on the solo race-pace runs (`20261030-180531`, `20261030-190734`; 232 m), map distance over commanded distance was 0.793, so the gain that delivers the command is 3650 / 0.793 = 4604. Over all ten of that day's holds (two-car and slower ones included, 556 m) it is 4481.
+- **Car 2 checks the method:** the same measurement on its five 2026-10-30 holds gives 1.013 at its 4614 gain, and the simulator's independent floor fit for car 2 gives 1.004.
+- **Speed matters:** below 1.5 m/s car 1 needs about 3980 eRPM per true m/s, which is why the 2026-10-21 tape runs (2 to 2.6 m, slow) gave 4040 for odometry. Faster, the wheels slip more and it rises to about 4600. Commands below 1.5 m/s now run about 15% fast; car 2 does the same at its 4614.
+- **VESC clamp:** 5.0 m/s × 4600 = 23000 eRPM, inside the shared `speed_max` of 23250, so gap_follow's 5.0 m/s top speed is not clipped. `src/racerbot_launch/test/test_speed_limits_fit_vesc.py` fails if any shipped top speed would be.
+
+**Every commanded speed on car 1 is now about 26% faster in reality** (4600 / 3650), manual teleop's full stick included (5.0 m/s commanded, about 3.9 real before, about 5.0 now). The first run after this change follows [the gain check procedure](rb1-lap-gap-2026-10-30.md#first-run-after-the-gain-change): wheels off the ground with LB held, then the floor at low speed.
+
+The odometry gain stays at 4040, so `/odom` reads 15 to 17% above true speed at racing speed (car 2's reads 3.5% above). That over-read makes TTC and the braking ceiling act early, which is the safe side; changing it is a separate decision, listed in the report.
 
 **Steering limits, 2026-10-22.** Car 1's 2026-10-21 check circles at the `-0.83` gain gave **0.388 rad right and 0.401 rad left** for a 0.380 rad command (full stick, +2% and +5%). Left full stick lands on `servo_min` (0.366 − 0.83 × 0.38 = 0.051), so 0.38 rad is the most full stick can be without clipping. Car 2 has its own, different numbers (its own circles, 2026-10-16); they don't apply here.
 
