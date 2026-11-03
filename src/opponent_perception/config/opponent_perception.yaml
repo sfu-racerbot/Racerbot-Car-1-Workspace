@@ -1,0 +1,23 @@
+# TEMPLATE ONLY. Copy outside installed share, fill measured values, then set true.
+# Do not use identity matrices or the example size as actual car calibration.
+schema_version: 1
+calibrated: false
+tracking_frame: odom
+max_error_px: 2.0
+max_range_m: 8.0
+tracking:
+  velocity_gain: 0.5
+  fresh_sec: 0.25
+  lost_sec: 0.75
+  max_speed_mps: 8.0
+  position_uncertainty_m: 0.05
+  uncertainty_growth_mps: 0.5
+  horizon_sec: 1.0
+  step_sec: 0.1
+tags:
+  - id: 7
+    vehicle_id: rb1
+    size_m: 0.12  # EXAMPLE: measure the outer black square, excluding white margin.
+    # T_opponent_tag: tag coordinates -> opponent rear-axle base_link coordinates.
+    # Tag x right, y up, z out of its front face. Replace with a measured SE(3).
+    opponent_from_tag: null

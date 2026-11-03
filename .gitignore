@@ -10,6 +10,8 @@ __pycache__/
 # clone -- would show up as untracked and could be committed by accident.
 .sim
 .venv-f1tenth/
+.venv-perception/
+src/opponent_perception/*.egg-info/
 .pytest_cache/
 # `ros2 run tf2_tools view_frames` output, written into whatever folder it
 # was run from.

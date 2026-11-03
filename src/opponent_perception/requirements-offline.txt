@@ -1,0 +1,6 @@
+# Only one OpenCV wheel may be installed in this environment.
+numpy>=1.26,<3
+opencv-contrib-python-headless>=4.8,<5
+PyYAML>=6,<7
+pytest>=8,<10
+setuptools>=70

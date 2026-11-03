@@ -63,6 +63,7 @@ After that, follow whichever branch below matches what you're doing.
 
 | Doc | What's in it, and who it's for |
 |---|---|
+| [opponent-perception.md](opponent-perception.md) | Offline AprilTag detection, opponent pose tracking, synthetic image replay and the preparation steps for ROS/camera validation. |
 | [racing-autonomy.md](racing-autonomy.md) | The map-based race stack end to end: SLAM, localization, racing line, velocity profile, pure pursuit, overtaking. The biggest doc here; it opens with a plain-language summary. |
 | [steering-laws.md](steering-laws.md) | The four ways the race controller can steer along the racing line (pure pursuit, Stanley, LQR, MPC): how each works, how to pick one at launch, and how to tune and judge one in the simulator. For anyone who wants to try something other than the default. |
 | [gap-follow.md](gap-follow.md) | What changed in `gap_follow` in October 2026 (swept-path clearance, arc guard, corner setup): what each does, how to turn it off, the simulator results, and the order to bring it up on the car. Read before running `gap_follow`. |
