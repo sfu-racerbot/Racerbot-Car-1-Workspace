@@ -74,6 +74,8 @@ def _limits(car):
             'gap_follow.yaml', 'gap_follow_node', car_id=car)['max_steering_angle'],
         'pure_pursuit.yaml max_steering_angle': effective_config(
             'pure_pursuit.yaml', 'pure_pursuit_node', car_id=car)['max_steering_angle'],
+        'disparity_trajectory.yaml max_steering_angle': effective_config(
+            'disparity_trajectory.yaml', 'disparity_trajectory_node', car_id=car)['max_steering_angle'],
         'auto_map_race.yaml profile_max_steering_angle': _params(
             os.path.join(_SRC, 'pure_pursuit', 'config', 'auto_map_race.yaml'),
             'auto_map_race_node')['profile_max_steering_angle'],
@@ -87,6 +89,7 @@ def _limits(car):
 @pytest.mark.parametrize('car', CARS)
 @pytest.mark.parametrize('name', ['joy_teleop.yaml full stick', 'gap_follow.yaml max_steering_angle',
                                   'pure_pursuit.yaml max_steering_angle',
+                                  'disparity_trajectory.yaml max_steering_angle',
                                   'auto_map_race.yaml profile_max_steering_angle',
                                   'optimize_raceline --max-steering-angle default'])
 def test_shipped_limit_is_not_clipped_by_the_servo(name, car):

@@ -1,0 +1,44 @@
+disparity_trajectory_node:
+  ros__parameters:
+    # --- Topics: the car's own ---
+    scan_topic: /scan
+    joy_topic: /joy
+    drive_topic: /drive          # -> ackermann_mux, priority 10 (/teleop at 100 always wins)
+
+    # --- LB deadman: mandatory workspace policy (docs/architecture.md). Never false. ---
+    enable_deadman: true
+    deadman_button: 4            # LB on the F710 in XInput mode
+    joy_timeout_sec: 0.5
+    scan_timeout_sec: 0.5        # LiDAR silent this long -> explicit 0/0 stop
+    min_valid_fraction: 0.1      # fewer real returns than this (all inf/zero/NaN) -> stop
+
+    # --- Geometry. max_steering_angle is per car: src/racerbot_car/cars/<id>/calibration/disparity_trajectory.yaml ---
+    wheelbase: 0.36              # measured on car 2, 2026-08-24; shared (docs/hardware-reference.md)
+    lidar_x_m: 0.26              # base_link -> laser, as every bringup's static transform
+
+    # --- Speed: deliberately low for first runs. Simulator-validated at these values only. ---
+    max_speed: 2.5               # m/s
+    min_speed: 1.0               # m/s
+    max_lateral_acc: 2.5         # m/s^2, sets the turn and room speed limits
+    alpha: 0.8                   # steering smoothing, 1.0 = none
+
+    # --- Method D (trajectory_logic.py); the screened defaults ---
+    trajectory_n_curvatures: 21
+    trajectory_step_m: 0.1
+    trajectory_horizon_m: 2.0
+    trajectory_margin_m: 0.05    # around the 0.175 m footprint circles
+    trajectory_strip_half_m: 0.25
+    trajectory_continuation_cap_m: 5.0
+    trajectory_point_range_m: 6.0
+    trajectory_smooth_w: 0.1
+    trajectory_min_score_m: 0.2  # no arc clear this far -> stop
+
+    # --- Slow down by obstacle_slowdown when >= threshold separate obstacles (walls count) are in view ---
+    enable_obstacle_slowdown: true
+    obstacle_count_threshold: 3
+    obstacle_count_range: 3.0
+    obstacle_cluster_gap: 0.3
+    obstacle_min_beams: 5
+    obstacle_fov_half_angle_deg: 90.0
+    obstacle_slowdown: 1.0
+    obstacle_min_speed: 1.0

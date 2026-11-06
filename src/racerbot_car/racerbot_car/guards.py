@@ -23,6 +23,7 @@ CALIBRATION_KEYS = {
         'max_steering_angle': 'required', 'arc_guard_max_correction': 'required'}},
     'pure_pursuit.yaml': {'pure_pursuit_node': {'max_steering_angle': 'required'}},
     'neural_racer.yaml': {'neural_racer_node': {'max_steering_angle': 'required'}},
+    'disparity_trajectory.yaml': {'disparity_trajectory_node': {'max_steering_angle': 'required'}},
     'odom_calibration.yaml': {'odom_calibration_node': {key: 'required' for key in (
         'vehicle_model', 'planner_max_steering_rad', 'speed_to_erpm_gain',
         'steering_angle_to_servo_gain', 'steering_angle_to_servo_offset',

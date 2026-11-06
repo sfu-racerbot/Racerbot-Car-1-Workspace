@@ -1,0 +1,5 @@
+disparity_trajectory_node:
+  ros__parameters:
+    # Car 2's autonomy cap, as calibration/gap_follow.yaml: 2026-10-16 circles, full stick 0.436 rad.
+    # Must fit inside vesc.yaml's servo clip (test_steering_limits_fit_servo.py).
+    max_steering_angle: 0.349

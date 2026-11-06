@@ -13,6 +13,9 @@ SHARED_CONFIGS = {
     'pure_pursuit.yaml': 'src/pure_pursuit/config/pure_pursuit.yaml',
     'neural_racer.yaml': 'src/neural_racer/config/neural_racer.yaml',
     'odom_calibration.yaml': 'src/odom_calibration/config/odom_calibration.yaml',
+    # Folder src/disparity_extender/ holds package disparity_trajectory: team A's
+    # racerbot_a already owns the package name disparity_extender.
+    'disparity_trajectory.yaml': 'src/disparity_extender/config/disparity_trajectory.yaml',
 }
 
 
