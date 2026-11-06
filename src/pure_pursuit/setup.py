@@ -33,6 +33,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'apex_line_editor = pure_pursuit.apex_line_editor:main',
             'pure_pursuit_node = pure_pursuit.pure_pursuit_node:main',
             'waypoint_recorder_node = pure_pursuit.waypoint_recorder_node:main',
             'generate_velocity_profile = pure_pursuit.generate_velocity_profile:main',

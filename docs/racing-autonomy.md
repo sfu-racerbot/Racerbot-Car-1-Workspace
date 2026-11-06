@@ -1203,7 +1203,7 @@ src/racerbot_launch/launch/race_launch.py   # localization + pure_pursuit togeth
 
 ## Selecting an edited racing line
 
-Follow the [apex editor workflow](../tools/f1tenth_sim/APEX_LINE_EDITOR.md) to turn dashboard corner markers into a new profiled CSV. Start it directly with `race_launch.py run_dir:=<new-folder> steering_law:=pure_pursuit`.
+Follow the [apex editor workflow](../src/pure_pursuit/APEX_LINE_EDITOR.md) to turn dashboard corner markers into a new profiled CSV. Start it directly with `race_launch.py run_dir:=<new-folder> steering_law:=pure_pursuit`.
 
 Runtime line changes require fresh joystick messages with LB released and fresh finite odometry reporting at most 0.05 m/s. Stop, release LB, select the CSV, and hold LB again after acceptance. A refused file leaves the previous profile active. Automatic mapping handover waits and retries when this stop requirement blocks loading.
 
