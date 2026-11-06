@@ -265,3 +265,9 @@ colcon build --symlink-install --packages-select web_dashboard usb_cam_stream
 ```
 
 **Working when:** the build finishes, the tests above pass, and the site still shows Car 2 online. Then commit the new pointer (`git add src/web_dashboards`). A site whose protocol version moved past the car's shows a red banner — rebuilding and restarting the dashboard fixes it.
+
+### Racing-line parameter writes
+
+An armed dashboard connection can request `pure_pursuit_node.waypoints_file` changes. This service write selects an existing CSV inside configured saved-map roots; resolved paths prevent symlink escape. It publishes no ROS topic. The controller requires released LB and fresh stopped odometry, and the dashboard displays its refusal reason. Select a validated line in the current localization map frame. File selection does not validate map identity or simulate tracking.
+
+Automatic apex placement also writes a new run folder through the workspace editor. It is an armed write operation and uses a bounded background process. The result is staged through `pending_waypoints_file`; pure pursuit waits for a fresh LB press while stopped before activating it. The dashboard continues to publish no ROS topic.

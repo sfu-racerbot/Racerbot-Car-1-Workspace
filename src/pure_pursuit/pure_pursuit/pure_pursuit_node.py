@@ -162,6 +162,7 @@ class PurePursuitNode(Node):
         # docs/writing-your-own-node.md).
         # ------------------------------------------------------------------
         self.declare_parameter('waypoints_file', '')
+        self.declare_parameter('pending_waypoints_file', '')
         # Read-only broadcast of the active racing line, for the dashboard.
         # Latched and published once per profile, not per tick.
         self.declare_parameter('racing_line_topic', '/racing_line')
@@ -618,6 +619,7 @@ class PurePursuitNode(Node):
         self.seg_len = np.empty(0, dtype=np.float64)
         self.cumulative_arc_length = np.empty(0, dtype=np.float64)
         self.total_track_length = 0.0
+        self._pending_profile = None
         self.profile_ready = False
         # Set for real by _activate_profile, the instant the racing line
         # this node is about to drive becomes active -- see
@@ -812,6 +814,9 @@ class PurePursuitNode(Node):
 
     def _activate_profile(self, path: str):
         """Load and atomically activate a profiled racing-line CSV."""
+        self._install_profile(self._prepare_profile(path))
+
+    def _prepare_profile(self, path):
         try:
             xy, speed_profile = racing_math.load_profiled_csv(path)
         except (OSError, ValueError) as exc:
@@ -840,6 +845,10 @@ class PurePursuitNode(Node):
             speed_profile=speed_profile, curvature=signed_curvature,
             closed=self.closed_loop)
 
+        return (xy, speed_profile, seg_len, cumulative, total_length, path_context)
+
+    def _install_profile(self, prepared):
+        xy, speed_profile, seg_len, cumulative, total_length, path_context = prepared
         # Assign only after all validation and derived values succeed, so a
         # bad runtime update cannot damage a previously active profile.
         self.xy = xy
@@ -923,6 +932,27 @@ class PurePursuitNode(Node):
                 f'Racing-line broadcast disabled after {type(exc).__name__}: {exc}. '
                 'Driving is unaffected; the dashboard just will not draw the line.')
 
+    def _profile_switch_refusal(self):
+        """Require positive evidence of a released deadman and stationary car.
+
+        ROS parameter callbacks and control timers share the node's default
+        mutually-exclusive callback group, so activation cannot interleave with
+        a control tick, including under a MultiThreadedExecutor.
+        """
+        prefix = 'line switch blocked: '
+        if (self.last_joy_time is None or
+                not 0 <= self._seconds_since(self.last_joy_time) < self.joy_timeout_sec
+                or not self.joy_button_available):
+            return prefix + 'need a fresh joystick message with LB released'
+        if self.deadman_held:
+            return prefix + 'release LB before changing the racing line'
+        if (self.last_odom_time is None or not math.isfinite(self.current_speed)
+                or not 0 <= self._seconds_since(self.last_odom_time) < self.odom_timeout_sec):
+            return prefix + 'need fresh finite odometry to confirm the car is stopped'
+        if abs(self.current_speed) > 0.05:
+            return prefix + 'stop the car (speed must be at most 0.05 m/s)'
+        return None
+
     def _parameter_callback(self, parameters):
         """Runtime parameter changes: a new racing line, or a live tune.
 
@@ -934,14 +964,31 @@ class PurePursuitNode(Node):
         still doing 4.0. Rejecting says so out loud instead. See
         live_tuning.py.
         """
+        # A profile switch is a separate transaction. Reject mixed requests
+        # before any side effects (including a valid CSV followed by a bad tune).
+        profile_changes = [p for p in parameters if p.name in ('waypoints_file', 'pending_waypoints_file')]
+        if profile_changes and len(parameters) != 1:
+            return SetParametersResult(successful=False,
+                reason='waypoints_file must be changed in a separate request')
         requested = {}
         for parameter in parameters:
-            if parameter.name == 'waypoints_file':
+            if parameter.name in ('waypoints_file', 'pending_waypoints_file'):
+                if parameter.name == 'pending_waypoints_file' and parameter.value == '':
+                    self._pending_profile = None
+                    return SetParametersResult(successful=True, reason='pending line cancelled')
                 if parameter.type_ != Parameter.Type.STRING or not parameter.value:
                     return SetParametersResult(
                         successful=False,
                         reason="waypoints_file must be a non-empty profiled CSV path")
+                reason = self._profile_switch_refusal()
+                if reason:
+                    return SetParametersResult(successful=False, reason=reason)
                 try:
+                    if parameter.name == 'pending_waypoints_file':
+                        prepared = self._prepare_profile(str(parameter.value))
+                        self._pending_profile = (str(parameter.value), prepared)
+                        return SetParametersResult(successful=True,
+                            reason='validated line queued; press LB while stopped to apply')
                     self._activate_profile(str(parameter.value))
                 except RuntimeError as exc:
                     return SetParametersResult(successful=False, reason=str(exc))
@@ -1121,21 +1168,43 @@ class PurePursuitNode(Node):
         without needing to know exactly when SLAM considers itself
         settled.
         """
-        if (self._profile_active_since is not None
-                and self._seconds_since(self._profile_active_since)
-                < self.opponent_detection_settle_sec):
-            return None
+        if self._profile_active_since is not None:
+            settled_for = self._seconds_since(self._profile_active_since)
+            if math.isinf(settled_for):
+                # The clock stepped back mid-window: how long the map has
+                # settled is unknown, so start the window again rather than
+                # read the step as "settled long ago".
+                self._profile_active_since = self.get_clock().now()
+                settled_for = 0.0
+            if settled_for < self.opponent_detection_settle_sec:
+                return None
         if self.localization_source == 'particle_filter' and self._frozen_map_ray_caster is not None:
             return self._frozen_map_ray_caster
         return self._live_map_ray_caster
 
     def joy_callback(self, msg: Joy):
+        # Only an observed released -> held edge can activate a prepared line.
+        was_released = (self.last_joy_time is not None and not self.deadman_held
+                        and self.joy_button_available
+                        and 0 <= self._seconds_since(self.last_joy_time) < self.joy_timeout_sec)
         self.last_joy_time = self.get_clock().now()
         self.joy_button_available = len(msg.buttons) > self.deadman_button
         if self.joy_button_available:
             self.deadman_held = bool(msg.buttons[self.deadman_button])
         else:
             self.deadman_held = False
+
+        if self.deadman_held and was_released and self._pending_profile is not None:
+            if (self.last_odom_time is not None and math.isfinite(self.current_speed)
+                    and 0 <= self._seconds_since(self.last_odom_time) < self.odom_timeout_sec
+                    and abs(self.current_speed) <= 0.05):
+                path, prepared = self._pending_profile
+                self._install_profile(prepared)
+                self._pending_profile = None
+                self._log_profile_ready(path)
+                self._publish_racing_line(path)
+            else:
+                self.get_logger().warn('Pending line not applied: stop, release LB, then press LB again')
 
     def _deadman_engaged(self) -> bool:
         return self._deadman_status()[0]

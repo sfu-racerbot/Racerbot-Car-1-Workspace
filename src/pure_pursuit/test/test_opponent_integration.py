@@ -1256,6 +1256,11 @@ def test_waiting_node_loads_generated_profile_at_runtime(profiled_csv):
         assert waiting.profile_ready is False
         assert waiting.last_decision_state == 'waiting_for_profile'
 
+        from sensor_msgs.msg import Joy
+        joy = Joy(); joy.buttons = [0] * (waiting.deadman_button + 1)
+        waiting.joy_callback(joy)
+        waiting.current_speed = 0.0
+        waiting.last_odom_time = waiting.get_clock().now()
         result = waiting._parameter_callback([
             Parameter('waypoints_file', Parameter.Type.STRING, profiled_csv)])
         assert result.successful, result.reason

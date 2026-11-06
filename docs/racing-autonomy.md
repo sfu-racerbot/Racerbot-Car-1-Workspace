@@ -1200,3 +1200,11 @@ src/racerbot_launch/launch/race_launch.py   # localization + pure_pursuit togeth
 ```
 
 > **This doc covers the algorithms and the reasoning.** For a code-adjacent, file-by-file reference with every formula and parameter in one place, see [src/pure_pursuit/README.md](../src/pure_pursuit/README.md).
+
+## Selecting an edited racing line
+
+Follow the [apex editor workflow](../tools/f1tenth_sim/APEX_LINE_EDITOR.md) to turn dashboard corner markers into a new profiled CSV. Start it directly with `race_launch.py run_dir:=<new-folder> steering_law:=pure_pursuit`.
+
+Runtime line changes require fresh joystick messages with LB released and fresh finite odometry reporting at most 0.05 m/s. Stop, release LB, select the CSV, and hold LB again after acceptance. A refused file leaves the previous profile active. Automatic mapping handover waits and retries when this stop requirement blocks loading.
+
+Dashboard apex placement can prepare a line automatically. A validated edit is queued through `pending_waypoints_file`, leaving the active line in place until a fresh LB release-to-press transition. At that press, fresh odometry must still confirm at most 0.05 m/s. The prepared arrays are installed before the next control tick; the file is not re-read at activation. Clear cancels pending edits. Existing direct `waypoints_file` changes retain the stopped-and-released gate described above.

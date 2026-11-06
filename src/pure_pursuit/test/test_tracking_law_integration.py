@@ -319,6 +319,10 @@ def test_profile_reload_resets_the_law(node_factory, profiled_csv, law_name):
     _hold_lb(node)
     _pose_slightly_left(node)
     node.control_loop()
+    # The runtime-switch policy requires released LB and fresh stopped odometry.
+    _release_lb(node)
+    node.current_speed = 0.0
+    node.last_odom_time = node.get_clock().now()
     resets = []
     original_reset = node.tracking_law.reset
     node.tracking_law.reset = lambda: (resets.append(1), original_reset())
