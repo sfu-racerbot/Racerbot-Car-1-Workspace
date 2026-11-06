@@ -150,7 +150,7 @@ def __getattr__(name):
 
 
 def make_plant(track: str, num_agents: int, seed: int, calibration=None,
-               car_id=None) -> FidelityPlant:
+               car_id=None, max_laps: int = 1) -> FidelityPlant:
     """Build the environment and wrap it in this car's fidelity layer.
 
     ``calibration`` None is the selected car's calibration; a given one (a floor
@@ -180,7 +180,7 @@ def make_plant(track: str, num_agents: int, seed: int, calibration=None,
             integrator_timestep=INTEGRATOR_DT,
             integrator=IntegratorType.RK4,
             dynamics_model=DynamicModel.ST,
-            max_laps=1,
+            max_laps=max_laps,
         ),
         observation_config=ObservationConfig(type=ObservationType.DIRECT),
         lidar_config=components["lidar_config"],
@@ -793,13 +793,23 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                   law_params: Optional[dict] = None, car_id=None,
                   calibration=None, plan: Optional["PathPlan"] = None,
                   max_speed: Optional[float] = None,
-                  max_lateral_accel: Optional[float] = None) -> dict:
+                  max_lateral_accel: Optional[float] = None,
+                  max_laps: int = 1,
+                  start_pose: Optional[np.ndarray] = None,
+                  step_hook=None) -> dict:
     """One solo lap of pure pursuit. The optional arguments default to the selected
     car's own: its calibration, the track's own line planned at the PathPlan defaults,
-    and pure_pursuit.yaml's speed and lateral limits."""
+    and pure_pursuit.yaml's speed and lateral limits.
+
+    ``max_laps`` (default 1) laps end the run; each lap's finish time is in
+    ``lap_times_s``. ``start_pose`` ((1, 3) x, y, yaw) replaces the spawn on
+    the plan's first point. ``step_hook(plant, steering, speed)`` is called
+    with each final command, before the plant steps it (tune_lookahead.py
+    measures footprint clearance and steering rate through it)."""
     select_profile(PROFILE.name, car_id)
     car_id = _CAR_ID
-    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id)
+    plant = make_plant(track, 1, seed, calibration=calibration, car_id=car_id,
+                       max_laps=max_laps)
     line = plant.env.unwrapped.track.raceline
     if plan is None:
         plan = PathPlan.from_track(plant.env.unwrapped.track, car_id=car_id)
@@ -808,7 +818,8 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     # with most of a corridor's worth of cross-track error already on the
     # clock, and the scenario's 0.5m limit would fail the comparison before
     # the car had turned a wheel.
-    obs, _ = plant.reset(plan_initial_pose(plan, line))
+    obs, _ = plant.reset(plan_initial_pose(plan, line) if start_pose is None
+                         else np.asarray(start_pose, dtype=float).reshape(1, 3))
     follower = PathFollower(plan, law_name=law_name, law_params=law_params, car_id=car_id)
     command_shaper = CommandShaper(car_id, max_speed, max_lateral_accel)
     max_cross_track = 0.0
@@ -819,6 +830,7 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
     avoid_steps = 0
     stop_steps = 0
     lap_time_s = None
+    lap_times_s: list[float] = []
     started = time.monotonic()
     max_steps = math.ceil(timeout_s / CONTROL_DT)
 
@@ -860,11 +872,15 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
             steering, speed = command_shaper.command(
                 steering, speed, hard_speed_cap,
                 measured_speed=ego["std_state"][3])
+            if step_hook is not None:
+                step_hook(plant, steering, speed)
             obs, _reward, done, _truncated, info = plant.step(
                 [(steering, speed)]
             )
             if lap_time_s is None and float(info["lap_counts"][0]) >= 1.0:
                 lap_time_s = float(info["sim_time"])
+            while len(lap_times_s) < int(float(info["lap_counts"][0])):
+                lap_times_s.append(float(info["sim_time"]))
             if done or obs["agent_0"]["collision"]:
                 break
         else:
@@ -893,6 +909,10 @@ def run_pure_solo(track: str, seed: int, timeout_s: float,
                 float(np.percentile(cross_track_sq, 95)), 4)
             if cross_track_sq else None,
             "lap_time_s": lap_time_s,
+            "lap_times_s": lap_times_s,
+            "rms_cross_track_m": round(
+                float(np.sqrt(np.mean(np.square(cross_track_sq)))), 4)
+            if cross_track_sq else None,
             "law_fail_steps": follower.law_fail_steps,
             "law_compute_ms_p50": _pct(0.50),
             "law_compute_ms_p99": _pct(0.99),
