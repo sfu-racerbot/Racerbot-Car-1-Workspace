@@ -267,3 +267,54 @@ def test_deadman_joy_stale_publishes_zero(rig):
         rig.feed_mapping_command()
         rig.tick()
     _assert_all_stops(rig.received[start:])
+
+
+# The wall clock stepping backwards (NTP/chrony on the car, a WSL resync in the
+# simulator): a stamp taken before the step reads as in the future, so
+# now - stamp is negative, and a bare `age < timeout` calls it fresh for as long
+# as the step. Measured 2026-11-03: two ~2.7 s backwards steps in three
+# simulator runs.
+CLOCK_STEP_SEC = 2.7
+
+
+def test_joy_from_before_a_backward_clock_step_publishes_zero(rig):
+    """LB held, then the clock steps back: that /joy's age is unknown, so stop.
+
+    Before the fix its age was -2.7 s, under joy_timeout_sec, and the fed
+    command went straight out. The next /joy re-stamps on the stepped clock
+    and forwarding resumes: the step costs one /joy interval, not the run.
+    """
+    joy_at = rig.feed_joy(lb_held=True)
+    rig.feed_mapping_command()
+    assert rig.tick()[-1].drive.speed == pytest.approx(MAPPING_SPEED, abs=FLOAT32_TOL)
+
+    rig.now = joy_at - CLOCK_STEP_SEC
+    start = len(rig.received)
+    for _ in range(3):
+        rig.feed_mapping_command()   # fresh on the stepped clock, non-zero
+        rig.tick()
+    _assert_all_stops(rig.received[start:])
+
+    rig.feed_joy(lb_held=True)
+    rig.feed_mapping_command()
+    assert rig.tick()[-1].drive.speed == pytest.approx(MAPPING_SPEED, abs=FLOAT32_TOL)
+
+
+def test_a_command_from_before_a_backward_clock_step_is_not_forwarded(rig):
+    """The selected command predates the step: its age is unknown, so it is stale.
+
+    /joy is fresh and LB held throughout, so only the command's age can stop it.
+    Before the fix the command's age was negative, under command_timeout_sec,
+    and a command of unknown age went to the motor.
+    """
+    rig.feed_joy(lb_held=True)
+    rig.feed_mapping_command()
+    cmd_at = rig.now
+    assert rig.tick()[-1].drive.speed == pytest.approx(MAPPING_SPEED, abs=FLOAT32_TOL)
+
+    rig.now = cmd_at - CLOCK_STEP_SEC
+    start = len(rig.received)
+    for _ in range(3):
+        rig.feed_joy(lb_held=True)   # fresh /joy on the stepped clock
+        rig.tick()
+    _assert_all_stops(rig.received[start:])

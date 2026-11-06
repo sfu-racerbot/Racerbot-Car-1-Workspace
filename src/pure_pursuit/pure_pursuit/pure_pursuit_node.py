@@ -1121,10 +1121,16 @@ class PurePursuitNode(Node):
         without needing to know exactly when SLAM considers itself
         settled.
         """
-        if (self._profile_active_since is not None
-                and self._seconds_since(self._profile_active_since)
-                < self.opponent_detection_settle_sec):
-            return None
+        if self._profile_active_since is not None:
+            settled_for = self._seconds_since(self._profile_active_since)
+            if math.isinf(settled_for):
+                # The clock stepped back mid-window: how long the map has
+                # settled is unknown, so start the window again rather than
+                # read the step as "settled long ago".
+                self._profile_active_since = self.get_clock().now()
+                settled_for = 0.0
+            if settled_for < self.opponent_detection_settle_sec:
+                return None
         if self.localization_source == 'particle_filter' and self._frozen_map_ray_caster is not None:
             return self._frozen_map_ray_caster
         return self._live_map_ray_caster
@@ -1150,12 +1156,13 @@ class PurePursuitNode(Node):
                 'waiting_for_joy',
                 f"no Joy messages received on '{self.joy_topic}'; LB cannot be verified",
             )
-        age_sec = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9
+        age_sec = self._seconds_since(self.last_joy_time)
         if age_sec >= self.joy_timeout_sec:
             return (
                 False,
                 'joy_stale',
-                f"last Joy message is {age_sec:.2f}s old (limit {self.joy_timeout_sec:.2f}s)",
+                f"last Joy message is {self._age_text(age_sec)} "
+                f"(limit {self.joy_timeout_sec:.2f}s)",
             )
         if not self.joy_button_available:
             return (
@@ -1243,7 +1250,7 @@ class PurePursuitNode(Node):
         if pose_age > self.pose_timeout_sec:
             self._stop(
                 'pose_stale',
-                f"last localization pose is {pose_age:.2f}s old by {age_source} "
+                f"last localization pose is {self._age_text(pose_age)} by {age_source} "
                 f"(limit {self.pose_timeout_sec:.2f}s)",
             )
             return
@@ -2000,7 +2007,8 @@ class PurePursuitNode(Node):
                 None,
                 0.0,
                 'lidar_scan_stale',
-                f"last LaserScan is {scan_age:.2f}s old (limit {self.scan_timeout_sec:.2f}s)",
+                f"last LaserScan is {self._age_text(scan_age)} "
+                f"(limit {self.scan_timeout_sec:.2f}s)",
             )
 
         scan = self.last_scan
@@ -2406,9 +2414,27 @@ class PurePursuitNode(Node):
             self.xy, overtake_idx, next_idx, self.overtake_side * self.overtake_lateral_offset)
 
     def _seconds_since(self, stamp) -> float:
+        """Seconds since ``stamp``; inf when unknown.
+
+        Unknown includes a negative result: the wall clock was stepped
+        backwards after ``stamp`` was taken (NTP/chrony on the car, a WSL
+        resync in the simulator -- ~2.7 s steps measured 2026-11-03). A bare
+        ``age < timeout`` would then call a dead /joy, pose or scan fresh for as
+        long as the step. Every freshness check reads inf as stale, and every
+        timer that ends in a stop (pose_frozen, off-line recovery) stops now:
+        both the fail-safe direction. The next message re-stamps on the new
+        clock, so a freshness stop lasts one message interval.
+        """
         if stamp is None:
             return math.inf
-        return (self.get_clock().now() - stamp).nanoseconds / 1e9
+        age = (self.get_clock().now() - stamp).nanoseconds / 1e9
+        return age if age >= 0.0 else math.inf
+
+    @staticmethod
+    def _age_text(age_sec: float) -> str:
+        if math.isinf(age_sec):
+            return 'of unknown age (the clock stepped backwards since it arrived)'
+        return f'{age_sec:.2f}s old'
 
     def _command_timing(self):
         """Return one bounded command interval and the clock sample behind it."""

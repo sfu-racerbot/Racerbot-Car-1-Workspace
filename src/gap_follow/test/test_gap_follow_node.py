@@ -132,6 +132,85 @@ def test_stops_when_the_joy_stream_goes_stale(node):
 
 
 # ============================================================================
+# The wall clock stepping backwards (NTP/chrony on the car, a WSL resync in
+# the simulator). A stamp taken before the step reads as in the future, so
+# now - stamp is negative. On 2026-11-03 that killed gap_follow mid-lap in two
+# of three simulator runs (ValueError: command_age_sec must be non-negative),
+# and every `age < timeout` freshness check read it as fresh.
+# ============================================================================
+
+# Measured: both backward steps in the 2026-11-03 simulator runs were ~2.7 s.
+CLOCK_STEP_SEC = 2.7
+
+
+def _stamped_before_a_backward_step(node):
+    return node.get_clock().now() + Duration(seconds=CLOCK_STEP_SEC)
+
+
+def test_age_of_a_stamp_from_before_a_backward_step_is_unknown_not_negative(node):
+    # oracle: invariant -- an age is never negative; unknown reads as stale.
+    assert node._age_sec(_stamped_before_a_backward_step(node)) == math.inf
+    # and an ordinary age passes through: 0.3 s ago is 0.3 s (+ the few us the
+    # call itself takes), not inf and not 0.
+    age = node._age_sec(node.get_clock().now() - Duration(seconds=0.3))
+    assert 0.3 <= age < 0.35
+
+
+def test_a_backward_clock_step_does_not_kill_the_node(node):
+    published = _capture(node)
+    _ready(node)
+    node.scan_callback(_scan())
+    assert published[-1].drive.speed > 0.0
+    node.last_command_time = _stamped_before_a_backward_step(node)
+    node.scan_callback(_scan())  # raised ValueError, and the node exited
+    assert published[-1].drive.speed > 0.0
+    assert node.last_decision_state == 'gap_follow'
+
+
+def test_a_command_from_before_a_backward_step_still_counts_for_braking(node):
+    # With odometry at rest, conservative_ttc_speed uses the recent command
+    # speed. Reading the unknown age as stale would drop it to the 0 m/s
+    # odometry -- less braking -- so it must read as just sent instead.
+    _ready(node, speed=0.0)
+    node.last_commanded_speed = 1.5
+    node.last_command_time = _stamped_before_a_backward_step(node)
+    effective_speed, _ = node._effective_ttc_speed()
+    # oracle: closed form -- max(|odom| = 0.0, commanded = 1.5) m/s.
+    assert effective_speed == 1.5
+
+
+def test_joy_from_before_a_backward_step_is_stale_and_stops_the_car(node):
+    published = _capture(node)
+    _ready(node)
+    node.last_joy_time = _stamped_before_a_backward_step(node)
+    node.scan_callback(_scan())
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'joy_stale'
+    # The next Joy message re-stamps on the stepped clock: one message of stop.
+    _hold_deadman(node)
+    node.scan_callback(_scan())
+    assert published[-1].drive.speed > 0.0
+
+
+def test_odometry_from_before_a_backward_step_is_stale(node):
+    published = _capture(node)
+    _ready(node, speed=1.0)
+    node.last_odom_time = _stamped_before_a_backward_step(node)
+    node.scan_callback(_scan())
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'odometry_stale'
+
+
+def test_a_scan_from_before_a_backward_step_is_reported_stale(node):
+    published = _capture(node)
+    _ready(node, speed=1.0)
+    node.last_scan_time = _stamped_before_a_backward_step(node)
+    node._sensor_status_callback()
+    assert published == []
+    assert node.last_decision_state == 'scan_stale'
+
+
+# ============================================================================
 # Normal driving, and the physical envelope of what it publishes
 # ============================================================================
 

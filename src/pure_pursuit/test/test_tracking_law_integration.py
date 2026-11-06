@@ -474,3 +474,75 @@ def test_mpc_intent_never_runs_the_solver(osqp_available, profiled_csv):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+# --- The wall clock stepping backwards (NTP/chrony on the car, a WSL resync in
+# the simulator). A stamp taken before the step reads as in the future, so
+# now - stamp is negative and a bare `age < timeout` calls a dead input fresh
+# for as long as the step. Measured 2026-11-03: two ~2.7 s steps in three
+# simulator runs.
+CLOCK_STEP_SEC = 2.7
+
+
+def _stamped_before_a_backward_step(node):
+    return node.get_clock().now() + Duration(seconds=CLOCK_STEP_SEC)
+
+
+def _driving(node_factory):
+    """A node on the line with LB held that is publishing a non-zero command."""
+    node = node_factory('pure_pursuit')
+    node.enable_deadman = True
+    _hold_lb(node)
+    _pose_slightly_left(node)
+    _one_command_interval(node)
+    published = _capture_published(node)
+    node.control_loop()
+    assert published[-1].drive.speed > 0.0   # control: the stops below are the checks
+    return node, published
+
+
+def test_age_of_a_stamp_from_before_a_backward_step_is_unknown(node_factory):
+    node = node_factory('pure_pursuit')
+    # oracle: invariant -- an age is never negative; unknown reads as inf (stale).
+    assert node._seconds_since(_stamped_before_a_backward_step(node)) == math.inf
+    age = node._seconds_since(node.get_clock().now() - Duration(seconds=0.3))
+    assert 0.3 <= age < 0.35   # an ordinary age passes through, in seconds
+
+
+def test_joy_from_before_a_backward_step_stops_the_car(node_factory):
+    node, published = _driving(node_factory)
+    node.last_joy_time = _stamped_before_a_backward_step(node)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'joy_stale'
+    _hold_lb(node)   # the next /joy re-stamps on the stepped clock
+    _one_command_interval(node)
+    node.control_loop()
+    assert published[-1].drive.speed > 0.0
+
+
+def test_a_pose_from_before_a_backward_step_is_stale(node_factory):
+    node, published = _driving(node_factory)
+    node.last_pose_time = _stamped_before_a_backward_step(node)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'pose_stale'
+
+
+def test_a_scan_from_before_a_backward_step_is_stale(node_factory):
+    node, published = _driving(node_factory)
+    node.last_scan_time = _stamped_before_a_backward_step(node)
+    node.control_loop()
+    assert published[-1].drive.speed == 0.0
+    assert node.last_decision_state == 'lidar_scan_stale'
+
+
+def test_a_backward_step_restarts_the_map_settle_window(node_factory):
+    # Reading the unknown elapsed time as "settled long ago" would hand
+    # opponent detection a map that may not have settled. Restart instead.
+    node = node_factory('pure_pursuit')
+    node._live_map_ray_caster = object()   # stands in for a built map
+    node._profile_active_since = _stamped_before_a_backward_step(node)
+    assert node.map_ray_caster is None
+    # oracle: invariant -- the window restarted at "now", so it has not elapsed.
+    assert node._seconds_since(node._profile_active_since) < node.opponent_detection_settle_sec

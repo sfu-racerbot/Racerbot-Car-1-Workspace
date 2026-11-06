@@ -1033,7 +1033,7 @@ class GapFollowNode(Node):
                 why = 'no fresh odometry'
             elif self.last_fused_time is None:
                 why = 'no fused odometry'
-            elif ((self.get_clock().now() - self.last_fused_time).nanoseconds / 1e9
+            elif (self._age_sec(self.last_fused_time)
                   >= self.imu_traction_timeout_sec):
                 why = 'fused odometry stale'
             elif not math.isfinite(self.fused_speed):
@@ -1043,7 +1043,7 @@ class GapFollowNode(Node):
             return False, None, why
         wheel = self.wheel_speed if self.using_fused_speed else self.current_speed
         if self.using_fused_speed and (self.last_wheel_time is None or
-                (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+                self._age_sec(self.last_wheel_time)
                 >= self.odom_timeout_sec or not math.isfinite(wheel)):
             self.traction_hold.reset()
             return False, None, 'no fresh wheel odometry'
@@ -1094,8 +1094,8 @@ class GapFollowNode(Node):
                 why = 'no fresh odometry'
             elif self.last_measured_steering_time is None:
                 why = 'no measured steering'
-            elif not ((self.get_clock().now() - self.last_measured_steering_time).nanoseconds
-                      / 1e9 < self.imu_understeer_timeout_sec):
+            elif not (self._age_sec(self.last_measured_steering_time)
+                      < self.imu_understeer_timeout_sec):
                 why = 'measured steering stale'
             elif not math.isfinite(self.measured_steering):
                 why = 'measured steering not finite'
@@ -1155,7 +1155,7 @@ class GapFollowNode(Node):
         """
         if self.last_imu_time is None:
             return None, 'no imu'
-        age_sec = (self.get_clock().now() - self.last_imu_time).nanoseconds / 1e9
+        age_sec = self._age_sec(self.last_imu_time)
         if not age_sec < self.imu_timeout_sec:
             return None, 'imu stale'
         if self.imu_state is None:
@@ -1217,11 +1217,31 @@ class GapFollowNode(Node):
             self.wheelbase, dt)
         return limit, None
 
+    def _age_sec(self, stamp) -> float:
+        """Seconds since ``stamp`` on this node's clock, for freshness checks.
+
+        A negative age means the wall clock was stepped backwards after
+        ``stamp`` was taken (NTP/chrony on the car, a WSL clock resync in the
+        simulator -- measured 2026-11-03: two ~2.7s steps in three simulator
+        runs). How long ago the message really arrived is then unknown, and a
+        bare ``age < timeout`` would call it fresh for as long as the step --
+        the LB deadman's /joy check included. Unknown is stale here: the
+        fail-safe direction, and the next message re-stamps on the new clock,
+        so it costs one message interval of stop, not a run.
+        """
+        age = (self.get_clock().now() - stamp).nanoseconds / 1e9
+        return age if age >= 0.0 else math.inf
+
+    @staticmethod
+    def _age_text(age_sec: float) -> str:
+        if math.isinf(age_sec):
+            return 'of unknown age (the clock stepped backwards since it arrived)'
+        return f'{age_sec:.2f}s old'
+
     def _odom_fresh(self) -> bool:
         if self.last_odom_time is None or not math.isfinite(self.current_speed):
             return False
-        age_sec = (
-            self.get_clock().now() - self.last_odom_time).nanoseconds / 1e9
+        age_sec = self._age_sec(self.last_odom_time)
         return age_sec < self.odom_timeout_sec
 
     def _effective_ttc_speed(self):
@@ -1230,6 +1250,13 @@ class GapFollowNode(Node):
             command_age_sec = (
                 self.get_clock().now() - self.last_command_time
             ).nanoseconds / 1e9
+            # Negative = the clock stepped back since the last command (see
+            # _age_sec). Here "stale" would be the unsafe reading: it drops the
+            # commanded-speed fallback below and can only lower the TTC speed.
+            # Treat it as just sent, which can only raise it (brake earlier).
+            # conservative_ttc_speed rightly refuses a negative age; passing
+            # one through killed gap_follow mid-lap twice on 2026-11-03.
+            command_age_sec = max(0.0, command_age_sec)
 
         recent_command_speed = 0.0
         if (
@@ -1266,7 +1293,7 @@ class GapFollowNode(Node):
             return self._odom_fresh()
         if self.last_wheel_time is None or not math.isfinite(self.wheel_speed):
             return False
-        age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+        age = self._age_sec(self.last_wheel_time)
         return age < self.odom_timeout_sec and self._odom_fresh()
 
     def _stale_odom_detail(self) -> str:
@@ -1280,7 +1307,7 @@ class GapFollowNode(Node):
         if self.using_fused_speed:
             wheel_age = math.inf
             if self.last_wheel_time is not None and math.isfinite(self.wheel_speed):
-                wheel_age = (self.get_clock().now() - self.last_wheel_time).nanoseconds / 1e9
+                wheel_age = self._age_sec(self.last_wheel_time)
             if not wheel_age < self.odom_timeout_sec:
                 stale.append(self.wheel_odom_topic)
         if not self._odom_fresh():
@@ -1324,12 +1351,13 @@ class GapFollowNode(Node):
                 'waiting_for_joy',
                 f"no Joy messages received on '{self.joy_topic}'; LB cannot be verified",
             )
-        age_sec = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9
+        age_sec = self._age_sec(self.last_joy_time)
         if age_sec >= self.joy_timeout_sec:
             return (
                 False,
                 'joy_stale',
-                f"last Joy message is {age_sec:.2f}s old (limit {self.joy_timeout_sec:.2f}s)",
+                f"last Joy message is {self._age_text(age_sec)} "
+                f"(limit {self.joy_timeout_sec:.2f}s)",
             )
         if not self.joy_button_available:
             return (
@@ -2579,10 +2607,10 @@ class GapFollowNode(Node):
                 desired_steering=0.0, desired_speed=0.0,
                 commanded_steering=0.0, commanded_speed=0.0)
             return
-        age_sec = (self.get_clock().now() - self.last_scan_time).nanoseconds / 1e9
+        age_sec = self._age_sec(self.last_scan_time)
         if age_sec >= self.scan_timeout_sec:
             detail = (
-                f"last LaserScan is {age_sec:.2f}s old "
+                f"last LaserScan is {self._age_text(age_sec)} "
                 f"(limit {self.scan_timeout_sec:.2f}s); /drive has gone quiet")
             self._log_decision(
                 'scan_stale', detail, 0.0, 0.0, command_published=False)

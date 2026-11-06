@@ -9,6 +9,7 @@ PoseStamped input pure pursuit expects.
 """
 
 from collections import namedtuple
+import json
 import math
 import os
 from pathlib import Path
@@ -31,6 +32,26 @@ from sensor_msgs.msg import Joy
 from std_msgs.msg import String
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 from tf2_ros import Buffer, TransformException, TransformListener
+
+
+def _age(now_sec: float, stamp_sec: float) -> float:
+    """Seconds from ``stamp_sec`` to ``now_sec``; inf if the clock stepped back.
+
+    A negative age means the wall clock was stepped backwards after the stamp
+    (NTP/chrony on the car, a WSL resync in the simulator -- ~2.7 s steps
+    measured 2026-11-03). How old the message really is is then unknown, and a
+    bare ``age < timeout`` would call a dead /joy or controller fresh for as
+    long as the step. Unknown reads as stale: the fail-safe direction, and the
+    next message re-stamps on the new clock.
+    """
+    age = now_sec - stamp_sec
+    return age if age >= 0.0 else math.inf
+
+
+def _age_text(age_sec: float) -> str:
+    if math.isinf(age_sec):
+        return 'of unknown age (the clock stepped backwards since it arrived)'
+    return f'{age_sec:.2f}s old'
 
 
 def _die_with_parent():
@@ -244,6 +265,15 @@ class LapRecorder:
             return list(self.points)
         total = self.point_turn[-1]
         direction = 1.0 if total >= 0.0 else -1.0
+        # Turning past 2*pi by no more than the closure gate's own heading
+        # tolerance is that lap's closing heading error, not a second lap.
+        # Trimming it anyway cut the *whole opening straight* (turning is flat
+        # there, and the loop below keeps the last sample of the plateau):
+        # on ra_slam_1026, 2026-11-03, a 362 deg lap lost its first 3.8 m,
+        # the loop no longer closed, and recorded_path.last_revolution then
+        # cut it to 10 m of 27 m -- no racing line, so no race.
+        if direction * total - 2.0 * math.pi <= self.closure_heading_rad:
+            return list(self.points)
         target = total - direction * 2.0 * math.pi
         # Turning is constant along a straight, so many samples share the
         # exact target value and the boundary lands on a whole plateau of
@@ -368,7 +398,7 @@ class LapRecorder:
             if self.last_odom_yaw is not None:
                 if not self._odom_gap:
                     self.turn += angle_difference(odom_yaw, self.last_odom_yaw)
-                elif (now_sec - self._odom_anchor_time <= 0.25
+                elif (_age(now_sec, self._odom_anchor_time) <= 0.25
                       and not self._odom_gap_ambiguous):
                     self.turn += (angle_difference(odom_yaw, self.last_odom_yaw)
                                   - self._odom_gap_turn)
@@ -536,6 +566,7 @@ class AutoMapRaceNode(Node):
         # down when this node exits. False (the default) is the original
         # map-then-race behaviour, unchanged.
         self.declare_parameter('finish_after_mapping', False)
+        self.declare_parameter('sim_stop_before_profile_generation', False)
         self.declare_parameter('finish_hold_sec', 1.0)
         # Well under the documented 106-correction pathological case from
         # 2026-08-19. UNVALIDATED: no run this session closed even once, so
@@ -666,6 +697,7 @@ class AutoMapRaceNode(Node):
         # to sit above would be a contradictory config, not a valid choice.
         self.max_mapping_laps = max(self.mapping_laps, int(value('max_mapping_laps')))
         self.finish_after_mapping = bool(value('finish_after_mapping'))
+        self.sim_stop_before_profile_generation = bool(value('sim_stop_before_profile_generation'))
         self.finish_hold_sec = max(0.0, float(value('finish_hold_sec')))
         self.finish_exit_time = None
         # Set when a mapping-only run is done; main() then exits cleanly.
@@ -1082,12 +1114,13 @@ class AutoMapRaceNode(Node):
                 'waiting_for_joy',
                 f"no Joy messages received on '{self.joy_topic}'; LB cannot be verified",
             )
-        age_sec = now_sec - self.last_joy_time
+        age_sec = _age(now_sec, self.last_joy_time)
         if age_sec >= self.joy_timeout_sec:
             return (
                 False,
                 'joy_stale',
-                f"last Joy message is {age_sec:.2f}s old (limit {self.joy_timeout_sec:.2f}s)",
+                f"last Joy message is {_age_text(age_sec)} "
+                f"(limit {self.joy_timeout_sec:.2f}s)",
             )
         if not self.joy_button_available:
             return (
@@ -1107,7 +1140,7 @@ class AutoMapRaceNode(Node):
     def _pf_pose_fresh(self, now_sec: float) -> bool:
         return (self.pf_pose is not None
                 and self.pf_pose_time is not None
-                and (now_sec - self.pf_pose_time) <= self.pf_pose_timeout_sec)
+                and _age(now_sec, self.pf_pose_time) <= self.pf_pose_timeout_sec)
 
     def _start_particle_filter(self, now_sec: float):
         """Spawn particle-filter localization against the map just saved.
@@ -1397,12 +1430,12 @@ class AutoMapRaceNode(Node):
                 f'{source_name}_command_missing',
                 f"no command has arrived on the selected '{source_name}' input",
             )
-        age_sec = now_sec - stamp
+        age_sec = _age(now_sec, stamp)
         if age_sec > self.command_timeout_sec:
             return (
                 None,
                 f'{source_name}_command_stale',
-                f"selected '{source_name}' command is {age_sec:.2f}s old "
+                f"selected '{source_name}' command is {_age_text(age_sec)} "
                 f"(limit {self.command_timeout_sec:.2f}s)",
             )
         return (
@@ -1808,6 +1841,20 @@ class AutoMapRaceNode(Node):
         except OSError as exc:
             self.get_logger().error(f'Could not write commands.txt: {exc}')
         self.get_logger().info('\n' + text)
+        # Atomic completion marker for simulator orchestration. Keep the
+        # initial pose separately: a simulator resets there, while a physical
+        # car's saved-run start_pose.yaml remains its end-of-mapping pose.
+        try:
+            marker = self.run_directory / 'mapping_complete.json'
+            temporary = marker.with_suffix('.tmp')
+            temporary.write_text(json.dumps({
+                'map_ok': self.map_saved_ok,
+                'profile_ok': self.profile_path is not None,
+                'initial_pose': self.start_pose,
+            }))
+            temporary.replace(marker)
+        except OSError as exc:
+            self.get_logger().error(f'Could not write mapping completion marker: {exc}')
         self.state = 'finished'
         self.finish_exit_time = now_sec + self.finish_hold_sec
 
@@ -1852,6 +1899,9 @@ class AutoMapRaceNode(Node):
         return not failed, failed
 
     def _write_profile(self) -> str:
+        if self.sim_stop_before_profile_generation:
+            self._publish_stop()
+            self._publish_controller()
         run_directory = self.output_directory / strftime('%Y%m%d-%H%M%S')
         run_directory.mkdir(parents=True, exist_ok=False)
         # Set now, not after the profile succeeds, so a mapping-only run can

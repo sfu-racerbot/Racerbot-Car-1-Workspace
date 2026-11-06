@@ -663,7 +663,7 @@ A *fixed* lookahead is a bad compromise in both directions. Short enough to corn
 
 Scaling the lookahead with current speed fixes both at once.
 
-Simulator-validated defaults are $L_{min}=0.6\,m$, $L_{max}=1.5\,m$, $k=0.15$ — at the 4.0 m/s speed cap that's a 1.2 m lookahead. The old 2.0 m-at-4 m/s setting cut corners and collided in the dynamics model; see [simulator.md](simulator.md).
+Current defaults are $L_{min}=1.2\,m$, $L_{max}=1.8\,m$, $k=0.15$: 1.5 m at 2 m/s and 1.8 m at the 4.0 m/s speed cap. The cap and speed gain were reduced at the user's request after simulator wall hits; full simulator lap validation is still pending. The 1.2 m floor is retained to avoid the earlier low-speed oscillation. The preceding 1.2 / 2.5 / 0.3 tuning was evaluated on 2026-11-03 with the `car` fidelity profile: the earlier 0.6 / 1.5 / 0.15 setting let the lookahead fall to 0.6 m at low speed, where the car weaves into the safety net and stops. Those preceding values passed pure pursuit on Spielberg, Silverstone and Brands Hatch (`run_validation.py --scenario all`: 6 of 7, up from 4 of 7; only `pure_traffic` still fails) and lapped the team's own course `ra_slam_1026` in 16.9 s instead of 18.8 s. A fixed lookahead of 2.5 m or more cuts corners on that 31 m course. To try other values: `tools/f1tenth_sim/pure_course.py --track <track> --lookahead 1.0,1.5,2.0`. See [simulator.md](simulator.md).
 
 **The $v$ here is the car's measured speed** from `/odom` (`odom_topic`) — its own estimate of how fast it's actually going — **not** the profiled target.
 
@@ -937,7 +937,7 @@ The waypoint it offsets is deliberately **not** the normal Pure Pursuit target. 
 
 This matters more than it looks.
 
-The normal target is at most `max_lookahead` (`1.5 m`) away. Offsetting a point that close by 0.35 m sideways demands a large curvature — roughly a 0.45 rad heading change, well past the `0.26 rad` steering clamp.
+The normal target is at most `max_lookahead` (`1.8 m`) away. Offsetting a point that close by 0.35 m sideways demands a large curvature — roughly a 0.45 rad heading change, well past the `0.26 rad` steering clamp.
 
 With the [online curvature ceiling](#speed-the-profile-then-two-online-ceilings) in the loop, the controller answers that demand the only way it can: by braking. The car then slows down in the middle of the pass, which is exactly backwards.
 
@@ -1073,7 +1073,7 @@ All of these live in `src/pure_pursuit/config/pure_pursuit.yaml` — see that fi
 | `drive_topic` | `/drive` | Output, arbitrated by `ackermann_mux` like every other autonomy node |
 | `control_rate_hz` | `40.0` | Control loop frequency |
 | `wheelbase` | `0.36` | Meters, measured on this car 2026-08-24; must match `vesc.yaml` |
-| `min_lookahead` / `max_lookahead` / `lookahead_speed_gain` | `0.6` / `1.5` / `0.15` | Adaptive lookahead formula, see above |
+| `min_lookahead` / `max_lookahead` / `lookahead_speed_gain` | `1.2` / `1.8` / `0.15` | Adaptive lookahead formula, see above |
 | `nearest_search_window` | `40` | +/- waypoints searched around last tick's nearest point (`0` = search all) |
 | `max_speed` / `min_speed` | `4.0` / `0.5` | Hard safety ceiling/floor, independent of the `.csv` |
 | `max_lateral_accel` | `2.5` | m/s²; online cornering ceiling on the *commanded* curvature, see [Speed](#speed-the-profile-then-two-online-ceilings) |

@@ -581,6 +581,36 @@ def test_lap_points_returns_a_single_revolution_untouched():
     assert recorder.lap_points() == recorder.points
 
 
+def test_lap_points_keeps_one_lap_that_closed_a_few_degrees_past_a_full_turn():
+    """One lap, starting on a straight, closing 3 deg past 360: keep it whole.
+
+    Found on ra_slam_1026 (2026-11-03): a 362 deg lap had its whole opening
+    straight trimmed, because turning is flat along a straight and the trim
+    kept the last sample of that plateau. The loop no longer closed, and the
+    race never started.
+    """
+    recorder = LapRecorder(
+        spacing=0.15, min_distance=5.0, departure_distance=1.0,
+        closure_distance=0.4, closure_heading_rad=math.radians(30.0),
+        min_duration_sec=0.0, min_turn_rad=math.radians(300.0),
+        closure_widen_after_revolutions=1.25, max_closure_distance=4.0)
+    # Start mid-way along the bottom straight, as the car did, so the last
+    # corner is 2 m before the finish and the final straight is recorded
+    # carrying the full lap's turning.
+    square = _square_lap()[:-1]           # 64 samples, (0.25, 0) .. (0, 0)
+    half = 8                              # square[7] is (2.0, 0.0)
+    start_x, start_y, _ = square[half - 1]
+    excess = math.radians(3.0)            # the finish heading, 3 deg past the start's
+    lap = square[half:] + [(x, y, excess) for x, y, _ in square[:half]]
+    recorder.update(start_x, start_y, 0.0, 0.0)
+    for x, y, yaw in lap:
+        recorder.update(x, y, yaw, 0.1)
+    # control: what lap_points reads really is past a full revolution.
+    assert abs(recorder.point_turn[-1]) > 2.0 * math.pi + math.radians(2.0)
+    # oracle: invariant -- excess turning within closure_heading_rad is one lap.
+    assert recorder.lap_points() == recorder.points
+
+
 def test_lap_points_trims_a_clockwise_recording_too():
     """Turning is signed, and half the courses go the other way."""
     recorder = LapRecorder(
@@ -2096,6 +2126,50 @@ def test_bare_node_defaults_never_plan_harder_braking_than_the_shipped_config():
     node = _supervisor()
     try:
         assert node.profile_max_brake <= shipped['profile_max_brake']
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_mapping_completion_keeps_initial_pose_for_simulator_reset(tmp_path):
+    import json
+    clock = [100.0]
+    node, published = _mapping_only_supervisor(tmp_path, clock)
+    try:
+        node.map_saves_completed = 1
+        node._control_step()
+        # oracle: invariant -- a partial map save cannot authorize racing.
+        assert not (tmp_path / 'mapping_complete.json').exists()
+        node.map_saves_completed = 2
+        node.map_saved_ok = True
+        node._lookup_and_publish_pose = lambda: (4.0, 5.0, 0.5)
+        node._control_step()
+        result = json.loads((tmp_path / 'mapping_complete.json').read_text())
+        # oracle: spec -- reset goes to the initial position, not mapping's end.
+        assert result == {'map_ok': True, 'profile_ok': True,
+                          'initial_pose': [1.5, -2.0, 0.25]}
+        assert run_commands.read_start_pose(tmp_path) == pytest.approx(
+            (4.0, 5.0, 0.5), abs=1e-4)  # metres/radians: original saved-run semantics
+        assert published[-1].drive.speed == 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_sim_profile_generation_stops_before_cleanup_can_block_or_fail(tmp_path):
+    node, published = _mapping_only_supervisor(tmp_path, [100.0])
+    try:
+        node.sim_stop_before_profile_generation = True
+        node.output_directory = tmp_path
+        # Empty recording deliberately refuses cleanup, after setup. The
+        # stop and idle-controller notice must precede even this failure.
+        notices = []
+        node.controller_pub.publish = lambda msg: notices.append(msg.data)
+        with pytest.raises(ValueError):
+            node._write_profile()
+        # oracle: invariant -- expensive/failing planning starts only stopped.
+        assert published[-1].drive.speed == 0.
+        assert notices[-1] == ''
     finally:
         node.destroy_node()
         rclpy.shutdown()

@@ -3,7 +3,7 @@
 # Tape-measure positions to the IMU chip, not the board edge. Update after tools/calibrate_imu.py --step mount.
 
 car:
-  length: 0.55          # body outline for the GUI [m]
+  length: 0.533         # body outline for the GUI [m]; measured bumper to bumper, 2026-11-04 (team)
   width: 0.30
   wheelbase: 0.36       # front-to-rear axle [m]; car 2, tape-measured 2026-08-24 (docs/hardware-reference.md; team lead, 2026-10-31)
   track: 0.26           # left-to-right wheel centers [m]

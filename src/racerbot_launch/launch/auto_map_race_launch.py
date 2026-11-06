@@ -5,6 +5,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from gap_follow.speed_overrides import mapping_speed_overrides
 from launch import LaunchDescription
+from launch.actions import GroupAction
 from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
                             OpaqueFunction)
 from launch.conditions import IfCondition
@@ -96,6 +97,14 @@ def generate_launch_description():
     pure_layers = layered(pure_config, 'pure_pursuit.yaml', car_id)
 
     def mapping_controller(context):
+        which = LaunchConfiguration('mapping_controller').perform(context)
+        if which not in ('gap_follow', 'none'):
+            raise RuntimeError(f"mapping_controller:={which!r}: use gap_follow or none")
+        if which == 'none':
+            # Another controller publishes /auto_map/drive (the simulator's
+            # disparity_race mode); the supervisor treats it exactly as it
+            # treats gap_follow.
+            return []
         enabled = LaunchConfiguration('opponent_awareness').perform(context).lower()
         if enabled not in ('true', 'false'):
             raise RuntimeError(f"opponent_awareness:={enabled!r}: use true or false")
@@ -156,7 +165,13 @@ def generate_launch_description():
         }],
     )
 
+    mapping_controller_arg = DeclareLaunchArgument(
+        'mapping_controller', default_value='gap_follow',
+        description='gap_follow (default): gap_follow_node drives the mapping laps. none: '
+                    'start no mapping controller; something else publishes /auto_map/drive.')
+
     return LaunchDescription([
+        mapping_controller_arg,
         opponent_arg,
         include_bringup_arg,
         mapping_max_speed_arg,
@@ -167,7 +182,7 @@ def generate_launch_description():
         diagnostics_arg,
         record_bag_arg,
         bringup,
-        diagnostics,
+        GroupAction(actions=[diagnostics], scoped=True),
         slam,
         OpaqueFunction(function=mapping_controller),
         racing_controller,
