@@ -299,7 +299,9 @@ def optimize_minimum_curvature(centerline: np.ndarray,
                                spacing: float,
                                iterations: int = 8,
                                smoothing_weight: float = 0.0,
-                               trust_region: float = 0.30):
+                               trust_region: float = 0.30,
+                               apex_points=None,
+                               apex_tolerance: float = 0.02):
     """Iterative minimum-curvature optimization over a closed track.
 
     Args:
@@ -313,6 +315,9 @@ def optimize_minimum_curvature(centerline: np.ndarray,
         smoothing_weight: see solve_lateral_offsets.
         trust_region: largest lateral step one pass may take, or None for
             no cap. See the comment at the clamp below.
+        apex_points: optional map-frame (n, 2) points constraining lateral
+            offsets each pass. Callers must validate final geometric distance
+            after resampling; infeasible bounds raise ValueError.
 
     Returns a dict with the optimized ``line``, the total lateral ``alpha``
     from the original centerline, the per-iteration ``curvature_history``
@@ -335,6 +340,10 @@ def optimize_minimum_curvature(centerline: np.ndarray,
         raise ValueError('iterations must be at least 1')
 
     original = resample_closed_path(centerline, spacing)
+    pins = np.empty((0, 2)) if apex_points is None else np.asarray(apex_points, float)
+    if (pins.ndim != 2 or pins.shape[1] != 2 or not np.isfinite(pins).all()
+            or not math.isfinite(apex_tolerance) or apex_tolerance <= 0):
+        raise ValueError('apex points and tolerance must be finite and valid')
     n = len(original)
     base_left = _resample_scalar_to(
         np.asarray(centerline, dtype=np.float64), np.asarray(width_left, float), n)
@@ -394,6 +403,14 @@ def optimize_minimum_curvature(centerline: np.ndarray,
                 raise ValueError('trust_region must be finite and positive, or None')
             upper, lower = _order_bounds(np.minimum(upper, trust_region),
                                          np.maximum(lower, -trust_region))
+
+        for point in pins:
+            index = int(np.argmin(np.linalg.norm(reference - point, axis=1)))
+            lateral = float((point - reference[index]) @ normals[index])
+            lower[index] = max(lower[index], lateral - apex_tolerance)
+            upper[index] = min(upper[index], lateral + apex_tolerance)
+            if lower[index] >= upper[index]:
+                raise ValueError('apex is outside the feasible corridor/trust region')
 
         a_matrix, offset = linearized_curvature_system(reference, h)
         step = solve_lateral_offsets(

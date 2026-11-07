@@ -1973,6 +1973,12 @@ class AutoMapRaceNode(Node):
             self.state = 'error'
             self.get_logger().error(f'Failed to call pure pursuit parameter service: {exc}')
             return
+        if not result.successful and result.reason.startswith('line switch blocked: '):
+            self.profile_request_started = False
+            self.get_logger().warn(
+                f'Waiting to load the racing line: {result.reason}',
+                throttle_duration_sec=2.0)
+            return
         if not result.successful:
             self.state = 'error'
             self.get_logger().error(
